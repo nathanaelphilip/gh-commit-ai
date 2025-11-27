@@ -45,7 +45,7 @@ Based on the following git changes, write a single-line commit message. The mess
 - Focus on what the change does, now how it does it
 - Analyze the git diff to understand the changes
 - Use the branch name to extract any ticket information
-- Start with lowercase letter
+- only use lowercase letters unless it is an acronym or a ticket number: TICK-123
 
 Git Status:
 $GIT_STATUS
