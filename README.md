@@ -12,13 +12,22 @@ A GitHub CLI extension that uses AI to generate git commit messages. Supports Ol
 
 ## Installation
 
-### Option 1: Install from local directory
+### Option 1: Install from GitHub (recommended)
 
 ```bash
+gh extension install nathanaelphilip/gh-commit-ai
+```
+
+### Option 2: Install from local directory
+
+If you've cloned the repository:
+
+```bash
+cd gh-commit-ai
 gh extension install .
 ```
 
-### Option 2: Install manually
+### Option 3: Install manually
 
 1. Copy the `gh-commit-ai` script to your PATH:
    ```bash
@@ -29,6 +38,22 @@ gh extension install .
    ```bash
    chmod +x /usr/local/bin/gh-commit-ai
    ```
+
+### Upgrading
+
+To upgrade to the latest version:
+
+```bash
+gh extension upgrade commit-ai
+```
+
+### Uninstalling
+
+To remove the extension:
+
+```bash
+gh extension remove commit-ai
+```
 
 ## Usage
 
