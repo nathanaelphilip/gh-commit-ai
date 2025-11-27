@@ -42,6 +42,10 @@ Based on the following git changes, write a single-line commit message. The mess
 - Be in imperative mood (e.g., 'add' not 'added')
 - Be clear and concise (max 72 characters)
 - Not include any explanation, just the commit message
+- Focus on what the change does, now how it does it
+- Analyze the git diff to understand the changes
+- Use the branch name to extract any ticket information
+- Start with lowercase letter
 
 Git Status:
 $GIT_STATUS
