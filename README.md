@@ -1,14 +1,11 @@
 # gh-commit-ai
 
-A GitHub CLI extension that uses AI to generate git commit messages. Supports Ollama (local), Anthropic Claude, and OpenAI GPT models.
+A GitHub CLI extension that uses Ollama to generate AI-powered git commit messages.
 
 ## Prerequisites
 
 - [GitHub CLI](https://cli.github.com/) installed
-- One of the following AI providers:
-  - [Ollama](https://ollama.ai/) (default, free, runs locally)
-  - [Anthropic API](https://www.anthropic.com/) (requires API key)
-  - [OpenAI API](https://openai.com/) (requires API key)
+- [Ollama](https://ollama.ai/) installed and running
 
 ## Installation
 
@@ -48,57 +45,20 @@ The extension will:
 
 You can configure the extension using environment variables:
 
-#### AI Provider Selection
-
-- `AI_PROVIDER`: Choose your AI provider (default: `ollama`)
-  - `ollama` - Use local Ollama instance
-  - `anthropic` - Use Anthropic Claude API
-  - `openai` - Use OpenAI GPT API
-
-#### Ollama Configuration (default)
-
-- `OLLAMA_MODEL`: The Ollama model to use (default: `gemma3:12b`)
+- `OLLAMA_MODEL`: The Ollama model to use (default: `gemma3:4b`)
 - `OLLAMA_HOST`: The Ollama API host (default: `http://localhost:11434`)
 
+Example:
+
 ```bash
+export OLLAMA_MODEL="codellama"
 gh commit-ai
-# or with custom model
+```
+
+Or use inline:
+
+```bash
 OLLAMA_MODEL="codellama" gh commit-ai
-```
-
-#### Anthropic Configuration
-
-- `ANTHROPIC_API_KEY`: Your Anthropic API key (required)
-- `ANTHROPIC_MODEL`: The Claude model to use (default: `claude-3-5-sonnet-20241022`)
-
-```bash
-export ANTHROPIC_API_KEY="sk-ant-..."
-export AI_PROVIDER="anthropic"
-gh commit-ai
-```
-
-#### OpenAI Configuration
-
-- `OPENAI_API_KEY`: Your OpenAI API key (required)
-- `OPENAI_MODEL`: The GPT model to use (default: `gpt-4o-mini`)
-
-```bash
-export OPENAI_API_KEY="sk-proj-..."
-export AI_PROVIDER="openai"
-gh commit-ai
-```
-
-#### Quick Examples
-
-```bash
-# Use Ollama (default)
-gh commit-ai
-
-# Use Anthropic with custom model
-AI_PROVIDER="anthropic" ANTHROPIC_API_KEY="sk-ant-..." gh commit-ai
-
-# Use OpenAI with GPT-4
-AI_PROVIDER="openai" OPENAI_MODEL="gpt-4o" OPENAI_API_KEY="sk-proj-..." gh commit-ai
 ```
 
 ### Interactive Options
@@ -112,7 +72,7 @@ When presented with a generated commit message, you can:
 
 1. Checks if you're in a git repository
 2. Gathers git status and diff information
-3. Sends the changes to your chosen AI provider with a prompt to generate a conventional commit message
+3. Sends the changes to Ollama with a prompt to generate a conventional commit message
 4. Displays the generated message for your approval
 5. Commits with the approved message
 
@@ -121,7 +81,7 @@ When presented with a generated commit message, you can:
 ```bash
 $ gh commit-ai
 Analyzing changes...
-Generating commit message with gemma3:12b...
+Generating commit message with gemma3:4b...
 
 Generated commit message:
 feat: add user authentication with JWT tokens
@@ -140,24 +100,9 @@ Staging all changes...
 - Stage your changes with `git add` or modify some files first
 
 **"Error: Failed to generate commit message"**
-
-For Ollama:
 - Ensure Ollama is running: `ollama serve`
 - Check if the model is available: `ollama list`
 - Verify the Ollama host is correct
-
-For Anthropic:
-- Verify your `ANTHROPIC_API_KEY` is set correctly
-- Check your API key is valid and has credits
-- Ensure you have access to the specified model
-
-For OpenAI:
-- Verify your `OPENAI_API_KEY` is set correctly
-- Check your API key is valid and has credits
-- Ensure you have access to the specified model
-
-**"Error: ANTHROPIC_API_KEY is not set"** or **"Error: OPENAI_API_KEY is not set"**
-- Set the required API key environment variable for your chosen provider
 
 ## License
 
