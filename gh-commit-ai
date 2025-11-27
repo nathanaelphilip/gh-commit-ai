@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+
+set -e
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+# Configuration
+OLLAMA_MODEL="${OLLAMA_MODEL:-gemma3:4b}"
+OLLAMA_HOST="${OLLAMA_HOST:-http://localhost:11434}"
+
+# Check if we're in a git repository
+if ! git rev-parse --git-dir > /dev/null 2>&1; then
+    echo -e "${RED}Error: Not a git repository${NC}"
+    exit 1
+fi
+
+# Check if there are changes to commit
+if git diff --cached --quiet && git diff --quiet; then
+    echo -e "${YELLOW}No changes to commit${NC}"
+    exit 0
+fi
+
+# Get git status and diff
+echo -e "${GREEN}Analyzing changes...${NC}"
+GIT_STATUS=$(git status --short)
+GIT_DIFF=$(git diff --cached 2>/dev/null || echo "")
+
+# If nothing is staged, get unstaged diff
+if [ -z "$GIT_DIFF" ]; then
+    GIT_DIFF=$(git diff 2>/dev/null || echo "")
+fi
+
+# Prepare prompt for Ollama
+PROMPT="You are a helpful assistant that writes concise, clear git commit messages following conventional commit format.
+
+Based on the following git changes, write a single-line commit message. The message should:
+- Start with a type (feat, fix, docs, style, refactor, test, chore)
+- Be in imperative mood (e.g., 'add' not 'added')
+- Be clear and concise (max 72 characters)
+- Not include any explanation, just the commit message
+
+Git Status:
+$GIT_STATUS
+
+Git Diff:
+$GIT_DIFF
+
+Respond with ONLY the commit message, nothing else."
+
+# Create JSON payload for Ollama
+JSON_PAYLOAD=$(jq -n \
+    --arg model "$OLLAMA_MODEL" \
+    --arg prompt "$PROMPT" \
+    '{model: $model, prompt: $prompt, stream: false}')
+
+# Call Ollama API
+echo -e "${GREEN}Generating commit message with $OLLAMA_MODEL...${NC}"
+RESPONSE=$(curl -s -X POST "$OLLAMA_HOST/api/generate" \
+    -H "Content-Type: application/json" \
+    -d "$JSON_PAYLOAD")
+
+# Extract commit message from response
+COMMIT_MSG=$(echo "$RESPONSE" | jq -r '.response' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+
+if [ -z "$COMMIT_MSG" ] || [ "$COMMIT_MSG" = "null" ]; then
+    echo -e "${RED}Error: Failed to generate commit message${NC}"
+    echo "Response: $RESPONSE"
+    exit 1
+fi
+
+# Show the generated commit message
+echo -e "\n${GREEN}Generated commit message:${NC}"
+echo -e "${YELLOW}$COMMIT_MSG${NC}\n"
+
+# Ask for confirmation
+read -p "Use this commit message? (y/n/e to edit): " -n 1 -r
+echo
+
+if [[ $REPLY =~ ^[Yy]$ ]]; then
+    # Stage all changes if nothing is staged
+    if git diff --cached --quiet; then
+        echo -e "${GREEN}Staging all changes...${NC}"
+        git add -A
+    fi
+
+    # Commit with the generated message
+    git commit -m "$COMMIT_MSG"
+    echo -e "${GREEN}✓ Committed successfully!${NC}"
+elif [[ $REPLY =~ ^[Ee]$ ]]; then
+    # Allow user to edit the message
+    git commit -e -m "$COMMIT_MSG"
+    echo -e "${GREEN}✓ Committed with edited message!${NC}"
+else
+    echo -e "${YELLOW}Commit cancelled${NC}"
+    exit 0
+fi
