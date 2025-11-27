@@ -51,11 +51,15 @@ $GIT_DIFF
 
 Respond with ONLY the commit message, nothing else."
 
+# Escape JSON strings (replace backslash, double quote, newline, carriage return, tab)
+escape_json() {
+    echo "$1" | sed 's/\\/\\\\/g; s/"/\\"/g; s/\n/\\n/g; s/\r/\\r/g; s/\t/\\t/g' | awk '{printf "%s\\n", $0}' | sed '$ s/\\n$//'
+}
+
 # Create JSON payload for Ollama
-JSON_PAYLOAD=$(jq -n \
-    --arg model "$OLLAMA_MODEL" \
-    --arg prompt "$PROMPT" \
-    '{model: $model, prompt: $prompt, stream: false}')
+MODEL_ESCAPED=$(escape_json "$OLLAMA_MODEL")
+PROMPT_ESCAPED=$(escape_json "$PROMPT")
+JSON_PAYLOAD=$(printf '{"model":"%s","prompt":"%s","stream":false}' "$MODEL_ESCAPED" "$PROMPT_ESCAPED")
 
 # Call Ollama API
 echo -e "${GREEN}Generating commit message with $OLLAMA_MODEL...${NC}"
@@ -63,8 +67,8 @@ RESPONSE=$(curl -s -X POST "$OLLAMA_HOST/api/generate" \
     -H "Content-Type: application/json" \
     -d "$JSON_PAYLOAD")
 
-# Extract commit message from response
-COMMIT_MSG=$(echo "$RESPONSE" | jq -r '.response' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+# Extract commit message from response (parse JSON without jq)
+COMMIT_MSG=$(echo "$RESPONSE" | grep -o '"response":"[^"]*"' | sed 's/"response":"//;s/"$//' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
 
 if [ -z "$COMMIT_MSG" ] || [ "$COMMIT_MSG" = "null" ]; then
     echo -e "${RED}Error: Failed to generate commit message${NC}"

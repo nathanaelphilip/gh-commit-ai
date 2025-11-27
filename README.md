@@ -6,7 +6,6 @@ A GitHub CLI extension that uses Ollama to generate AI-powered git commit messag
 
 - [GitHub CLI](https://cli.github.com/) installed
 - [Ollama](https://ollama.ai/) installed and running
-- `jq` for JSON parsing: `brew install jq` (macOS) or `apt-get install jq` (Linux)
 
 ## Installation
 
@@ -104,9 +103,6 @@ Staging all changes...
 - Ensure Ollama is running: `ollama serve`
 - Check if the model is available: `ollama list`
 - Verify the Ollama host is correct
-
-**"jq: command not found"**
-- Install jq: `brew install jq` (macOS) or your system's package manager
 
 ## License
 
