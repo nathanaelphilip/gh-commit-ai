@@ -42,15 +42,28 @@ fi
 # Prepare prompt for Ollama
 PROMPT="You are a helpful assistant that writes concise, clear git commit messages following conventional commit format.
 
-Based on the following git changes, write a single-line commit message. The message should:
+CRITICAL: All commit messages must use lowercase letters only. The ONLY exceptions are:
+- Acronyms (API, HTTP, JSON, etc.)
+- Ticket numbers (EWQ-123, JIRA-456, etc.)
+
+Examples of CORRECT format:
+- feat: add user authentication with JWT tokens
+- fix: resolve API connection timeout issue
+- chore: update dependencies for EWQ-123
+
+Examples of WRONG format (DO NOT USE):
+- feat: Add User Authentication (incorrect - uses capital letters)
+- fix: Resolve API Connection (incorrect - uses capital letters)
+
+Based on the following git changes, write a single-line commit message. Requirements:
 - Start with a type (feat, fix, docs, style, refactor, test, chore)
+- Use ONLY lowercase letters (except acronyms and ticket numbers)
 - Be in imperative mood (e.g., 'add' not 'added')
 - Be clear and concise (max 72 characters)
-- Not include any explanation, just the commit message
-- Focus on what the change does, now how it does it
+- Do not include any explanation, just the commit message
+- Focus on what the change does, not how it does it
 - Analyze the git diff to understand the changes
-- Use the branch name to extract any ticket information
-- only use lowercase letters unless it is an acronym or a ticket number: TICK-123
+- Extract ticket information from branch name if present
 
 Git Status:
 $GIT_STATUS
@@ -58,7 +71,7 @@ $GIT_STATUS
 Git Diff:
 $GIT_DIFF
 
-Respond with ONLY the commit message, nothing else."
+Remember: Use lowercase only. Respond with ONLY the commit message, nothing else."
 
 # Escape JSON strings (replace backslash, double quote, newline, carriage return, tab)
 escape_json() {
