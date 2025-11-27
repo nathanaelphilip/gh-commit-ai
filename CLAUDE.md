@@ -4,30 +4,47 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a GitHub CLI extension that generates AI-powered git commit messages using Ollama. The entire functionality is contained in a single bash script (`gh-commit-ai`) that can be installed as a `gh` extension.
+This is a GitHub CLI extension that generates AI-powered git commit messages using AI models from multiple providers (Ollama, Anthropic, OpenAI). The entire functionality is contained in a single bash script (`gh-commit-ai`) that can be installed as a `gh` extension.
 
 ## Architecture
 
 ### Single-Script Design
 - **gh-commit-ai**: The main executable bash script that implements the entire extension
   - Uses pure bash without external dependencies (except curl, git, and standard Unix tools)
-  - Integrates with Ollama's REST API to generate commit messages
+  - Multi-provider support with pluggable API integration
   - Provides interactive prompts for user confirmation and editing
 
 ### Key Components in gh-commit-ai
 
-1. **Git Integration** (lines 16-35): Validates git repository, checks for changes, gathers status and diff
-2. **Prompt Engineering** (lines 37-56): Constructs the prompt for Ollama with specific commit message guidelines
-3. **JSON Handling** (lines 54-62): Pure bash JSON creation using `escape_json()` function to avoid `jq` dependency
-4. **API Communication** (lines 64-68): Calls Ollama's `/api/generate` endpoint with curl
-5. **JSON Parsing** (line 71): Extracts response using grep/sed instead of `jq`
-6. **Interactive Workflow** (lines 80-100): User confirmation with options to accept, reject, or edit
+1. **Git Integration** (lines 20-35): Validates git repository, checks for changes, gathers status and diff
+2. **Prompt Engineering** (lines 37-61): Constructs the prompt for AI with specific commit message guidelines
+3. **JSON Handling** (lines 63-66): Pure bash JSON creation using `escape_json()` function to avoid `jq` dependency
+4. **Provider Functions** (lines 68-132):
+   - `call_ollama()`: Integrates with local Ollama API
+   - `call_anthropic()`: Integrates with Anthropic Claude API (requires API key)
+   - `call_openai()`: Integrates with OpenAI GPT API (requires API key)
+5. **Provider Routing** (lines 134-150): Case statement that routes to the appropriate provider based on `AI_PROVIDER`
+6. **JSON Parsing**: Each provider function extracts responses using grep/sed to avoid `jq` dependency
+7. **Interactive Workflow** (lines 158-180): User confirmation with options to accept, reject, or edit
 
 ## Configuration
 
-Environment variables (defined at lines 12-13):
-- `OLLAMA_MODEL`: Model to use (default: `gemma3:4b`)
+Environment variables (defined at lines 12-18):
+
+**Provider Selection:**
+- `AI_PROVIDER`: Choose provider (default: `ollama`) - Options: `ollama`, `anthropic`, `openai`
+
+**Ollama (default, local, free):**
+- `OLLAMA_MODEL`: Model to use (default: `gemma3:12b`)
 - `OLLAMA_HOST`: API endpoint (default: `http://localhost:11434`)
+
+**Anthropic (API key required):**
+- `ANTHROPIC_API_KEY`: Your Anthropic API key
+- `ANTHROPIC_MODEL`: Model to use (default: `claude-3-5-sonnet-20241022`)
+
+**OpenAI (API key required):**
+- `OPENAI_API_KEY`: Your OpenAI API key
+- `OPENAI_MODEL`: Model to use (default: `gpt-4o-mini`)
 
 ## Testing the Extension
 
@@ -46,10 +63,19 @@ gh commit-ai
 gh extension remove commit-ai
 ```
 
-### Testing with Different Models
+### Testing with Different Providers
 ```bash
+# Test with Ollama (default)
+./gh-commit-ai
 OLLAMA_MODEL="codellama" ./gh-commit-ai
-OLLAMA_MODEL="llama2" gh commit-ai
+
+# Test with Anthropic
+AI_PROVIDER="anthropic" ANTHROPIC_API_KEY="sk-ant-..." ./gh-commit-ai
+AI_PROVIDER="anthropic" ANTHROPIC_MODEL="claude-3-opus-20240229" ANTHROPIC_API_KEY="sk-ant-..." gh commit-ai
+
+# Test with OpenAI
+AI_PROVIDER="openai" OPENAI_API_KEY="sk-proj-..." ./gh-commit-ai
+AI_PROVIDER="openai" OPENAI_MODEL="gpt-4o" OPENAI_API_KEY="sk-proj-..." gh commit-ai
 ```
 
 ## Commit Message Guidelines
@@ -69,3 +95,29 @@ This project intentionally avoids external dependencies beyond what's typically 
 - Standard tools only: bash, curl, git, grep, sed, awk
 
 When modifying the script, maintain this zero-dependency approach for maximum portability.
+
+## Adding New AI Providers
+
+The script uses a pluggable architecture for AI providers. To add a new provider:
+
+1. **Add configuration variables** at the top (lines 12-18)
+2. **Create a provider function** following this pattern:
+   ```bash
+   call_newprovider() {
+       local prompt="$1"
+       # Validate API key if needed
+       # Build JSON payload with escape_json()
+       # Call API with curl
+       # Parse response with grep/sed
+       # Return cleaned message
+   }
+   ```
+3. **Add case statement entry** (lines 134-150) for the new provider
+4. **Update documentation** in README.md and CLAUDE.md
+
+Each provider function should:
+- Accept the prompt as first argument
+- Validate required credentials
+- Use `escape_json()` for JSON string escaping
+- Use pure bash/grep/sed for JSON parsing (no jq)
+- Return the commit message as output
