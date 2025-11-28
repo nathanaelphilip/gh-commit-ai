@@ -16,9 +16,14 @@ This is a GitHub CLI extension that generates AI-powered git commit messages usi
 
 ### Key Components in gh-commit-ai
 
-1. **Git Integration** (lines ~20-47): Validates git repository, checks for changes, gathers status and diff
+1. **Git Integration** (lines ~20-71): Validates git repository, checks for changes, gathers status and diff
    - **Performance optimization**: Limits diff to configurable number of lines (default 200) via `DIFF_MAX_LINES`
    - Also captures `git diff --stat` for file-level overview without full content
+   - **Branch Intelligence** (lines ~50-71):
+     - Extracts current branch name
+     - Detects ticket numbers using pattern `[A-Z][A-Z0-9]+-[0-9]+` (e.g., ABC-123, JIRA-456)
+     - Suggests commit type based on branch prefix (feat/*, fix/*, docs/*, etc.)
+     - Passes branch context to AI for better commit messages
 2. **Prompt Engineering** (lines ~50-101): Two-stage thinking prompt that:
    - **Stage 1**: AI identifies all significant changes and lists them as bullets
    - **Stage 2**: AI synthesizes those bullets into one concise summary line
@@ -156,6 +161,44 @@ The summary "add user authentication" captures the overall purpose of all four c
 Examples:
 - Input: "Feat: Add User Authentication With JWT" → Output: "feat: add user authentication with JWT"
 - Input: "Fix: Resolve API Connection Issue For EWQ-123" → Output: "fix: resolve API connection issue for EWQ-123"
+
+## Branch Intelligence
+
+The script automatically extracts context from branch names to improve commit message accuracy:
+
+**Ticket Number Detection:**
+- Pattern: `[A-Z][A-Z0-9]+-[0-9]+` (e.g., ABC-123, JIRA-456, PROJ-789)
+- Example: Branch `feature/ABC-123-user-login` → Extracts "ABC-123"
+- The ticket number is passed to the AI and included in the commit message
+
+**Type Suggestion:**
+Branch prefixes automatically suggest commit types:
+- `feat/*` or `feature/*` → suggests "feat"
+- `fix/*`, `bugfix/*`, or `hotfix/*` → suggests "fix"
+- `docs/*` or `doc/*` → suggests "docs"
+- `style/*` → suggests "style"
+- `refactor/*` → suggests "refactor"
+- `test/*` or `tests/*` → suggests "test"
+- `chore/*` → suggests "chore"
+
+**How It Works:**
+1. Script extracts branch name using `git rev-parse --abbrev-ref HEAD`
+2. Searches for ticket number pattern in branch name
+3. Matches branch prefix against known patterns
+4. Passes this context to AI in the prompt
+5. AI uses this information to generate more accurate commit messages
+
+**Example:**
+```bash
+# Branch: feature/PROJ-456-add-authentication
+# AI receives:
+# - Branch name: feature/PROJ-456-add-authentication
+# - Ticket number: PROJ-456 (include this in commit)
+# - Suggested type: feat
+
+# Generated commit:
+feat(auth): add user authentication for PROJ-456
+```
 
 ## Performance Optimizations
 

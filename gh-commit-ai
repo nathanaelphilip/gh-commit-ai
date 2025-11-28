@@ -47,6 +47,49 @@ if [ -z "$GIT_DIFF" ]; then
     GIT_DIFF=$(git diff 2>/dev/null | head -n "$DIFF_MAX_LINES" || echo "")
 fi
 
+# Get current branch name
+BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+
+# Extract ticket number from branch name (e.g., feature/ABC-123-description → ABC-123)
+TICKET_NUMBER=""
+if [ -n "$BRANCH_NAME" ]; then
+    TICKET_NUMBER=$(echo "$BRANCH_NAME" | grep -oE '[A-Z][A-Z0-9]+-[0-9]+' | head -1)
+fi
+
+# Detect suggested type from branch name
+SUGGESTED_TYPE=""
+if [ -n "$BRANCH_NAME" ]; then
+    case "$BRANCH_NAME" in
+        feat/*|feature/*) SUGGESTED_TYPE="feat" ;;
+        fix/*|bugfix/*|hotfix/*) SUGGESTED_TYPE="fix" ;;
+        docs/*|doc/*) SUGGESTED_TYPE="docs" ;;
+        style/*) SUGGESTED_TYPE="style" ;;
+        refactor/*) SUGGESTED_TYPE="refactor" ;;
+        test/*|tests/*) SUGGESTED_TYPE="test" ;;
+        chore/*) SUGGESTED_TYPE="chore" ;;
+    esac
+fi
+
+# Prepare branch context
+BRANCH_CONTEXT="Branch context:
+- Branch name: $BRANCH_NAME"
+
+if [ -n "$TICKET_NUMBER" ]; then
+    BRANCH_CONTEXT="$BRANCH_CONTEXT
+- Ticket number: $TICKET_NUMBER (include this in your commit message)"
+fi
+
+if [ -n "$SUGGESTED_TYPE" ]; then
+    BRANCH_CONTEXT="$BRANCH_CONTEXT
+- Suggested type: $SUGGESTED_TYPE (based on branch name)"
+fi
+
+# Prepare closing instruction
+CLOSING_INSTRUCTION="Think: What are all the changes? Then: What's the one-line summary that captures all of them?"
+if [ -n "$TICKET_NUMBER" ]; then
+    CLOSING_INSTRUCTION="$CLOSING_INSTRUCTION Include ticket $TICKET_NUMBER in the summary."
+fi
+
 # Prepare prompt for Ollama
 if [ "$USE_SCOPE" = "true" ]; then
     SCOPE_INSTRUCTION="OUTPUT FORMAT (summary line MUST be first):
@@ -89,6 +132,8 @@ RULES:
 
 $SCOPE_EXAMPLES
 
+$BRANCH_CONTEXT
+
 Files changed:
 $GIT_STATUS
 
@@ -98,7 +143,7 @@ $GIT_STATS
 Diff sample:
 $GIT_DIFF
 
-Think: What are all the changes? Then: What's the one-line summary that captures all of them?"
+$CLOSING_INSTRUCTION"
 
 # Escape JSON strings (replace backslash, double quote, newline, carriage return, tab)
 escape_json() {

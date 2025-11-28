@@ -13,10 +13,11 @@ This document tracks potential improvements and features for gh-commit-ai.
 - [ ] Allow configuration of custom scope names per project (future enhancement)
 
 ### 2. Branch Name Intelligence
-- [ ] Better extraction of context from branch names
-- [ ] Auto-detect ticket numbers: `feature/ABC-123-user-auth` → include "ABC-123" in commit
-- [ ] Auto-suggest type from branch: `fix/login-bug` → suggest "fix" type
-- [ ] Extract feature/ticket info to include in summary
+- [x] Better extraction of context from branch names
+- [x] Auto-detect ticket numbers: `feature/ABC-123-user-auth` → include "ABC-123" in commit
+- [x] Auto-suggest type from branch: `fix/login-bug` → suggest "fix" type
+- [x] Extract feature/ticket info to include in summary
+- [x] Support multiple branch prefixes: feat, feature, fix, bugfix, hotfix, docs, style, refactor, test, chore
 
 ### 3. Dry-Run Mode
 - [ ] Implement `--dry-run` flag (generate message without committing)

@@ -95,6 +95,11 @@ Without scope:
 - <change 3>
 ```
 
+**Branch Intelligence:** The extension automatically extracts context from your branch name:
+- **Ticket numbers**: `feature/ABC-123-login` → Includes "ABC-123" in commit message
+- **Type hints**: `fix/login-bug` → Suggests "fix" type automatically
+- **Supported patterns**: `feat/*`, `feature/*`, `fix/*`, `bugfix/*`, `hotfix/*`, `docs/*`, `style/*`, `refactor/*`, `test/*`, `chore/*`
+
 **Note:** All commit messages are automatically converted to lowercase, with exceptions for:
 - Technical acronyms (API, HTTP, JSON, JWT, etc.)
 - Ticket numbers (e.g., ABC-123, JIRA-456)
@@ -202,7 +207,9 @@ When presented with a generated commit message, you can:
 5. Displays the generated message for your approval
 6. Commits with the approved message
 
-## Example
+## Examples
+
+### Basic Example
 
 ```bash
 $ gh commit-ai
@@ -222,6 +229,30 @@ Use this commit message? (y/n/e to edit): y
 Staging all changes...
 ✓ Committed successfully!
 ```
+
+### Example with Branch Intelligence
+
+```bash
+# Branch: feature/ABC-123-user-login
+$ gh commit-ai
+Analyzing changes...
+Generating commit message with gemma3:12b...
+
+Generated commit message:
+feat(auth): add user login for ABC-123
+
+- implement login form validation
+- add session token management
+- create user authentication API
+
+Use this commit message? (y/n/e to edit): y
+Staging all changes...
+✓ Committed successfully!
+```
+
+The extension automatically detected:
+- Ticket number "ABC-123" from branch name and included it in the commit
+- Type "feat" suggested from "feature/" branch prefix
 
 ## Troubleshooting
 
