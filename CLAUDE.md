@@ -123,6 +123,42 @@ gh commit-ai --amend
 gh commit-ai
 ```
 
+## Testing
+
+### Unit Tests
+
+The project includes a comprehensive test suite using [Bats](https://github.com/bats-core/bats-core) (Bash Automated Testing System).
+
+**Test Coverage:**
+- Core functions (JSON escaping, lowercase enforcement)
+- Command-line interface and argument parsing
+- Branch intelligence (ticket extraction, type detection)
+- Error handling
+
+**Running Tests:**
+```bash
+# Install bats (macOS)
+brew install bats-core
+
+# Run all tests
+bats tests/
+
+# Run specific test file
+bats tests/test_core_functions.bats
+bats tests/test_cli.bats
+bats tests/test_branch_intelligence.bats
+```
+
+**Test Files:**
+- `tests/test_helper.bash` - Helper functions and fixtures
+- `tests/test_core_functions.bats` - Tests for escape_json() and enforce_lowercase()
+- `tests/test_cli.bats` - Tests for command-line interface
+- `tests/test_branch_intelligence.bats` - Tests for branch name parsing
+
+See [tests/README.md](tests/README.md) for detailed testing documentation.
+
+**Note:** The test suite covers unit-testable functions. Integration testing with actual API calls and git operations should be done manually.
+
 ## Testing the Extension
 
 ### Local Development

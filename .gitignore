@@ -1,0 +1,16 @@
+# Test artifacts
+.git/COMMIT_MSG_*
+
+# Temporary files
+*.tmp
+*.swp
+*~
+
+# IDE files
+.vscode/
+.idea/
+*.iml
+
+# OS files
+.DS_Store
+Thumbs.db

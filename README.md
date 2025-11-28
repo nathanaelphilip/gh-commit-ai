@@ -317,6 +317,30 @@ Use this commit message? (y/n/e to edit): y
 
 **Note:** This will rewrite the last commit. Only use on commits that haven't been pushed, or be prepared to force push.
 
+## Testing
+
+This project includes unit and integration tests using [Bats](https://github.com/bats-core/bats-core).
+
+### Install Bats:
+```bash
+# macOS
+brew install bats-core
+
+# Linux
+sudo apt-get install bats
+```
+
+### Run tests:
+```bash
+# Run all tests
+bats tests/
+
+# Run specific test file
+bats tests/test_core_functions.bats
+```
+
+See [tests/README.md](tests/README.md) for more details on the test suite.
+
 ## Troubleshooting
 
 **"Error: Not a git repository"**
