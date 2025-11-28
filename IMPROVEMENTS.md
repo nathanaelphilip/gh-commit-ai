@@ -46,10 +46,13 @@ This document tracks potential improvements and features for gh-commit-ai.
 - [x] Example configuration file (.gh-commit-ai.example.yml)
 
 ### 6. Interactive Bullet Editing
-- [ ] Allow adding/removing individual bullets after generation
-- [ ] Allow reordering bullets
-- [ ] Allow editing summary line separately
-- [ ] Interactive menu for modifications
+- [x] Allow adding/removing individual bullets after generation
+- [x] Allow reordering bullets
+- [x] Allow editing summary line separately
+- [x] Interactive menu for modifications
+- [x] Menu-driven interface with single-key commands (s/a/r/o/d/c)
+- [x] Real-time preview after each edit
+- [x] Pure bash implementation (no external dependencies)
 
 ### 7. Cost Tracking (for paid APIs)
 - [ ] Show token count after generation

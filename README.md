@@ -255,6 +255,49 @@ When presented with a generated commit message, you can:
 - Press `y` to accept and commit
 - Press `n` to cancel
 - Press `e` to edit the message in your default editor before committing
+- Press `i` for interactive editing (modify summary line and bullets individually)
+
+#### Interactive Editing Mode
+
+The interactive editor (`i` option) allows you to fine-tune the commit message:
+
+**Features:**
+- **Edit summary line** - Modify the first line without opening an editor
+- **Add bullets** - Add new change descriptions to the list
+- **Remove bullets** - Delete specific bullets by number
+- **Reorder bullets** - Move bullets up or down for better organization
+
+**Example workflow:**
+```bash
+$ gh commit-ai
+# ... AI generates message ...
+
+Use this commit message? (y/n/e to edit/i for interactive): i
+
+=== Interactive Commit Message Editor ===
+
+Summary:
+  feat: add user authentication
+
+Changes:
+  1. - implement JWT token generation
+  2. - create login endpoint
+  3. - add password hashing
+
+Options:
+  s - Edit summary line
+  a - Add bullet
+  r - Remove bullet
+  o - Reorder bullets
+  d - Done (return to confirmation)
+  c - Cancel
+
+Choose option: a
+Enter new bullet (without leading dash): create user session management
+
+# After adding, you see updated message and can make more edits
+# Press 'd' when done to return to confirmation
+```
 
 ## How It Works
 

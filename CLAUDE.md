@@ -50,10 +50,19 @@ This is a GitHub CLI extension that generates AI-powered git commit messages usi
 7. **Provider Routing**: Case statement that routes to the appropriate provider based on `AI_PROVIDER`
 8. **JSON Parsing**: Each provider function extracts responses using grep/sed to avoid `jq` dependency
 9. **Message Post-Processing**: Applies lowercase enforcement to ensure consistent formatting
-10. **Dry-Run and Preview Modes** (lines ~341-358):
+10. **Dry-Run and Preview Modes** (lines ~577-587):
     - `--preview`: Shows message and exits immediately
     - `--dry-run`: Shows message and optionally saves to `.git/COMMIT_MSG_<timestamp>` file
-11. **Interactive Workflow**: User confirmation with options to accept, reject, or edit
+11. **Interactive Editing** (lines ~325-471): Fine-grained message editing without opening a text editor
+    - `parse_commit_message()`: Parses message into SUMMARY_LINE and BULLETS arrays
+    - `rebuild_commit_message()`: Rebuilds message from components
+    - `interactive_edit_message()`: Provides menu-driven editing interface
+    - Features: Edit summary, add/remove/reorder bullets
+12. **Interactive Workflow** (lines ~589-639): User confirmation with loop support for interactive editing
+    - `y`: Accept and commit
+    - `n`: Cancel
+    - `e`: Edit in default editor
+    - `i`: Interactive editing mode (new)
 
 ## Configuration
 
@@ -160,6 +169,49 @@ gh commit-ai --amend
 # Normal mode (default)
 gh commit-ai
 ```
+
+## Interactive Editing Mode
+
+The interactive editing feature (invoked with `i` during confirmation) allows fine-grained editing without opening a text editor.
+
+**Architecture:**
+
+1. **Message Parsing** (`parse_commit_message()`):
+   - Splits commit message into components
+   - Extracts first line as `SUMMARY_LINE`
+   - Extracts all lines starting with `- ` as `BULLETS` array
+   - Uses bash arrays for in-memory manipulation
+
+2. **Message Rebuilding** (`rebuild_commit_message()`):
+   - Reconstructs message from `SUMMARY_LINE` and `BULLETS`
+   - Maintains proper formatting (blank line between summary and bullets)
+   - Uses `echo -e` to handle newlines
+
+3. **Interactive Menu** (`interactive_edit_message()`):
+   - Menu-driven interface with single-key commands
+   - Operations:
+     - `s`: Edit summary line with read prompt
+     - `a`: Add new bullet to end of array
+     - `r`: Remove bullet by number (with validation)
+     - `o`: Reorder bullets (move from position X to Y)
+     - `d`: Done - return edited message
+     - `c`: Cancel - return original message
+   - Uses `clear` command to redraw screen after each operation
+   - Returns 0 on success (done), 1 on cancel
+
+4. **Integration with Confirmation Loop**:
+   - Main confirmation prompt wrapped in `while true` loop
+   - Pressing `i` calls `interactive_edit_message()`
+   - On success, updates `COMMIT_MSG` and shows updated message
+   - Loops back to confirmation for final approval
+   - On cancel, exits the script
+
+**Benefits:**
+- Quick edits without leaving the terminal
+- No need to learn git commit editor commands
+- Visual feedback after each operation
+- Can make multiple changes in sequence
+- Reorder provides better organization of changes
 
 ## Testing
 
