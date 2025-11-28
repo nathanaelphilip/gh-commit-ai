@@ -136,10 +136,16 @@ This document tracks potential improvements and features for gh-commit-ai.
 - [ ] Support different changelog formats (Keep a Changelog is implemented, others future enhancement)
 
 ### 13. Pre-commit Hook Integration
-- [ ] Implement `gh commit-ai install-hook` command
-- [ ] Automatically generate messages on commit
-- [ ] Support `prepare-commit-msg` hook
-- [ ] Easy uninstall option
+- [x] Implement `gh commit-ai install-hook` command
+- [x] Implement `gh commit-ai uninstall-hook` command
+- [x] Support `prepare-commit-msg` hook
+- [x] OPT-IN design via `GH_COMMIT_AI=1` environment variable
+- [x] Skip merge/squash/amend commits
+- [x] Conflict detection (won't overwrite existing hooks)
+- [x] Git alias suggestion (`git ai-commit`)
+- [x] Error handling and fallback
+- [x] Integration with `--preview` flag
+- [x] Clean uninstall with safety checks
 
 ### 14. Better Token Limit Handling
 - [ ] Intelligently sample different parts of very large diffs

@@ -321,7 +321,7 @@ CHANGELOG_MODE=false
 CHANGELOG_SINCE=""
 CHANGELOG_FORMAT="keepachangelog"
 
-# Check for changelog subcommand
+# Check for subcommands
 if [ "$1" = "changelog" ]; then
     CHANGELOG_MODE=true
     shift
@@ -360,6 +360,119 @@ if [ "$1" = "changelog" ]; then
                 ;;
         esac
     done
+elif [ "$1" = "install-hook" ]; then
+    # Install prepare-commit-msg hook
+    HOOK_DIR=".git/hooks"
+    HOOK_FILE="$HOOK_DIR/prepare-commit-msg"
+
+    # Check if we're in a git repository
+    if ! git rev-parse --git-dir > /dev/null 2>&1; then
+        echo -e "${RED}Error: Not a git repository${NC}"
+        exit 1
+    fi
+
+    # Create hooks directory if it doesn't exist
+    mkdir -p "$HOOK_DIR"
+
+    # Check if hook already exists
+    if [ -f "$HOOK_FILE" ]; then
+        # Check if it's our hook
+        if grep -q "gh-commit-ai hook" "$HOOK_FILE" 2>/dev/null; then
+            echo -e "${YELLOW}Hook already installed${NC}"
+            exit 0
+        else
+            echo -e "${RED}Error: A prepare-commit-msg hook already exists${NC}"
+            echo "Please manually merge or remove: $HOOK_FILE"
+            exit 1
+        fi
+    fi
+
+    # Create the hook
+    cat > "$HOOK_FILE" << 'EOF'
+#!/bin/bash
+# gh-commit-ai hook
+# This hook is OPT-IN: only runs when GH_COMMIT_AI=1
+
+COMMIT_MSG_FILE="$1"
+COMMIT_SOURCE="$2"
+
+# Only run if explicitly enabled via environment variable
+if [ "$GH_COMMIT_AI" != "1" ]; then
+    exit 0
+fi
+
+# Don't run for merge commits, squash, or amend
+if [ "$COMMIT_SOURCE" = "merge" ] || [ "$COMMIT_SOURCE" = "squash" ] || [ "$COMMIT_SOURCE" = "commit" ]; then
+    exit 0
+fi
+
+# Generate commit message using gh-commit-ai
+echo "Generating commit message with AI..." >&2
+
+# Run gh-commit-ai in preview mode to get the message
+GENERATED_MSG=$(gh commit-ai --preview 2>&1 | grep -A 1000 "Generated commit message:" | tail -n +2)
+
+if [ -n "$GENERATED_MSG" ]; then
+    # Write the generated message to the commit message file
+    echo "$GENERATED_MSG" > "$COMMIT_MSG_FILE"
+    echo "✓ AI-generated message added. Review and edit if needed." >&2
+else
+    echo "✗ Failed to generate message, opening editor with empty message" >&2
+fi
+EOF
+
+    chmod +x "$HOOK_FILE"
+
+    echo -e "${GREEN}✓ Pre-commit hook installed successfully!${NC}"
+    echo ""
+    echo "Usage (OPT-IN):"
+    echo "  1. Regular commits work normally:"
+    echo "     git commit"
+    echo ""
+    echo "  2. Use AI generation when you want it:"
+    echo "     GH_COMMIT_AI=1 git commit"
+    echo ""
+    echo "  3. Or set up a convenient alias:"
+    echo "     git config alias.ai-commit '!GH_COMMIT_AI=1 git commit'"
+    echo "     git ai-commit    # Use AI generation"
+    echo ""
+    echo "To uninstall: gh commit-ai uninstall-hook"
+
+    exit 0
+
+elif [ "$1" = "uninstall-hook" ]; then
+    # Uninstall prepare-commit-msg hook
+    HOOK_FILE=".git/hooks/prepare-commit-msg"
+
+    # Check if we're in a git repository
+    if ! git rev-parse --git-dir > /dev/null 2>&1; then
+        echo -e "${RED}Error: Not a git repository${NC}"
+        exit 1
+    fi
+
+    if [ ! -f "$HOOK_FILE" ]; then
+        echo -e "${YELLOW}No hook to uninstall${NC}"
+        exit 0
+    fi
+
+    # Check if it's our hook
+    if ! grep -q "gh-commit-ai hook" "$HOOK_FILE" 2>/dev/null; then
+        echo -e "${RED}Error: Hook file exists but is not from gh-commit-ai${NC}"
+        echo "Please manually review: $HOOK_FILE"
+        exit 1
+    fi
+
+    rm "$HOOK_FILE"
+    echo -e "${GREEN}✓ Pre-commit hook uninstalled successfully${NC}"
+
+    # Also remove the git alias if it exists
+    if git config --get alias.ai-commit > /dev/null 2>&1; then
+        echo ""
+        echo "Note: Git alias 'ai-commit' still exists. To remove it:"
+        echo "  git config --unset alias.ai-commit"
+    fi
+
+    exit 0
 fi
 
 while [[ $# -gt 0 ]]; do
@@ -384,11 +497,13 @@ while [[ $# -gt 0 ]]; do
             echo "gh-commit-ai - AI-powered git commit message generator"
             echo ""
             echo "Usage: gh commit-ai [options]"
-            echo "       gh commit-ai changelog [options]"
+            echo "       gh commit-ai <command> [options]"
             echo ""
             echo "Commands:"
-            echo "  (default)    Generate commit message for current changes"
-            echo "  changelog    Generate changelog from commit history"
+            echo "  (default)       Generate commit message for current changes"
+            echo "  changelog       Generate changelog from commit history"
+            echo "  install-hook    Install git hook for opt-in AI commits"
+            echo "  uninstall-hook  Remove git hook"
             echo ""
             echo "Options:"
             echo "  --dry-run    Generate commit message without committing"
@@ -407,6 +522,7 @@ while [[ $# -gt 0 ]]; do
             echo "  AI_PROVIDER      AI provider to use (ollama, anthropic, openai)"
             echo "  USE_SCOPE        Enable/disable scopes (true/false)"
             echo "  DIFF_MAX_LINES   Maximum diff lines to send to AI"
+            echo "  GH_COMMIT_AI     Set to 1 to enable hook (opt-in)"
             echo ""
             echo "Configuration Files:"
             echo "  .gh-commit-ai.yml       Local config (repo root)"
@@ -419,6 +535,8 @@ while [[ $# -gt 0 ]]; do
             echo "  gh commit-ai --amend"
             echo "  gh commit-ai changelog"
             echo "  gh commit-ai changelog --since v1.0.0"
+            echo "  gh commit-ai install-hook"
+            echo "  GH_COMMIT_AI=1 git commit    # With hook installed"
             echo "  USE_SCOPE=false gh commit-ai"
             exit 0
             ;;

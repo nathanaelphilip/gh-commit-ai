@@ -680,6 +680,104 @@ Generating changelog...
 
 **Note:** Works best with repositories that follow [Conventional Commits](https://www.conventionalcommits.org/) format.
 
+### Git Hook Integration (Opt-In)
+
+Install a git hook to enable AI-generated commit messages directly with `git commit`:
+
+#### Installation
+
+```bash
+$ gh commit-ai install-hook
+✓ Pre-commit hook installed successfully!
+
+Usage (OPT-IN):
+  1. Regular commits work normally:
+     git commit
+
+  2. Use AI generation when you want it:
+     GH_COMMIT_AI=1 git commit
+
+  3. Or set up a convenient alias:
+     git config alias.ai-commit '!GH_COMMIT_AI=1 git commit'
+     git ai-commit    # Use AI generation
+
+To uninstall: gh commit-ai uninstall-hook
+```
+
+#### Usage
+
+**Option 1: Set environment variable each time**
+```bash
+$ GH_COMMIT_AI=1 git commit
+Generating commit message with AI...
+✓ AI-generated message added. Review and edit if needed.
+
+# Your editor opens with the AI-generated message
+# Edit if needed, save, and the commit is created
+```
+
+**Option 2: Use the git alias (recommended)**
+```bash
+# Set up alias once
+$ git config alias.ai-commit '!GH_COMMIT_AI=1 git commit'
+
+# Then use it whenever you want AI generation
+$ git ai-commit
+Generating commit message with AI...
+✓ AI-generated message added. Review and edit if needed.
+
+# Regular git commit still works normally
+$ git commit
+# Opens editor with empty message (no AI)
+```
+
+**Option 3: Export variable for the session**
+```bash
+# Enable AI for all commits in this terminal session
+$ export GH_COMMIT_AI=1
+$ git commit  # Uses AI
+$ git commit  # Uses AI
+
+# Disable again
+$ unset GH_COMMIT_AI
+$ git commit  # Normal commit
+```
+
+#### How It Works
+
+1. **OPT-IN by default**: The hook only runs when `GH_COMMIT_AI=1` is set
+2. **Regular commits unaffected**: Normal `git commit` works exactly as before
+3. **Preview mode**: Hook uses `--preview` to generate the message
+4. **Editor integration**: Message is pre-filled in your commit editor
+5. **Full control**: You can edit, amend, or abort before committing
+
+#### Safety Features
+
+- **Skips merge commits**: Doesn't interfere with merge/squash commits
+- **Skips amends**: Won't override when using `git commit --amend`
+- **Error handling**: Falls back to empty message if generation fails
+- **Easy removal**: `gh commit-ai uninstall-hook` removes cleanly
+
+#### Uninstallation
+
+```bash
+$ gh commit-ai uninstall-hook
+✓ Pre-commit hook uninstalled successfully
+
+Note: Git alias 'ai-commit' still exists. To remove it:
+  git config --unset alias.ai-commit
+```
+
+**Benefits of the hook approach:**
+- Seamless integration with existing git workflow
+- No need to remember to run `gh commit-ai`
+- Still provides full editing control
+- Opt-in when you want it, normal commits otherwise
+
+**When to use the hook vs direct command:**
+- **Hook**: Quick commits where you trust AI to get it right
+- **Direct**: When you want to see options (`--options`), costs, or have more control
+
 ## Testing
 
 This project includes unit and integration tests using [Bats](https://github.com/bats-core/bats-core).

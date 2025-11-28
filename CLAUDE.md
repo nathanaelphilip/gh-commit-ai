@@ -821,6 +821,134 @@ gh commit-ai changelog [--since <ref>] [--format <format>]
 - Output to file option
 - Template customization
 
+## Git Hook Integration (Opt-In)
+
+The tool supports installing a `prepare-commit-msg` hook for seamless git workflow integration.
+
+**Usage:**
+```bash
+gh commit-ai install-hook
+gh commit-ai uninstall-hook
+```
+
+**Architecture:**
+
+1. **Install Command** (lines 363-441):
+   - Creates `.git/hooks/prepare-commit-msg` file
+   - Checks for existing hooks to avoid conflicts
+   - Provides instructions for opt-in usage
+   - Suggests git alias setup
+
+2. **Uninstall Command** (lines 443-476):
+   - Verifies hook is from gh-commit-ai before removing
+   - Removes hook file
+   - Notifies about remaining git alias
+
+3. **Hook Script** (embedded in install command):
+   ```bash
+   #!/bin/bash
+   # gh-commit-ai hook
+   # This hook is OPT-IN: only runs when GH_COMMIT_AI=1
+
+   COMMIT_MSG_FILE="$1"
+   COMMIT_SOURCE="$2"
+
+   # Only run if explicitly enabled
+   if [ "$GH_COMMIT_AI" != "1" ]; then
+       exit 0
+   fi
+
+   # Skip merge/squash/amend commits
+   if [ "$COMMIT_SOURCE" = "merge" ] || ...; then
+       exit 0
+   fi
+
+   # Generate message using --preview
+   GENERATED_MSG=$(gh commit-ai --preview 2>&1 | grep -A 1000 "Generated commit message:" | tail -n +2)
+
+   # Write to commit message file
+   echo "$GENERATED_MSG" > "$COMMIT_MSG_FILE"
+   ```
+
+**Opt-In Mechanism:**
+
+The hook checks for `GH_COMMIT_AI=1` environment variable:
+- **Not set**: Hook exits immediately (exit 0), normal git behavior
+- **Set to 1**: Hook runs AI generation
+
+**Usage Patterns:**
+
+1. **One-time opt-in:**
+   ```bash
+   GH_COMMIT_AI=1 git commit
+   ```
+
+2. **Git alias (recommended):**
+   ```bash
+   git config alias.ai-commit '!GH_COMMIT_AI=1 git commit'
+   git ai-commit
+   ```
+
+3. **Session-wide:**
+   ```bash
+   export GH_COMMIT_AI=1
+   git commit  # Uses AI
+   git commit  # Uses AI
+   unset GH_COMMIT_AI
+   ```
+
+**Safety Features:**
+
+1. **Conflict Detection:**
+   - Checks for existing `prepare-commit-msg` hook
+   - Only installs if no hook exists OR existing hook is from gh-commit-ai
+   - Prevents overwriting user's custom hooks
+
+2. **Commit Type Filtering:**
+   - Skips merge commits (`COMMIT_SOURCE=merge`)
+   - Skips squash commits (`COMMIT_SOURCE=squash`)
+   - Skips amend commits (`COMMIT_SOURCE=commit`)
+   - Only runs for new commits
+
+3. **Error Handling:**
+   - Falls back to empty message if generation fails
+   - User still gets editor to write message manually
+   - Logs status to stderr (not in commit message)
+
+4. **Clean Uninstall:**
+   - Verifies hook ownership before deletion
+   - Warns about remaining git alias
+   - Won't remove non-gh-commit-ai hooks
+
+**Integration with --preview:**
+
+Hook leverages existing `--preview` flag:
+- Generates message without committing
+- Displays to stdout (for parsing)
+- No interactive prompts
+- Fast, no user input required
+
+**Benefits of Opt-In Approach:**
+
+- **Non-intrusive**: Zero impact on normal `git commit`
+- **User control**: Explicit decision each time (or via alias)
+- **No surprises**: Clear when AI is running
+- **No latency**: Regular commits unchanged
+- **Team-friendly**: Each developer chooses independently
+
+**Limitations:**
+
+- Doesn't show token usage/cost (hook needs to be fast)
+- No interactive editing (i/e options not available)
+- No `--options` flag support (single generation only)
+- Editor opens after generation (can't preview first)
+
+**Future Enhancements:**
+- Config option for default AI providers in hooks
+- Support for custom hook templates
+- Ability to chain with existing hooks
+- Cache recent messages for reuse
+
 ## Performance Optimizations
 
 The script is optimized for speed:
