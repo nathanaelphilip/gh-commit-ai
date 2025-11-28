@@ -325,6 +325,24 @@ CHANGELOG_FORMAT="keepachangelog"
 VERBOSE=false
 FORCED_TYPE=""
 CUSTOM_MAX_LINES=""
+NO_LOWERCASE=false
+
+### Message history directory
+MESSAGE_HISTORY_DIR="/tmp/gh-commit-ai-history"
+mkdir -p "$MESSAGE_HISTORY_DIR"
+
+# Save message to history (keeps last 5)
+save_message_history() {
+    local message="$1"
+    local timestamp=$(date +%s)
+    local history_file="$MESSAGE_HISTORY_DIR/msg_${timestamp}.txt"
+
+    # Save the message
+    echo "$message" > "$history_file"
+
+    # Keep only the last 5 messages
+    ls -t "$MESSAGE_HISTORY_DIR"/msg_*.txt 2>/dev/null | tail -n +6 | xargs rm -f 2>/dev/null || true
+}
 
 # Check for subcommands
 if [ "$1" = "changelog" ]; then
@@ -514,6 +532,10 @@ while [[ $# -gt 0 ]]; do
             CUSTOM_MAX_LINES="$2"
             shift 2
             ;;
+        --no-lowercase)
+            NO_LOWERCASE=true
+            shift
+            ;;
         --help|-h)
             echo "gh-commit-ai - AI-powered git commit message generator"
             echo ""
@@ -533,6 +555,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --options           Generate multiple variations to choose from"
             echo "  --type <type>       Force a specific commit type (feat, fix, docs, etc.)"
             echo "  --max-lines <n>     Override DIFF_MAX_LINES for this run"
+            echo "  --no-lowercase      Disable automatic lowercase enforcement"
             echo "  --verbose, -v       Show detailed API request/response info"
             echo "  --version           Show version number"
             echo "  --help, -h          Show this help message"
@@ -1582,14 +1605,16 @@ if [ "$MULTIPLE_OPTIONS" = "true" ]; then
     # Parse options from response
     num_options=$(parse_multiple_options "$COMMIT_MSG")
 
-    # Enforce lowercase on each option
-    for i in $(seq 1 $num_options); do
-        if [ -f "/tmp/option_${i}.txt" ]; then
-            local option_content=$(cat "/tmp/option_${i}.txt")
-            local lowercased=$(enforce_lowercase "$option_content")
-            echo "$lowercased" > "/tmp/option_${i}.txt"
-        fi
-    done
+    # Enforce lowercase on each option (unless disabled)
+    if [ "$NO_LOWERCASE" != "true" ]; then
+        for i in $(seq 1 $num_options); do
+            if [ -f "/tmp/option_${i}.txt" ]; then
+                local option_content=$(cat "/tmp/option_${i}.txt")
+                local lowercased=$(enforce_lowercase "$option_content")
+                echo "$lowercased" > "/tmp/option_${i}.txt"
+            fi
+        done
+    fi
 
     # Display all options
     echo ""
@@ -1617,12 +1642,20 @@ if [ "$MULTIPLE_OPTIONS" = "true" ]; then
     COMMIT_MSG=$(cat "/tmp/option_${selected}.txt")
     rm -f /tmp/option_*.txt 2>/dev/null
 
+    # Save to message history
+    save_message_history "$COMMIT_MSG"
+
     # Show selected message
     echo -e "\n${GREEN}Selected commit message:${NC}"
     echo -e "${YELLOW}$COMMIT_MSG${NC}\n"
 else
-    # Single message mode - enforce lowercase
-    COMMIT_MSG=$(enforce_lowercase "$COMMIT_MSG")
+    # Single message mode - enforce lowercase (unless disabled)
+    if [ "$NO_LOWERCASE" != "true" ]; then
+        COMMIT_MSG=$(enforce_lowercase "$COMMIT_MSG")
+    fi
+
+    # Save to message history
+    save_message_history "$COMMIT_MSG"
 
     # Show the generated commit message
     echo -e "\n${GREEN}Generated commit message:${NC}"

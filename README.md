@@ -70,6 +70,7 @@ gh commit-ai [options]
 - `--options` - Generate multiple message variations to choose from
 - `--type <type>` - Force a specific commit type (feat, fix, docs, etc.)
 - `--max-lines <n>` - Override DIFF_MAX_LINES for this run
+- `--no-lowercase` - Disable automatic lowercase enforcement
 - `--verbose, -v` - Show detailed API request/response for debugging
 - `--version` - Show version number
 - `--help, -h` - Show help message
@@ -388,6 +389,41 @@ $ gh commit-ai -v
 $ gh commit-ai --version
 gh-commit-ai version 1.0.0
 ```
+
+**Disable Lowercase Enforcement**
+
+By default, commit messages are automatically converted to lowercase (except for acronyms and ticket numbers). You can disable this:
+
+```bash
+$ gh commit-ai --no-lowercase
+# Preserves original capitalization from AI
+# Example output: "Add User Authentication System" instead of "add user authentication system"
+```
+
+**Message History**
+
+All generated messages are automatically saved to `/tmp/gh-commit-ai-history/` with timestamps. The last 5 messages are kept for recovery:
+
+```bash
+$ ls -t /tmp/gh-commit-ai-history/
+msg_1701234567.txt  # Most recent
+msg_1701234556.txt
+msg_1701234545.txt
+msg_1701234534.txt
+msg_1701234523.txt  # Oldest (5th message)
+
+# View a previous message
+$ cat /tmp/gh-commit-ai-history/msg_1701234567.txt
+feat: add user authentication
+
+- implement JWT token generation
+- create login endpoint
+```
+
+This is useful if you:
+- Accidentally rejected a good message
+- Want to compare different generations
+- Need to recover a message after a crash
 
 ### Cost Tracking
 
