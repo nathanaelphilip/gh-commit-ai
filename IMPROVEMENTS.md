@@ -169,8 +169,8 @@ This document tracks potential improvements and features for gh-commit-ai.
 - [x] **`--max-lines <n>` flag** - Override DIFF_MAX_LINES from command line
 - [x] **Message history** - Save last 5 generated messages to `/tmp` for recovery
 - [x] **`--no-lowercase` flag** - Disable automatic lowercase enforcement
-- [ ] **Better error messages** - More helpful error messages for common issues
-- [ ] **Progress indicator** - Show spinner/progress while waiting for AI
+- [x] **Better error messages** - More helpful error messages for common issues
+- [x] **Progress indicator** - Show spinner/progress while waiting for AI
 
 ## Community Requests
 

@@ -851,7 +851,7 @@ analyze_commit_history() {
         return
     fi
 
-    local total_commits=$(echo "$commits" | wc -l | tr -d ' ')
+    local total_commits=$(echo "$commits" | wc -l | LC_ALL=C tr -d ' ')
 
     # Return early if very few commits
     if [ "$total_commits" -lt 5 ]; then
@@ -868,7 +868,7 @@ analyze_commit_history() {
 
     # Detect scope usage (look for parentheses after type)
     local scope_count=$(echo "$commits" | grep -cE '^[a-z]+\([a-z]+\):' 2>/dev/null || echo "0")
-    scope_count=$(echo "$scope_count" | tr -d '\n' | tr -d ' ')
+    scope_count=$(echo "$scope_count" | LC_ALL=C tr -d '\n' | LC_ALL=C tr -d ' ')
     local uses_scopes=false
     local scope_percentage=0
     if [ "$scope_count" -gt 0 ] 2>/dev/null; then
@@ -878,25 +878,25 @@ analyze_commit_history() {
 
     # Detect conventional commit types used
     local feat_count=$(echo "$commits" | grep -ciE '^feat[(!:]' 2>/dev/null || echo "0")
-    feat_count=$(echo "$feat_count" | tr -d '\n' | tr -d ' ')
+    feat_count=$(echo "$feat_count" | LC_ALL=C tr -d '\n' | LC_ALL=C tr -d ' ')
     local fix_count=$(echo "$commits" | grep -ciE '^fix[(!:]' 2>/dev/null || echo "0")
-    fix_count=$(echo "$fix_count" | tr -d '\n' | tr -d ' ')
+    fix_count=$(echo "$fix_count" | LC_ALL=C tr -d '\n' | LC_ALL=C tr -d ' ')
     local docs_count=$(echo "$commits" | grep -ciE '^docs[(!:]' 2>/dev/null || echo "0")
-    docs_count=$(echo "$docs_count" | tr -d '\n' | tr -d ' ')
+    docs_count=$(echo "$docs_count" | LC_ALL=C tr -d '\n' | LC_ALL=C tr -d ' ')
     local chore_count=$(echo "$commits" | grep -ciE '^chore[(!:]' 2>/dev/null || echo "0")
-    chore_count=$(echo "$chore_count" | tr -d '\n' | tr -d ' ')
+    chore_count=$(echo "$chore_count" | LC_ALL=C tr -d '\n' | LC_ALL=C tr -d ' ')
     local refactor_count=$(echo "$commits" | grep -ciE '^refactor[(!:]' 2>/dev/null || echo "0")
-    refactor_count=$(echo "$refactor_count" | tr -d '\n' | tr -d ' ')
+    refactor_count=$(echo "$refactor_count" | LC_ALL=C tr -d '\n' | LC_ALL=C tr -d ' ')
     local test_count=$(echo "$commits" | grep -ciE '^test[(!:]' 2>/dev/null || echo "0")
-    test_count=$(echo "$test_count" | tr -d '\n' | tr -d ' ')
+    test_count=$(echo "$test_count" | LC_ALL=C tr -d '\n' | LC_ALL=C tr -d ' ')
     local style_count=$(echo "$commits" | grep -ciE '^style[(!:]' 2>/dev/null || echo "0")
-    style_count=$(echo "$style_count" | tr -d '\n' | tr -d ' ')
+    style_count=$(echo "$style_count" | LC_ALL=C tr -d '\n' | LC_ALL=C tr -d ' ')
 
     # Detect capitalization preference (first word after type)
     local lowercase_count=$(echo "$commits" | grep -cE '^[a-z]+(\([a-z]+\))?!?: [a-z]' 2>/dev/null || echo "0")
-    lowercase_count=$(echo "$lowercase_count" | tr -d '\n' | tr -d ' ')
+    lowercase_count=$(echo "$lowercase_count" | LC_ALL=C tr -d '\n' | LC_ALL=C tr -d ' ')
     local uppercase_count=$(echo "$commits" | grep -cE '^[a-z]+(\([a-z]+\))?!?: [A-Z]' 2>/dev/null || echo "0")
-    uppercase_count=$(echo "$uppercase_count" | tr -d '\n' | tr -d ' ')
+    uppercase_count=$(echo "$uppercase_count" | LC_ALL=C tr -d '\n' | LC_ALL=C tr -d ' ')
     local prefers_lowercase=true
     if [ "$uppercase_count" -gt "$lowercase_count" ] 2>/dev/null; then
         prefers_lowercase=false
@@ -904,7 +904,7 @@ analyze_commit_history() {
 
     # Detect breaking change usage
     local breaking_count=$(echo "$commits" | grep -cE '!:' 2>/dev/null || echo "0")
-    breaking_count=$(echo "$breaking_count" | tr -d '\n' | tr -d ' ')
+    breaking_count=$(echo "$breaking_count" | LC_ALL=C tr -d '\n' | LC_ALL=C tr -d ' ')
     local uses_breaking_changes=false
     if [ "$breaking_count" -gt 0 ]; then
         uses_breaking_changes=true
@@ -1458,10 +1458,25 @@ select_option() {
     done
 }
 
+# Show spinner while waiting
+show_spinner() {
+    local pid=$1
+    local message="$2"
+    local spinstr='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+    local delay=0.1
+
+    while kill -0 "$pid" 2>/dev/null; do
+        local temp=${spinstr#?}
+        printf "\r${GREEN}%s${NC} %c " "$message" "$spinstr" >&2
+        spinstr=$temp${spinstr%"$temp"}
+        sleep $delay
+    done
+    printf "\r%-${#message}s\r" " " >&2  # Clear the line
+}
+
 # Call Ollama API
 call_ollama() {
     local prompt="$1"
-    echo -e "${GREEN}Generating commit message with $OLLAMA_MODEL...${NC}"
 
     local model_escaped=$(escape_json "$OLLAMA_MODEL")
     local prompt_escaped=$(escape_json "$prompt")
@@ -1474,14 +1489,33 @@ call_ollama() {
         echo ""
     fi
 
-    local response=$(curl -s -X POST "$OLLAMA_HOST/api/generate" \
-        -H "Content-Type: application/json" \
-        -d "$json_payload")
+    # Run API call in background with spinner
+    local temp_response="/tmp/gh-commit-ai-response-$$"
+    (
+        curl -s -X POST "$OLLAMA_HOST/api/generate" \
+            -H "Content-Type: application/json" \
+            -d "$json_payload" > "$temp_response"
+    ) &
+    local api_pid=$!
+
+    show_spinner "$api_pid" "Generating commit message with $OLLAMA_MODEL..."
+    wait "$api_pid"
+
+    local response=$(cat "$temp_response")
+    rm -f "$temp_response"
 
     if [ "$VERBOSE" = "true" ]; then
         echo -e "${YELLOW}[Verbose] Response:${NC}"
         echo "$response" | jq '.' 2>/dev/null || echo "$response"
         echo ""
+    fi
+
+    # Check for errors
+    if echo "$response" | grep -q '"error"'; then
+        local error_msg=$(echo "$response" | grep -o '"error":"[^"]*"' | sed 's/"error":"//;s/"$//')
+        echo -e "${RED}Error from Ollama: $error_msg${NC}" >&2
+        echo -e "${YELLOW}Tip: Make sure Ollama is running (ollama serve) and the model is available (ollama list)${NC}" >&2
+        return 1
     fi
 
     # Extract commit message from response
@@ -1493,11 +1527,11 @@ call_anthropic() {
     local prompt="$1"
 
     if [ -z "$ANTHROPIC_API_KEY" ]; then
-        echo -e "${RED}Error: ANTHROPIC_API_KEY is not set${NC}"
+        echo -e "${RED}Error: ANTHROPIC_API_KEY is not set${NC}" >&2
+        echo -e "${YELLOW}Tip: Set your API key with: export ANTHROPIC_API_KEY=\"sk-ant-...\"${NC}" >&2
+        echo -e "${YELLOW}Get your API key from: https://console.anthropic.com/settings/keys${NC}" >&2
         exit 1
     fi
-
-    echo -e "${GREEN}Generating commit message with $ANTHROPIC_MODEL...${NC}"
 
     local prompt_escaped=$(escape_json "$prompt")
     local json_payload=$(printf '{"model":"%s","max_tokens":1024,"messages":[{"role":"user","content":"%s"}]}' "$ANTHROPIC_MODEL" "$prompt_escaped")
@@ -1510,16 +1544,41 @@ call_anthropic() {
         echo ""
     fi
 
-    local response=$(curl -s -X POST "https://api.anthropic.com/v1/messages" \
-        -H "Content-Type: application/json" \
-        -H "x-api-key: $ANTHROPIC_API_KEY" \
-        -H "anthropic-version: 2023-06-01" \
-        -d "$json_payload")
+    # Run API call in background with spinner
+    local temp_response="/tmp/gh-commit-ai-response-$$"
+    (
+        curl -s -X POST "https://api.anthropic.com/v1/messages" \
+            -H "Content-Type: application/json" \
+            -H "x-api-key: $ANTHROPIC_API_KEY" \
+            -H "anthropic-version: 2023-06-01" \
+            -d "$json_payload" > "$temp_response"
+    ) &
+    local api_pid=$!
+
+    show_spinner "$api_pid" "Generating commit message with $ANTHROPIC_MODEL..."
+    wait "$api_pid"
+
+    local response=$(cat "$temp_response")
+    rm -f "$temp_response"
 
     if [ "$VERBOSE" = "true" ]; then
         echo -e "${YELLOW}[Verbose] Response:${NC}"
         echo "$response" | jq '.' 2>/dev/null || echo "$response"
         echo ""
+    fi
+
+    # Check for errors
+    if echo "$response" | grep -q '"error"'; then
+        local error_type=$(echo "$response" | grep -o '"type":"[^"]*"' | head -1 | sed 's/"type":"//;s/"$//')
+        local error_msg=$(echo "$response" | grep -o '"message":"[^"]*"' | head -1 | sed 's/"message":"//;s/"$//')
+        echo -e "${RED}Error from Anthropic ($error_type): $error_msg${NC}" >&2
+
+        if [[ "$error_type" == *"authentication"* ]] || [[ "$error_msg" == *"API key"* ]]; then
+            echo -e "${YELLOW}Tip: Check your API key is valid and has credits${NC}" >&2
+        elif [[ "$error_type" == *"rate_limit"* ]]; then
+            echo -e "${YELLOW}Tip: You've hit the rate limit. Wait a moment and try again${NC}" >&2
+        fi
+        return 1
     fi
 
     # Extract token usage (global variables for cost tracking)
@@ -1536,11 +1595,11 @@ call_openai() {
     local prompt="$1"
 
     if [ -z "$OPENAI_API_KEY" ]; then
-        echo -e "${RED}Error: OPENAI_API_KEY is not set${NC}"
+        echo -e "${RED}Error: OPENAI_API_KEY is not set${NC}" >&2
+        echo -e "${YELLOW}Tip: Set your API key with: export OPENAI_API_KEY=\"sk-proj-...\"${NC}" >&2
+        echo -e "${YELLOW}Get your API key from: https://platform.openai.com/api-keys${NC}" >&2
         exit 1
     fi
-
-    echo -e "${GREEN}Generating commit message with $OPENAI_MODEL...${NC}"
 
     local prompt_escaped=$(escape_json "$prompt")
     local json_payload=$(printf '{"model":"%s","messages":[{"role":"user","content":"%s"}],"temperature":0.7}' "$OPENAI_MODEL" "$prompt_escaped")
@@ -1553,15 +1612,47 @@ call_openai() {
         echo ""
     fi
 
-    local response=$(curl -s -X POST "https://api.openai.com/v1/chat/completions" \
-        -H "Content-Type: application/json" \
-        -H "Authorization: Bearer $OPENAI_API_KEY" \
-        -d "$json_payload")
+    # Run API call in background with spinner
+    local temp_response="/tmp/gh-commit-ai-response-$$"
+    (
+        curl -s -X POST "https://api.openai.com/v1/chat/completions" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $OPENAI_API_KEY" \
+            -d "$json_payload" > "$temp_response"
+    ) &
+    local api_pid=$!
+
+    show_spinner "$api_pid" "Generating commit message with $OPENAI_MODEL..."
+    wait "$api_pid"
+
+    local response=$(cat "$temp_response")
+    rm -f "$temp_response"
 
     if [ "$VERBOSE" = "true" ]; then
         echo -e "${YELLOW}[Verbose] Response:${NC}"
         echo "$response" | jq '.' 2>/dev/null || echo "$response"
         echo ""
+    fi
+
+    # Check for errors
+    if echo "$response" | grep -q '"error"'; then
+        local error_type=$(echo "$response" | grep -o '"type":"[^"]*"' | head -1 | sed 's/"type":"//;s/"$//')
+        local error_msg=$(echo "$response" | grep -o '"message":"[^"]*"' | head -1 | sed 's/"message":"//;s/"$//')
+        local error_code=$(echo "$response" | grep -o '"code":"[^"]*"' | head -1 | sed 's/"code":"//;s/"$//')
+
+        echo -e "${RED}Error from OpenAI${NC}" >&2
+        [ -n "$error_code" ] && echo -e "${RED}Code: $error_code${NC}" >&2
+        [ -n "$error_type" ] && echo -e "${RED}Type: $error_type${NC}" >&2
+        [ -n "$error_msg" ] && echo -e "${RED}Message: $error_msg${NC}" >&2
+
+        if [[ "$error_code" == *"invalid_api_key"* ]] || [[ "$error_msg" == *"API key"* ]]; then
+            echo -e "${YELLOW}Tip: Check your API key is valid and has credits${NC}" >&2
+        elif [[ "$error_code" == *"rate_limit"* ]]; then
+            echo -e "${YELLOW}Tip: You've hit the rate limit. Wait a moment and try again${NC}" >&2
+        elif [[ "$error_code" == *"model_not_found"* ]]; then
+            echo -e "${YELLOW}Tip: The model '$OPENAI_MODEL' doesn't exist or you don't have access${NC}" >&2
+        fi
+        return 1
     fi
 
     # Extract token usage (global variables for cost tracking)
