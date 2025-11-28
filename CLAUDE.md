@@ -16,32 +16,39 @@ This is a GitHub CLI extension that generates AI-powered git commit messages usi
 
 ### Key Components in gh-commit-ai
 
-1. **Git Integration** (lines ~20-71): Validates git repository, checks for changes, gathers status and diff
+1. **Command-Line Argument Parsing** (lines ~22-64): Handles optional flags
+   - `--dry-run`: Generate message without committing (with optional file save)
+   - `--preview`: Generate and display message, then exit
+   - `--help, -h`: Show usage information
+2. **Git Integration** (lines ~66-116): Validates git repository, checks for changes, gathers status and diff
    - **Performance optimization**: Limits diff to configurable number of lines (default 200) via `DIFF_MAX_LINES`
    - Also captures `git diff --stat` for file-level overview without full content
-   - **Branch Intelligence** (lines ~50-71):
+   - **Branch Intelligence** (lines ~95-116):
      - Extracts current branch name
      - Detects ticket numbers using pattern `[A-Z][A-Z0-9]+-[0-9]+` (e.g., ABC-123, JIRA-456)
      - Suggests commit type based on branch prefix (feat/*, fix/*, docs/*, etc.)
      - Passes branch context to AI for better commit messages
-2. **Prompt Engineering** (lines ~50-101): Two-stage thinking prompt that:
+3. **Prompt Engineering** (lines ~118-191): Two-stage thinking prompt that:
    - **Stage 1**: AI identifies all significant changes and lists them as bullets
    - **Stage 2**: AI synthesizes those bullets into one concise summary line
    - **Output**: Summary line first (with type prefix and optional scope), then the detailed bullet list
    - **Scope support**: Conditionally includes scope instructions based on `USE_SCOPE` setting
    - This ensures the summary accurately captures ALL changes, not just some of them
-3. **JSON Handling** (~line 73-75): Pure bash JSON creation using `escape_json()` function to avoid `jq` dependency
-4. **Lowercase Enforcement** (~lines 77-110): `enforce_lowercase()` function that converts commit messages to lowercase while preserving:
+4. **JSON Handling** (~line 193-195): Pure bash JSON creation using `escape_json()` function to avoid `jq` dependency
+5. **Lowercase Enforcement** (~lines 197-235): `enforce_lowercase()` function that converts commit messages to lowercase while preserving:
    - Ticket numbers (e.g., ABC-123, JIRA-456)
    - Common acronyms (API, HTTP, JSON, JWT, SQL, etc.)
-5. **Provider Functions**:
+6. **Provider Functions**:
    - `call_ollama()`: Integrates with local Ollama API
    - `call_anthropic()`: Integrates with Anthropic Claude API (requires API key)
    - `call_openai()`: Integrates with OpenAI GPT API (requires API key)
-6. **Provider Routing**: Case statement that routes to the appropriate provider based on `AI_PROVIDER`
-7. **JSON Parsing**: Each provider function extracts responses using grep/sed to avoid `jq` dependency
-8. **Message Post-Processing**: Applies lowercase enforcement to ensure consistent formatting
-9. **Interactive Workflow**: User confirmation with options to accept, reject, or edit
+7. **Provider Routing**: Case statement that routes to the appropriate provider based on `AI_PROVIDER`
+8. **JSON Parsing**: Each provider function extracts responses using grep/sed to avoid `jq` dependency
+9. **Message Post-Processing**: Applies lowercase enforcement to ensure consistent formatting
+10. **Dry-Run and Preview Modes** (lines ~341-358):
+    - `--preview`: Shows message and exits immediately
+    - `--dry-run`: Shows message and optionally saves to `.git/COMMIT_MSG_<timestamp>` file
+11. **Interactive Workflow**: User confirmation with options to accept, reject, or edit
 
 ## Configuration
 
@@ -63,12 +70,44 @@ Environment variables (defined at lines 12-18):
 - `OPENAI_MODEL`: Model to use (default: `gpt-4o-mini`)
 
 **Commit Format:**
-- `USE_SCOPE`: Enable/disable conventional commit scopes (default: `true`)
+- `USE_SCOPE`: Enable/disable conventional commit scopes (default: `false`)
+  - When disabled (default), generates: `feat: add login`
   - When enabled, generates: `feat(auth): add login`
-  - When disabled, generates: `feat: add login`
 
 **Performance:**
 - `DIFF_MAX_LINES`: Maximum diff lines to send to AI (default: `200`) - Reduces token usage and speeds up generation
+
+## Command-Line Options
+
+The script supports several command-line flags:
+
+**`--dry-run`**
+- Generates commit message but doesn't commit
+- After showing the message, asks if you want to save it to a file
+- Saves to `.git/COMMIT_MSG_<timestamp>` if confirmed
+- Useful for testing or reviewing messages before committing
+
+**`--preview`**
+- Generates and displays the commit message
+- Exits immediately without any interaction
+- Useful for scripting or quick previews
+
+**`--help, -h`**
+- Shows usage information
+- Lists all available options and environment variables
+- Provides examples
+
+**Example usage:**
+```bash
+# Preview mode
+gh commit-ai --preview
+
+# Dry-run mode
+gh commit-ai --dry-run
+
+# Normal mode (default)
+gh commit-ai
+```
 
 ## Testing the Extension
 
@@ -113,18 +152,18 @@ The prompt uses a two-stage approach to ensure accurate summaries:
 
 **Mandatory Format:**
 
-With scope (default, `USE_SCOPE=true`):
+Without scope (default):
 ```
-<type>(<scope>): <concise summary capturing all changes (max 50 chars)>
+<type>: <concise summary capturing all changes (max 50 chars)>
 
 - <change 1>
 - <change 2>
 - <change 3>
 ```
 
-Without scope (`USE_SCOPE=false`):
+With scope (`USE_SCOPE=true`):
 ```
-<type>: <concise summary capturing all changes (max 50 chars)>
+<type>(<scope>): <concise summary capturing all changes (max 50 chars)>
 
 - <change 1>
 - <change 2>
@@ -142,7 +181,19 @@ Common scopes: `auth`, `api`, `ui`, `db`, `cli`, `docs`, `config`, `tests`, `dep
 6. Use imperative mood (add, fix, update - not added, fixed, updated)
 7. Use lowercase only (except acronyms and ticket numbers)
 
-**Example (with scope):**
+**Example (default, without scope):**
+```
+feat: add user authentication
+
+- implement JWT token generation
+- create login endpoint
+- add password hashing
+- create user session management
+```
+
+The summary "add user authentication" captures the overall purpose of all four changes listed below it.
+
+**Example (with scope enabled):**
 ```
 feat(auth): add user authentication
 
@@ -152,7 +203,7 @@ feat(auth): add user authentication
 - create user session management
 ```
 
-The summary "add user authentication" captures the overall purpose of all four changes listed below it, and the scope "(auth)" indicates this is authentication-related.
+When `USE_SCOPE=true`, the scope "(auth)" is added to indicate this is authentication-related.
 
 **Lowercase Enforcement:** Even if the AI generates uppercase letters, the `enforce_lowercase()` function automatically converts the message to lowercase while intelligently preserving:
 - Ticket number patterns (e.g., ABC-123, JIRA-456, EWQ-789)
@@ -196,7 +247,10 @@ Branch prefixes automatically suggest commit types:
 # - Ticket number: PROJ-456 (include this in commit)
 # - Suggested type: feat
 
-# Generated commit:
+# Generated commit (default, without scope):
+feat: add user authentication for PROJ-456
+
+# Generated commit (with USE_SCOPE=true):
 feat(auth): add user authentication for PROJ-456
 ```
 

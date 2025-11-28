@@ -17,7 +17,51 @@ ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"
 OPENAI_MODEL="${OPENAI_MODEL:-gpt-4o-mini}"
 OPENAI_API_KEY="${OPENAI_API_KEY:-}"
 DIFF_MAX_LINES="${DIFF_MAX_LINES:-200}"  # Limit diff lines for faster processing
-USE_SCOPE="${USE_SCOPE:-true}"  # Enable/disable conventional commit scopes
+USE_SCOPE="${USE_SCOPE:-false}"  # Enable/disable conventional commit scopes
+
+# Parse command-line arguments
+DRY_RUN=false
+PREVIEW=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --dry-run)
+            DRY_RUN=true
+            shift
+            ;;
+        --preview)
+            PREVIEW=true
+            shift
+            ;;
+        --help|-h)
+            echo "gh-commit-ai - AI-powered git commit message generator"
+            echo ""
+            echo "Usage: gh commit-ai [options]"
+            echo ""
+            echo "Options:"
+            echo "  --dry-run    Generate commit message without committing"
+            echo "  --preview    Generate and display message, then exit"
+            echo "  --help, -h   Show this help message"
+            echo ""
+            echo "Environment Variables:"
+            echo "  AI_PROVIDER      AI provider to use (ollama, anthropic, openai)"
+            echo "  USE_SCOPE        Enable/disable scopes (true/false)"
+            echo "  DIFF_MAX_LINES   Maximum diff lines to send to AI"
+            echo ""
+            echo "Examples:"
+            echo "  gh commit-ai"
+            echo "  gh commit-ai --dry-run"
+            echo "  gh commit-ai --preview"
+            echo "  USE_SCOPE=false gh commit-ai"
+            exit 0
+            ;;
+        *)
+            echo -e "${RED}Error: Unknown option $1${NC}"
+            echo "Use --help for usage information"
+            exit 1
+            ;;
+    esac
+done
 
 # Check if we're in a git repository
 if ! git rev-parse --git-dir > /dev/null 2>&1; then
@@ -293,6 +337,25 @@ COMMIT_MSG=$(enforce_lowercase "$COMMIT_MSG")
 # Show the generated commit message
 echo -e "\n${GREEN}Generated commit message:${NC}"
 echo -e "${YELLOW}$COMMIT_MSG${NC}\n"
+
+# Handle preview mode - just show and exit
+if [ "$PREVIEW" = true ]; then
+    exit 0
+fi
+
+# Handle dry-run mode - ask if user wants to save to file
+if [ "$DRY_RUN" = true ]; then
+    read -p "Save to file? (y/n): " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        COMMIT_FILE=".git/COMMIT_MSG_$(date +%s)"
+        echo "$COMMIT_MSG" > "$COMMIT_FILE"
+        echo -e "${GREEN}✓ Saved to $COMMIT_FILE${NC}"
+    else
+        echo -e "${YELLOW}Message not saved${NC}"
+    fi
+    exit 0
+fi
 
 # Ask for confirmation
 read -p "Use this commit message? (y/n/e to edit): " -n 1 -r

@@ -9,7 +9,7 @@ This document tracks potential improvements and features for gh-commit-ai.
 - [x] Format: `feat(auth): add user authentication`
 - [x] Format: `fix(api): resolve connection timeout`
 - [x] Format: `docs(readme): update installation steps`
-- [x] Allow configuration via `USE_SCOPE` environment variable (default: enabled)
+- [x] Allow configuration via `USE_SCOPE` environment variable (default: disabled for simplicity)
 - [ ] Allow configuration of custom scope names per project (future enhancement)
 
 ### 2. Branch Name Intelligence
@@ -20,9 +20,10 @@ This document tracks potential improvements and features for gh-commit-ai.
 - [x] Support multiple branch prefixes: feat, feature, fix, bugfix, hotfix, docs, style, refactor, test, chore
 
 ### 3. Dry-Run Mode
-- [ ] Implement `--dry-run` flag (generate message without committing)
-- [ ] Implement `--preview` flag (show message and exit)
-- [ ] Allow saving generated message to file
+- [x] Implement `--dry-run` flag (generate message without committing)
+- [x] Implement `--preview` flag (show message and exit)
+- [x] Allow saving generated message to file (in --dry-run mode)
+- [x] Add `--help` flag for usage information
 
 ### 4. Amend Support
 - [ ] Implement `--amend` flag to regenerate message for last commit

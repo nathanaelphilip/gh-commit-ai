@@ -60,8 +60,13 @@ gh extension remove commit-ai
 Navigate to any git repository and run:
 
 ```bash
-gh commit-ai
+gh commit-ai [options]
 ```
+
+**Options:**
+- `--dry-run` - Generate commit message without committing (optionally save to file)
+- `--preview` - Generate and display message, then exit (no interaction)
+- `--help, -h` - Show help message
 
 The extension will:
 1. Analyze your staged (or unstaged) changes
@@ -77,18 +82,18 @@ The extension will:
 
 **Commit Message Format:**
 
-With scope (default):
+Without scope (default):
 ```
-<type>(<scope>): <concise summary>
+<type>: <concise summary>
 
 - <change 1>
 - <change 2>
 - <change 3>
 ```
 
-Without scope:
+With scope (`USE_SCOPE=true`):
 ```
-<type>: <concise summary>
+<type>(<scope>): <concise summary>
 
 - <change 1>
 - <change 2>
@@ -150,16 +155,16 @@ gh commit-ai
 
 #### Commit Format Configuration
 
-- `USE_SCOPE`: Enable/disable conventional commit scopes (default: `true`)
+- `USE_SCOPE`: Enable/disable conventional commit scopes (default: `false`)
+  - When disabled (default): `feat: add login`
   - When enabled: `feat(auth): add login`
-  - When disabled: `feat: add login`
 
 ```bash
-# Disable scopes (simpler format)
-USE_SCOPE=false gh commit-ai
-
-# Enable scopes (default, more specific)
+# Enable scopes (more specific)
 USE_SCOPE=true gh commit-ai
+
+# Disable scopes (default, simpler format)
+USE_SCOPE=false gh commit-ai
 ```
 
 Common scopes: `auth`, `api`, `ui`, `db`, `cli`, `docs`, `config`, `tests`, `deps`
@@ -217,7 +222,7 @@ Analyzing changes...
 Generating commit message with gemma3:12b...
 
 Generated commit message:
-feat(auth): add user authentication
+feat: add user authentication
 
 - implement JWT token generation
 - create login and logout endpoints
@@ -239,7 +244,7 @@ Analyzing changes...
 Generating commit message with gemma3:12b...
 
 Generated commit message:
-feat(auth): add user login for ABC-123
+feat: add user login for ABC-123
 
 - implement login form validation
 - add session token management
@@ -253,6 +258,41 @@ Staging all changes...
 The extension automatically detected:
 - Ticket number "ABC-123" from branch name and included it in the commit
 - Type "feat" suggested from "feature/" branch prefix
+
+### Dry-Run Mode
+
+Generate a message without committing:
+
+```bash
+$ gh commit-ai --dry-run
+Analyzing changes...
+Generating commit message with gemma3:12b...
+
+Generated commit message:
+feat: add user authentication
+
+- implement JWT token generation
+- create login and logout endpoints
+
+Save to file? (y/n): y
+✓ Saved to .git/COMMIT_MSG_1234567890
+```
+
+### Preview Mode
+
+Generate and display message only (no interaction):
+
+```bash
+$ gh commit-ai --preview
+Analyzing changes...
+Generating commit message with gemma3:12b...
+
+Generated commit message:
+feat: add user authentication
+
+- implement JWT token generation
+- create login and logout endpoints
+```
 
 ## Troubleshooting
 
