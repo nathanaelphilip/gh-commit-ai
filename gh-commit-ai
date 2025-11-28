@@ -47,19 +47,26 @@ if [ -z "$GIT_DIFF" ]; then
 fi
 
 # Prepare prompt for Ollama
-PROMPT="Generate a git commit message in this EXACT format:
+PROMPT="Analyze these git changes and create a commit message.
 
-<type>: <summary max 50 chars>
+PROCESS:
+1. First, identify all significant changes and list them as bullets
+2. Then, synthesize those changes into ONE concise summary line
+3. Choose the right type: feat, fix, docs, style, refactor, test, or chore
+
+OUTPUT FORMAT (summary line MUST be first):
+<type>: <concise summary of all changes below>
 
 - <change 1>
 - <change 2>
 - <change 3>
+- <change 4>
 
 RULES:
-1. Type must be: feat, fix, docs, style, refactor, test, or chore
-2. Use lowercase only (except API, HTTP, JSON, JWT, SQL, ABC-123 style tickets)
-3. Use imperative mood (add/fix, not added/fixed)
-4. List all significant changes as bullets
+- Summary line: max 50 chars, describes the overall purpose
+- Use lowercase only (except API, HTTP, JSON, JWT, SQL, ABC-123 tickets)
+- Use imperative mood (add/fix not added/fixed)
+- The summary should capture the essence of all bullets below it
 
 Files changed:
 $GIT_STATUS
@@ -68,7 +75,9 @@ Stats:
 $GIT_STATS
 
 Diff sample:
-$GIT_DIFF"
+$GIT_DIFF
+
+Think: What are all the changes? Then: What's the one-line summary that captures all of them?"
 
 # Escape JSON strings (replace backslash, double quote, newline, carriage return, tab)
 escape_json() {

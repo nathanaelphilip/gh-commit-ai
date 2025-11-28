@@ -65,8 +65,10 @@ gh commit-ai
 
 The extension will:
 1. Analyze your staged (or unstaged) changes
-2. Generate a commit message using your chosen AI provider in the format:
-   - **Line 1**: Conventional commit prefix + concise summary (max 50 chars)
+2. Generate a commit message using your chosen AI provider:
+   - AI first identifies all significant changes
+   - Then synthesizes them into one concise summary line
+   - **Line 1**: Conventional commit prefix + summary (max 50 chars) that captures all changes
    - **Line 2**: Blank line
    - **Lines 3+**: Bulleted list of all significant changes
 3. Enforce lowercase formatting (preserving acronyms and ticket numbers)

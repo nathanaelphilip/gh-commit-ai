@@ -19,10 +19,11 @@ This is a GitHub CLI extension that generates AI-powered git commit messages usi
 1. **Git Integration** (lines ~20-47): Validates git repository, checks for changes, gathers status and diff
    - **Performance optimization**: Limits diff to configurable number of lines (default 200) via `DIFF_MAX_LINES`
    - Also captures `git diff --stat` for file-level overview without full content
-2. **Prompt Engineering** (lines ~49-71): Simplified, concise prompt that enforces conventional commit format with:
-   - Mandatory type prefix (feat/fix/docs/style/refactor/test/chore)
-   - Concise summary line (max 50 chars)
-   - Bulleted list of all changes
+2. **Prompt Engineering** (lines ~49-80): Two-stage thinking prompt that:
+   - **Stage 1**: AI identifies all significant changes and lists them as bullets
+   - **Stage 2**: AI synthesizes those bullets into one concise summary line
+   - **Output**: Summary line first (with type prefix), then the detailed bullet list
+   - This ensures the summary accurately captures ALL changes, not just some of them
 3. **JSON Handling** (~line 73-75): Pure bash JSON creation using `escape_json()` function to avoid `jq` dependency
 4. **Lowercase Enforcement** (~lines 77-110): `enforce_lowercase()` function that converts commit messages to lowercase while preserving:
    - Ticket numbers (e.g., ABC-123, JIRA-456)
@@ -92,11 +93,16 @@ AI_PROVIDER="openai" OPENAI_MODEL="gpt-4o" OPENAI_API_KEY="sk-proj-..." gh commi
 
 ## Commit Message Guidelines
 
-The prompt strictly enforces this format for ALL commits:
+The prompt uses a two-stage approach to ensure accurate summaries:
+
+**Two-Stage Generation Process:**
+1. **Stage 1 (Analysis)**: AI identifies and lists all significant changes as bullets
+2. **Stage 2 (Synthesis)**: AI creates a one-line summary that captures the essence of ALL changes
+3. **Output**: Summary line appears first, followed by the detailed bullets
 
 **Mandatory Format:**
 ```
-<type>: <concise summary (max 50 chars)>
+<type>: <concise summary capturing all changes (max 50 chars)>
 
 - <change 1>
 - <change 2>
@@ -105,11 +111,12 @@ The prompt strictly enforces this format for ALL commits:
 
 **Rules enforced by the prompt:**
 1. First line MUST start with: feat, fix, docs, style, refactor, test, or chore
-2. First line must be 50 characters or less
-3. Blank line after first line
-4. All significant changes listed as bullet points
-5. Use imperative mood (add, fix, update - not added, fixed, updated)
-6. Use lowercase only (except acronyms and ticket numbers)
+2. Summary must describe the overall purpose/theme of all changes below it
+3. First line must be 50 characters or less
+4. Blank line after first line
+5. All significant changes listed as bullet points
+6. Use imperative mood (add, fix, update - not added, fixed, updated)
+7. Use lowercase only (except acronyms and ticket numbers)
 
 **Example:**
 ```
@@ -120,6 +127,8 @@ feat: add user authentication
 - add password hashing
 - create user session management
 ```
+
+The summary "add user authentication" captures the overall purpose of all four changes listed below it.
 
 **Lowercase Enforcement:** Even if the AI generates uppercase letters, the `enforce_lowercase()` function automatically converts the message to lowercase while intelligently preserving:
 - Ticket number patterns (e.g., ABC-123, JIRA-456, EWQ-789)
