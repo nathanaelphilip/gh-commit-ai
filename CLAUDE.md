@@ -57,7 +57,45 @@ This is a GitHub CLI extension that generates AI-powered git commit messages usi
 
 ## Configuration
 
-Environment variables (defined at lines 12-18):
+### Configuration Files
+
+The extension supports YAML configuration files for persistent settings (implemented in lines 11-78):
+
+**Supported Config Files:**
+1. **Global config**: `~/.gh-commit-ai.yml` - Applies to all repositories
+2. **Local config**: `.gh-commit-ai.yml` - Repository-specific (overrides global)
+3. **Example template**: `.gh-commit-ai.example.yml` - Copy this to create your own
+
+**YAML Parser** (lines 11-56):
+- `parse_yaml_config()` - Pure bash YAML parser (no `yq` dependency)
+- Supports simple `key: value` format with comments
+- Maps YAML keys to `CONFIG_*` variables
+- Supported keys: `ai_provider`, `ollama_model`, `ollama_host`, `anthropic_model`, `openai_model`, `use_scope`, `diff_max_lines`
+
+**Configuration Loading** (lines 58-67):
+- Global config loaded first: `parse_yaml_config "$HOME/.gh-commit-ai.yml"`
+- Local config loaded second: `parse_yaml_config ".gh-commit-ai.yml"`
+- Local config values override global config values
+
+**Configuration Precedence** (lines 69-78):
+1. **Environment variables** (highest priority) - Override everything
+2. **Local config** (`.gh-commit-ai.yml` in repo root) - Override global config
+3. **Global config** (`~/.gh-commit-ai.yml` in home) - Override defaults
+4. **Built-in defaults** (lowest priority) - Fallback values
+
+Example: `AI_PROVIDER="${AI_PROVIDER:-${CONFIG_AI_PROVIDER:-ollama}}"`
+- First checks `AI_PROVIDER` env var
+- Falls back to `CONFIG_AI_PROVIDER` from config file
+- Falls back to `ollama` as default
+
+**Security Note:**
+- API keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) are NOT supported in config files
+- These must be set as environment variables for security reasons
+- Config files should not contain sensitive credentials
+
+### Environment Variables
+
+Environment variables take precedence over config files (defined at lines 69-78):
 
 **Provider Selection:**
 - `AI_PROVIDER`: Choose provider (default: `ollama`) - Options: `ollama`, `anthropic`, `openai`

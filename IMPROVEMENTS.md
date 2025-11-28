@@ -32,15 +32,18 @@ This document tracks potential improvements and features for gh-commit-ai.
 - [x] Use `git commit --amend` to rewrite commit
 
 ### 5. Configuration File
-- [ ] Support `.gh-commit-ai.yml` in repo root
-- [ ] Support project-specific settings:
-  - [ ] Default provider
-  - [ ] Default model
-  - [ ] Diff max lines
-  - [ ] Use scopes
-  - [ ] Default scope
-  - [ ] Custom ticket pattern
-- [ ] Support global config in `~/.gh-commit-ai.yml`
+- [x] Support `.gh-commit-ai.yml` in repo root
+- [x] Support project-specific settings:
+  - [x] Default provider
+  - [x] Default model
+  - [x] Diff max lines
+  - [x] Use scopes
+  - [ ] Default scope (future enhancement)
+  - [ ] Custom ticket pattern (future enhancement)
+- [x] Support global config in `~/.gh-commit-ai.yml`
+- [x] Pure bash YAML parser (no dependencies)
+- [x] Configuration precedence: env vars > local config > global config > defaults
+- [x] Example configuration file (.gh-commit-ai.example.yml)
 
 ### 6. Interactive Bullet Editing
 - [ ] Allow adding/removing individual bullets after generation

@@ -8,16 +8,74 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-# Configuration
-AI_PROVIDER="${AI_PROVIDER:-ollama}"  # Options: ollama, anthropic, openai
-OLLAMA_MODEL="${OLLAMA_MODEL:-gemma3:12b}"
-OLLAMA_HOST="${OLLAMA_HOST:-http://localhost:11434}"
-ANTHROPIC_MODEL="${ANTHROPIC_MODEL:-claude-3-5-sonnet-20241022}"
+# Simple YAML parser (supports only simple key: value pairs)
+parse_yaml_config() {
+    local config_file="$1"
+
+    if [ ! -f "$config_file" ]; then
+        return
+    fi
+
+    while IFS=: read -r key value; do
+        # Skip comments and empty lines
+        [[ "$key" =~ ^[[:space:]]*# ]] && continue
+        [[ -z "$key" ]] && continue
+
+        # Trim whitespace
+        key=$(echo "$key" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        value=$(echo "$value" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+
+        # Remove quotes from value
+        value=$(echo "$value" | sed 's/^["'\'']\|["'\'']$//g')
+
+        # Only set if not already set by environment variable
+        case "$key" in
+            ai_provider|AI_PROVIDER)
+                CONFIG_AI_PROVIDER="${CONFIG_AI_PROVIDER:-$value}"
+                ;;
+            ollama_model|OLLAMA_MODEL)
+                CONFIG_OLLAMA_MODEL="${CONFIG_OLLAMA_MODEL:-$value}"
+                ;;
+            ollama_host|OLLAMA_HOST)
+                CONFIG_OLLAMA_HOST="${CONFIG_OLLAMA_HOST:-$value}"
+                ;;
+            anthropic_model|ANTHROPIC_MODEL)
+                CONFIG_ANTHROPIC_MODEL="${CONFIG_ANTHROPIC_MODEL:-$value}"
+                ;;
+            openai_model|OPENAI_MODEL)
+                CONFIG_OPENAI_MODEL="${CONFIG_OPENAI_MODEL:-$value}"
+                ;;
+            use_scope|USE_SCOPE)
+                CONFIG_USE_SCOPE="${CONFIG_USE_SCOPE:-$value}"
+                ;;
+            diff_max_lines|DIFF_MAX_LINES)
+                CONFIG_DIFF_MAX_LINES="${CONFIG_DIFF_MAX_LINES:-$value}"
+                ;;
+        esac
+    done < "$config_file"
+}
+
+# Load configuration from files (global then local)
+# Global config (in user's home directory)
+if [ -f "$HOME/.gh-commit-ai.yml" ]; then
+    parse_yaml_config "$HOME/.gh-commit-ai.yml"
+fi
+
+# Local config (in current repository)
+if [ -f ".gh-commit-ai.yml" ]; then
+    parse_yaml_config ".gh-commit-ai.yml"
+fi
+
+# Configuration (priority: env vars > local config > global config > defaults)
+AI_PROVIDER="${AI_PROVIDER:-${CONFIG_AI_PROVIDER:-ollama}}"  # Options: ollama, anthropic, openai
+OLLAMA_MODEL="${OLLAMA_MODEL:-${CONFIG_OLLAMA_MODEL:-gemma3:12b}}"
+OLLAMA_HOST="${OLLAMA_HOST:-${CONFIG_OLLAMA_HOST:-http://localhost:11434}}"
+ANTHROPIC_MODEL="${ANTHROPIC_MODEL:-${CONFIG_ANTHROPIC_MODEL:-claude-3-5-sonnet-20241022}}"
 ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"
-OPENAI_MODEL="${OPENAI_MODEL:-gpt-4o-mini}"
+OPENAI_MODEL="${OPENAI_MODEL:-${CONFIG_OPENAI_MODEL:-gpt-4o-mini}}"
 OPENAI_API_KEY="${OPENAI_API_KEY:-}"
-DIFF_MAX_LINES="${DIFF_MAX_LINES:-200}"  # Limit diff lines for faster processing
-USE_SCOPE="${USE_SCOPE:-false}"  # Enable/disable conventional commit scopes
+DIFF_MAX_LINES="${DIFF_MAX_LINES:-${CONFIG_DIFF_MAX_LINES:-200}}"  # Limit diff lines for faster processing
+USE_SCOPE="${USE_SCOPE:-${CONFIG_USE_SCOPE:-false}}"  # Enable/disable conventional commit scopes
 
 # Parse command-line arguments
 DRY_RUN=false

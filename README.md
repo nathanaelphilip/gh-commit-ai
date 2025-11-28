@@ -112,7 +112,59 @@ With scope (`USE_SCOPE=true`):
 
 ### Configuration
 
-You can configure the extension using environment variables:
+You can configure the extension using configuration files or environment variables.
+
+#### Configuration Files
+
+The extension supports YAML configuration files for persistent settings:
+
+**Configuration priority (highest to lowest):**
+1. **Environment variables** - Override everything (e.g., `AI_PROVIDER=anthropic gh commit-ai`)
+2. **Local config** - `.gh-commit-ai.yml` in repository root
+3. **Global config** - `~/.gh-commit-ai.yml` in your home directory
+4. **Built-in defaults** - Fallback values
+
+**Creating a configuration file:**
+
+```bash
+# Copy the example file to your repo root
+cp .gh-commit-ai.example.yml .gh-commit-ai.yml
+
+# Or create a global config
+cp .gh-commit-ai.example.yml ~/.gh-commit-ai.yml
+```
+
+**Example configuration file:**
+
+```yaml
+# AI Provider Selection
+ai_provider: ollama  # Options: ollama, anthropic, openai
+
+# Ollama Configuration
+ollama_model: gemma3:12b
+ollama_host: http://localhost:11434
+
+# Anthropic Configuration
+anthropic_model: claude-3-5-sonnet-20241022
+
+# OpenAI Configuration
+openai_model: gpt-4o-mini
+
+# Commit Format
+use_scope: false  # Enable conventional commit scopes
+
+# Performance
+diff_max_lines: 200  # Max diff lines to send to AI
+```
+
+**Important:**
+- API keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) cannot be stored in config files for security
+- Set API keys as environment variables instead: `export ANTHROPIC_API_KEY="sk-ant-..."`
+- Environment variables always take precedence over config file values
+
+#### Environment Variables
+
+You can also configure using environment variables (these override config files):
 
 #### AI Provider Selection
 

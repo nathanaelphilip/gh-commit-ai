@@ -1,0 +1,54 @@
+# Example configuration for gh-commit-ai
+# Copy this file to .gh-commit-ai.yml in your repo root or ~/.gh-commit-ai.yml for global config
+#
+# Configuration priority (highest to lowest):
+# 1. Environment variables (e.g., AI_PROVIDER=anthropic gh commit-ai)
+# 2. Local config (.gh-commit-ai.yml in repo root)
+# 3. Global config (~/.gh-commit-ai.yml in home directory)
+# 4. Built-in defaults
+
+# AI Provider Selection
+# Options: ollama, anthropic, openai
+# Default: ollama
+ai_provider: ollama
+
+# Ollama Configuration
+# Model to use when ai_provider is ollama
+# Default: gemma3:12b
+ollama_model: gemma3:12b
+
+# Ollama API host
+# Default: http://localhost:11434
+ollama_host: http://localhost:11434
+
+# Anthropic Configuration
+# Model to use when ai_provider is anthropic
+# Default: claude-3-5-sonnet-20241022
+# Options: claude-3-5-sonnet-20241022, claude-3-opus-20240229, etc.
+anthropic_model: claude-3-5-sonnet-20241022
+
+# OpenAI Configuration
+# Model to use when ai_provider is openai
+# Default: gpt-4o-mini
+# Options: gpt-4o-mini, gpt-4o, gpt-4-turbo, etc.
+openai_model: gpt-4o-mini
+
+# Commit Format Configuration
+# Enable/disable conventional commit scopes
+# Default: false
+# Examples:
+#   false: feat: add user authentication
+#   true:  feat(auth): add user authentication
+use_scope: false
+
+# Performance Configuration
+# Maximum number of diff lines to send to AI
+# Default: 200
+# Lower values = faster, less context
+# Higher values = slower, more context
+diff_max_lines: 200
+
+# Note: API keys (ANTHROPIC_API_KEY, OPENAI_API_KEY) cannot be stored in config files
+# Set them as environment variables instead:
+#   export ANTHROPIC_API_KEY="sk-ant-..."
+#   export OPENAI_API_KEY="sk-proj-..."
