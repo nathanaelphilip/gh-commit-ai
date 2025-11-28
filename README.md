@@ -101,10 +101,20 @@ With scope (`USE_SCOPE=true`):
 - <change 3>
 ```
 
-**Branch Intelligence:** The extension automatically extracts context from your branch name:
-- **Ticket numbers**: `feature/ABC-123-login` → Includes "ABC-123" in commit message
-- **Type hints**: `fix/login-bug` → Suggests "fix" type automatically
-- **Supported patterns**: `feat/*`, `feature/*`, `fix/*`, `bugfix/*`, `hotfix/*`, `docs/*`, `style/*`, `refactor/*`, `test/*`, `chore/*`
+**Intelligent Type Detection:** The extension automatically suggests the commit type using:
+
+1. **Branch Intelligence** - Extracts context from your branch name:
+   - **Ticket numbers**: `feature/ABC-123-login` → Includes "ABC-123" in commit message
+   - **Type hints**: `fix/login-bug` → Suggests "fix" type automatically
+   - **Supported patterns**: `feat/*`, `feature/*`, `fix/*`, `bugfix/*`, `hotfix/*`, `docs/*`, `style/*`, `refactor/*`, `test/*`, `chore/*`
+
+2. **Smart Type Detection** - Analyzes your changes to suggest the appropriate type:
+   - **Documentation only**: Only `.md`, `.txt`, `README`, or `docs/` files → Suggests "docs"
+   - **Tests only**: Only test files (`.test.js`, `.spec.py`, `tests/`, etc.) → Suggests "test"
+   - **Version bumps**: Changes to `version` in `package.json`, `setup.py`, etc. → Suggests "chore"
+   - **Bug fixes**: Diff contains keywords like "fix", "bug", "error", "crash" → Suggests "fix"
+
+The AI uses these suggestions but can override them if the actual changes indicate a different type.
 
 **Note:** All commit messages are automatically converted to lowercase, with exceptions for:
 - Technical acronyms (API, HTTP, JSON, JWT, etc.)
@@ -391,6 +401,53 @@ Staging all changes...
 The extension automatically detected:
 - Ticket number "ABC-123" from branch name and included it in the commit
 - Type "feat" suggested from "feature/" branch prefix
+
+### Example with Smart Type Detection
+
+```bash
+# Scenario: Only documentation files changed
+$ git status
+modified:   README.md
+modified:   docs/installation.md
+new file:   CHANGELOG.md
+
+$ gh commit-ai
+Analyzing changes...
+Generating commit message with gemma3:12b...
+
+Generated commit message:
+docs: update installation guide and add changelog
+
+- update README installation steps
+- add detailed setup instructions
+- create initial CHANGELOG for version history
+
+Use this commit message? (y/n/e to edit): y
+```
+
+The extension detected that only documentation files changed and automatically suggested "docs" type.
+
+```bash
+# Scenario: Bug fix with keywords in diff
+$ git diff
++++ b/auth.js
+- if (user.password = hashedPassword) {
++ if (user.password === hashedPassword) {  // fix comparison bug
+
+$ gh commit-ai
+Analyzing changes...
+Generating commit message with gemma3:12b...
+
+Generated commit message:
+fix: correct password comparison in authentication
+
+- fix comparison operator bug in user validation
+- change assignment to equality check
+
+Use this commit message? (y/n/e to edit): y
+```
+
+The extension detected bug-related keywords ("fix", "bug") in the diff and suggested "fix" type.
 
 ### Dry-Run Mode
 

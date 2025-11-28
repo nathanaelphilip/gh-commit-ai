@@ -205,6 +205,91 @@ if [ -n "$BRANCH_NAME" ]; then
     esac
 fi
 
+# Smart type detection based on changed files and content
+detect_smart_type() {
+    local files="$1"
+    local diff="$2"
+
+    # Get list of changed files (extract filenames from git status)
+    local changed_files=$(echo "$files" | awk '{print $NF}')
+
+    # Count different file types
+    local doc_count=0
+    local test_count=0
+    local config_count=0
+    local code_count=0
+    local total_count=0
+
+    while IFS= read -r file; do
+        [ -z "$file" ] && continue
+        total_count=$((total_count + 1))
+
+        # Check for documentation files
+        if [[ "$file" =~ \.(md|txt|rst|adoc)$ ]] || [[ "$file" =~ ^docs?/ ]] || [[ "$file" =~ ^documentation/ ]] || [[ "$file" =~ README|CHANGELOG|LICENSE ]]; then
+            doc_count=$((doc_count + 1))
+        # Check for test files
+        elif [[ "$file" =~ ^tests?/ ]] || [[ "$file" =~ \.(test|spec)\. ]] || [[ "$file" =~ [_-](test|spec)\. ]] || [[ "$file" =~ __tests?__/ ]]; then
+            test_count=$((test_count + 1))
+        # Check for config files
+        elif [[ "$file" =~ \.(json|ya?ml|toml|ini|conf|config)$ ]] || [[ "$file" =~ ^\..*rc$ ]] || [[ "$file" =~ package\.json|setup\.py|Cargo\.toml|go\.mod ]]; then
+            config_count=$((config_count + 1))
+        else
+            code_count=$((code_count + 1))
+        fi
+    done <<< "$changed_files"
+
+    # Return early if no files detected
+    [ $total_count -eq 0 ] && return
+
+    # If only docs changed, suggest docs
+    if [ $doc_count -gt 0 ] && [ $test_count -eq 0 ] && [ $code_count -eq 0 ]; then
+        echo "docs"
+        return
+    fi
+
+    # If only tests changed, suggest test
+    if [ $test_count -gt 0 ] && [ $doc_count -eq 0 ] && [ $code_count -eq 0 ]; then
+        echo "test"
+        return
+    fi
+
+    # Check for version bumps in config files
+    if [ $config_count -gt 0 ]; then
+        if echo "$diff" | grep -qE '^\+.*"version".*:' || \
+           echo "$diff" | grep -qE '^\+.*version\s*='; then
+            echo "chore"
+            return
+        fi
+    fi
+
+    # Check for bug-related keywords in diff
+    if echo "$diff" | grep -qiE '^\+.*(fix|bug|issue|error|crash|problem|broken|incorrect|wrong)'; then
+        echo "fix"
+        return
+    fi
+
+    # No strong signal detected
+    echo ""
+}
+
+# Run smart type detection
+SMART_TYPE=$(detect_smart_type "$GIT_STATUS" "$GIT_DIFF")
+
+# Track where the suggestion came from for better prompting
+TYPE_SOURCE=""
+if [ -n "$SUGGESTED_TYPE" ]; then
+    TYPE_SOURCE="branch name"
+fi
+
+# Smart type detection can override if branch gives no suggestion
+if [ -z "$SUGGESTED_TYPE" ] && [ -n "$SMART_TYPE" ]; then
+    SUGGESTED_TYPE="$SMART_TYPE"
+    TYPE_SOURCE="file analysis"
+elif [ -n "$SMART_TYPE" ] && [ "$SMART_TYPE" != "$SUGGESTED_TYPE" ]; then
+    # Both exist but differ - mention both in context
+    TYPE_SOURCE="branch name (smart detection also suggests: $SMART_TYPE)"
+fi
+
 # Prepare branch context
 BRANCH_CONTEXT="Branch context:
 - Branch name: $BRANCH_NAME"
@@ -216,7 +301,7 @@ fi
 
 if [ -n "$SUGGESTED_TYPE" ]; then
     BRANCH_CONTEXT="$BRANCH_CONTEXT
-- Suggested type: $SUGGESTED_TYPE (based on branch name)"
+- Suggested type: $SUGGESTED_TYPE (based on $TYPE_SOURCE)"
 fi
 
 # Prepare closing instruction
@@ -599,6 +684,13 @@ track_cumulative_cost() {
     echo -e "${YELLOW}Today's total:${NC} \$$cumulative_display USD"
 }
 
+# Strip ANSI color codes from text
+strip_ansi_codes() {
+    local text="$1"
+    # Remove ANSI escape sequences
+    echo "$text" | sed 's/\x1b\[[0-9;]*m//g' | sed 's/\\033\[[0-9;]*m//g'
+}
+
 # Call Ollama API
 call_ollama() {
     local prompt="$1"
@@ -724,7 +816,9 @@ if [ "$DRY_RUN" = true ]; then
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         COMMIT_FILE=".git/COMMIT_MSG_$(date +%s)"
-        echo "$COMMIT_MSG" > "$COMMIT_FILE"
+        # Strip ANSI codes before saving
+        CLEAN_MSG=$(strip_ansi_codes "$COMMIT_MSG")
+        echo "$CLEAN_MSG" > "$COMMIT_FILE"
         echo -e "${GREEN}✓ Saved to $COMMIT_FILE${NC}"
     else
         echo -e "${YELLOW}Message not saved${NC}"
@@ -738,9 +832,12 @@ while true; do
     echo
 
     if [[ $REPLY =~ ^[Yy]$ ]]; then
+        # Strip any ANSI color codes before committing
+        CLEAN_MSG=$(strip_ansi_codes "$COMMIT_MSG")
+
         if [ "$AMEND" = true ]; then
             # Amend the last commit with new message
-            git commit --amend -m "$COMMIT_MSG"
+            git commit --amend -m "$CLEAN_MSG"
             echo -e "${GREEN}✓ Amended commit successfully!${NC}"
         else
             # Stage all changes if nothing is staged
@@ -750,17 +847,20 @@ while true; do
             fi
 
             # Commit with the generated message
-            git commit -m "$COMMIT_MSG"
+            git commit -m "$CLEAN_MSG"
             echo -e "${GREEN}✓ Committed successfully!${NC}"
         fi
         break
     elif [[ $REPLY =~ ^[Ee]$ ]]; then
+        # Strip any ANSI color codes before editing
+        CLEAN_MSG=$(strip_ansi_codes "$COMMIT_MSG")
+
         # Allow user to edit the message in editor
         if [ "$AMEND" = true ]; then
-            git commit --amend -e -m "$COMMIT_MSG"
+            git commit --amend -e -m "$CLEAN_MSG"
             echo -e "${GREEN}✓ Amended commit with edited message!${NC}"
         else
-            git commit -e -m "$COMMIT_MSG"
+            git commit -e -m "$CLEAN_MSG"
             echo -e "${GREEN}✓ Committed with edited message!${NC}"
         fi
         break
@@ -768,8 +868,8 @@ while true; do
         # Interactive editing mode
         EDITED_MSG=$(interactive_edit_message "$COMMIT_MSG")
         if [ $? -eq 0 ]; then
-            # User completed editing
-            COMMIT_MSG="$EDITED_MSG"
+            # User completed editing - strip any color codes that might have leaked
+            COMMIT_MSG=$(strip_ansi_codes "$EDITED_MSG")
             echo -e "\n${GREEN}Updated commit message:${NC}"
             echo -e "${YELLOW}$COMMIT_MSG${NC}\n"
             # Loop back to confirmation

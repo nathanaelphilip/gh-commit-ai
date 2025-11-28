@@ -28,11 +28,21 @@ This is a GitHub CLI extension that generates AI-powered git commit messages usi
      - Generates new message based on what was in that commit
    - **Performance optimization**: Limits diff to configurable number of lines (default 200) via `DIFF_MAX_LINES`
    - Also captures `git diff --stat` for file-level overview without full content
-   - **Branch Intelligence** (lines ~95-116):
+   - **Branch Intelligence** (lines ~186-206):
      - Extracts current branch name
      - Detects ticket numbers using pattern `[A-Z][A-Z0-9]+-[0-9]+` (e.g., ABC-123, JIRA-456)
      - Suggests commit type based on branch prefix (feat/*, fix/*, docs/*, etc.)
      - Passes branch context to AI for better commit messages
+   - **Smart Type Detection** (lines ~208-281):
+     - `detect_smart_type()`: Analyzes changed files and diff content
+     - Categorizes files: docs, tests, config, code
+     - Detects patterns:
+       - Documentation-only changes → "docs"
+       - Test-only changes → "test"
+       - Version bumps in config files → "chore"
+       - Bug keywords in diff (fix, bug, error, crash, etc.) → "fix"
+     - Smart suggestions can override branch suggestions when branch gives no hint
+     - When both exist, mentions both for AI to consider
 3. **Prompt Engineering** (lines ~118-191): Two-stage thinking prompt that:
    - **Stage 1**: AI identifies all significant changes and lists them as bullets
    - **Stage 2**: AI synthesizes those bullets into one concise summary line
@@ -407,17 +417,20 @@ Examples:
 - Input: "Feat: Add User Authentication With JWT" → Output: "feat: add user authentication with JWT"
 - Input: "Fix: Resolve API Connection Issue For EWQ-123" → Output: "fix: resolve API connection issue for EWQ-123"
 
-## Branch Intelligence
+## Intelligent Type Detection
 
-The script automatically extracts context from branch names to improve commit message accuracy:
+The extension uses two complementary systems to suggest the appropriate commit type:
+
+### 1. Branch Intelligence
+
+Extracts context from branch names to improve commit message accuracy.
 
 **Ticket Number Detection:**
 - Pattern: `[A-Z][A-Z0-9]+-[0-9]+` (e.g., ABC-123, JIRA-456, PROJ-789)
 - Example: Branch `feature/ABC-123-user-login` → Extracts "ABC-123"
 - The ticket number is passed to the AI and included in the commit message
 
-**Type Suggestion:**
-Branch prefixes automatically suggest commit types:
+**Type Suggestion from Branch Prefix:**
 - `feat/*` or `feature/*` → suggests "feat"
 - `fix/*`, `bugfix/*`, or `hotfix/*` → suggests "fix"
 - `docs/*` or `doc/*` → suggests "docs"
@@ -426,27 +439,75 @@ Branch prefixes automatically suggest commit types:
 - `test/*` or `tests/*` → suggests "test"
 - `chore/*` → suggests "chore"
 
-**How It Works:**
-1. Script extracts branch name using `git rev-parse --abbrev-ref HEAD`
-2. Searches for ticket number pattern in branch name
-3. Matches branch prefix against known patterns
-4. Passes this context to AI in the prompt
-5. AI uses this information to generate more accurate commit messages
+### 2. Smart Type Detection
 
-**Example:**
+Analyzes actual changes (files and diff content) to intelligently suggest commit types.
+
+**Architecture:**
+
+`detect_smart_type()` function (lines 209-273) performs multi-stage analysis:
+
+**Stage 1: File Classification**
+- Parses `git status` output to extract changed filenames
+- Categorizes each file into:
+  - **Documentation**: `.md`, `.txt`, `.rst`, `.adoc`, `docs/`, `README`, `CHANGELOG`, `LICENSE`
+  - **Tests**: `tests/`, `test/`, `*.test.*`, `*.spec.*`, `*_test.*`, `*_spec.*`, `__tests__/`
+  - **Config**: `.json`, `.yml`, `.yaml`, `.toml`, `.ini`, `.conf`, `.config`, `.*rc`, `package.json`, `setup.py`, `Cargo.toml`, `go.mod`
+  - **Code**: Everything else
+- Counts files in each category
+
+**Stage 2: Pattern Detection**
+1. **Documentation-only changes**:
+   - If `doc_count > 0` AND `test_count = 0` AND `code_count = 0`
+   - Returns "docs"
+
+2. **Test-only changes**:
+   - If `test_count > 0` AND `doc_count = 0` AND `code_count = 0`
+   - Returns "test"
+
+3. **Version bumps**:
+   - If config files changed AND diff contains `+"version"` or `+version =`
+   - Returns "chore"
+
+4. **Bug fixes**:
+   - If diff contains added lines with keywords: "fix", "bug", "issue", "error", "crash", "problem", "broken", "incorrect", "wrong"
+   - Uses case-insensitive grep: `grep -qiE '^\+.*(fix|bug|...)'`
+   - Returns "fix"
+
+**Stage 3: Integration with Branch Intelligence**
+- If branch gives no suggestion, smart type is used
+- If branch gives a suggestion, it takes precedence (branch is explicit user intent)
+- If both differ, prompt mentions both: "Suggested type: feat (based on branch name, smart detection also suggests: docs)"
+- AI can consider both suggestions and override if actual changes warrant it
+
+**Example Flow:**
 ```bash
-# Branch: feature/PROJ-456-add-authentication
-# AI receives:
-# - Branch name: feature/PROJ-456-add-authentication
-# - Ticket number: PROJ-456 (include this in commit)
-# - Suggested type: feat
+# Scenario 1: No branch hint, only docs changed
+Branch: main (no type hint)
+Files: README.md, docs/api.md
+Smart detection: "docs"
+→ Suggested type: docs (based on file analysis)
 
-# Generated commit (default, without scope):
-feat: add user authentication for PROJ-456
+# Scenario 2: Branch says "feat" but only docs changed
+Branch: feature/add-docs (suggests "feat")
+Files: README.md
+Smart detection: "docs"
+→ Suggested type: feat (based on branch name, smart detection also suggests: docs)
+# AI sees both and can choose appropriately
 
-# Generated commit (with USE_SCOPE=true):
-feat(auth): add user authentication for PROJ-456
+# Scenario 3: Branch says nothing, bug keywords found
+Branch: update-auth (no type hint)
+Files: auth.js
+Diff: "+ // fix authentication bug"
+Smart detection: "fix"
+→ Suggested type: fix (based on file analysis)
 ```
+
+**Benefits:**
+- Accurate suggestions even without branch naming conventions
+- Catches common patterns (docs-only, tests-only, version bumps)
+- Detects bug fixes from code comments and commit intent
+- Works alongside branch intelligence for best results
 
 ## Performance Optimizations
 

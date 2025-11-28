@@ -65,12 +65,16 @@ This document tracks potential improvements and features for gh-commit-ai.
 - [x] Fallback to awk when bc not available
 
 ### 8. Smart Type Detection
-- [ ] Analyze changes to suggest type automatically:
-  - [ ] Only docs files changed → `docs`
-  - [ ] Only test files changed → `test`
-  - [ ] Version bumps → `chore`
-  - [ ] Bug keywords in diff → `fix`
-- [ ] Make suggestions but allow override
+- [x] Analyze changes to suggest type automatically:
+  - [x] Only docs files changed → `docs`
+  - [x] Only test files changed → `test`
+  - [x] Version bumps → `chore`
+  - [x] Bug keywords in diff → `fix`
+- [x] Make suggestions but allow override
+- [x] File pattern recognition (docs, tests, config, code)
+- [x] Diff content analysis for bug-related keywords
+- [x] Integration with branch intelligence (mentions both when they differ)
+- [x] Works on main branch without branch naming conventions
 
 ### 9. Breaking Change Detection
 - [ ] Detect breaking changes in diff
