@@ -67,6 +67,7 @@ gh commit-ai [options]
 - `--dry-run` - Generate commit message without committing (optionally save to file)
 - `--preview` - Generate and display message, then exit (no interaction)
 - `--amend` - Regenerate message for the last commit and amend it
+- `--options` - Generate multiple message variations to choose from
 - `--help, -h` - Show help message
 
 The extension will:
@@ -549,6 +550,135 @@ Use this commit message? (y/n/e to edit): y
 ```
 
 **Note:** This will rewrite the last commit. Only use on commits that haven't been pushed, or be prepared to force push.
+
+### Multiple Options Mode
+
+Generate multiple commit message variations and choose your favorite:
+
+```bash
+$ gh commit-ai --options
+Analyzing changes...
+Generating commit message with gemma3:12b...
+
+Generated 3 commit message options:
+
+Option 1:
+feat: add user authentication
+
+- implement JWT token generation
+- create login endpoint
+
+Option 2:
+feat: add comprehensive user authentication system
+
+- implement JWT token generation and validation
+- create login and logout endpoints
+- add password hashing with bcrypt
+- create user session management
+- add authentication middleware
+
+Option 3:
+feat(auth): implement user authentication
+
+- add JWT-based authentication
+- create secure login flow
+- implement session management
+
+Select option (1-3), or 'n' to cancel: 2
+
+Selected commit message:
+feat: add comprehensive user authentication system
+
+- implement JWT token generation and validation
+- create login and logout endpoints
+- add password hashing with bcrypt
+- create user session management
+- add authentication middleware
+
+Use this commit message? (y/n/e to edit/i for interactive): y
+```
+
+**How it works:**
+- Option 1: Concise version with minimal details
+- Option 2: Detailed version with comprehensive bullet list
+- Option 3: Alternative perspective or different scope
+
+This is useful when you want to see different ways to describe your changes before committing.
+
+### Changelog Generation
+
+Generate a formatted changelog from your commit history:
+
+```bash
+$ gh commit-ai changelog
+Generating changelog...
+
+# Changelog
+
+## Unreleased
+
+### Date: 2025-11-28
+
+### ✨ Features
+
+- add user authentication system ([a1b2c3d](../../commit/a1b2c3d))
+- **api**: implement rate limiting ([e4f5g6h](../../commit/e4f5g6h))
+- add password reset functionality ([i7j8k9l](../../commit/i7j8k9l))
+
+### 🐛 Bug Fixes
+
+- **auth**: fix token expiration handling ([m0n1o2p](../../commit/m0n1o2p))
+- resolve memory leak in session management ([q3r4s5t](../../commit/q3r4s5t))
+
+### 📝 Documentation
+
+- update API documentation ([u6v7w8x](../../commit/u6v7w8x))
+- add authentication examples ([y9z0a1b](../../commit/y9z0a1b))
+```
+
+**Generate changelog since a specific version:**
+
+```bash
+$ gh commit-ai changelog --since v1.0.0
+Generating changelog...
+
+# Changelog
+
+## [1.0.0...HEAD]
+
+### Date: 2025-11-28
+
+### ✨ Features
+
+- add OAuth support ([c2d3e4f](../../commit/c2d3e4f))
+- implement 2FA authentication ([g5h6i7j](../../commit/g5h6i7j))
+
+### 🐛 Bug Fixes
+
+- fix login redirect issue ([k8l9m0n](../../commit/k8l9m0n))
+```
+
+**Features:**
+- **Parses conventional commits** - Automatically categorizes by type (feat, fix, docs, etc.)
+- **Breaking change detection** - Highlights breaking changes at the top with ⚠️
+- **Scoped entries** - Shows scope when present (e.g., `**auth**: add login`)
+- **Commit links** - Each entry links to the full commit
+- **Emoji categories** - Visual indicators for each section (✨ Features, 🐛 Bug Fixes, etc.)
+- **Flexible ranges** - Generate since any tag, commit, or relative ref (HEAD~10)
+
+**Supported categories:**
+- ⚠️ **BREAKING CHANGES** - Breaking changes (shown first)
+- ✨ **Features** - New features (feat)
+- 🐛 **Bug Fixes** - Bug fixes (fix)
+- 📝 **Documentation** - Documentation changes (docs)
+- ⚡ **Performance** - Performance improvements (perf)
+- ♻️ **Refactoring** - Code refactoring (refactor)
+- ✅ **Tests** - Test additions/changes (test)
+- 💄 **Style** - Style/formatting changes (style)
+- 🔧 **Chores** - Maintenance tasks (chore, build, ci)
+- **Other Changes** - Non-conventional commits
+
+**Note:** Works best with repositories that follow [Conventional Commits](https://www.conventionalcommits.org/) format.
 
 ## Testing
 

@@ -186,6 +186,13 @@ The script supports several command-line flags:
 - Uses `git commit --amend` to rewrite the commit message
 - **Warning:** Only use on commits that haven't been pushed, or be prepared to force push
 
+**`--options`**
+- Generates 3 different commit message variations
+- Variations: concise, detailed, and alternative perspective
+- Displays all options with numbers
+- User selects their preferred option
+- Useful for exploring different ways to describe changes
+
 **`--help, -h`**
 - Shows usage information
 - Lists all available options and environment variables
@@ -704,6 +711,115 @@ Automatically analyzes the repository's commit history to detect and match exist
 - Maintains consistency across team
 - Works with existing codebases
 - Can be disabled for standardized workflows
+
+## Changelog Generation
+
+The tool includes a `changelog` subcommand that generates formatted changelogs from conventional commit history.
+
+**Usage:**
+```bash
+gh commit-ai changelog [--since <ref>] [--format <format>]
+```
+
+**Architecture:**
+
+1. **Command Detection** (lines 93-132):
+   - Checks if first argument is "changelog"
+   - Sets `CHANGELOG_MODE=true`
+   - Parses changelog-specific flags (`--since`, `--format`)
+   - Has separate help text for changelog command
+
+2. **Execution Flow** (lines 437-441):
+   - Runs before main commit message generation
+   - Exits immediately after generating changelog
+   - Independent of normal commit workflow
+
+3. **Changelog Generation Function** (lines 84-313):
+   ```bash
+   generate_changelog() {
+       # 1. Build git log command
+       # 2. Parse commits with conventional format regex
+       # 3. Categorize by type (feat, fix, docs, etc.)
+       # 4. Detect breaking changes
+       # 5. Format output with emoji categories
+   }
+   ```
+
+**Parsing Logic:**
+
+1. **Conventional Commit Regex**:
+   ```bash
+   # With breaking change: feat!: description
+   ^([a-z]+)(\([a-z0-9_-]+\))?!:\ (.+)$
+
+   # Standard: feat(scope): description
+   ^([a-z]+)(\([a-z0-9_-]+\))?:\ (.+)$
+
+   # Non-conventional: any text
+   type="other"
+   ```
+
+2. **Breaking Change Detection**:
+   - `!` suffix in commit type (e.g., `feat!:`)
+   - `BREAKING CHANGE:` in commit body
+
+3. **Categorization**:
+   - Uses bash arrays for each category
+   - Breaking changes tracked separately
+   - Commit can appear in multiple categories (breaking + feature)
+
+4. **Output Format**:
+   ```markdown
+   # Changelog
+
+   ## [version...HEAD] or Unreleased
+
+   ### Date: YYYY-MM-DD
+
+   ### ⚠️ BREAKING CHANGES (if any)
+   - entry with link
+
+   ### ✨ Features
+   - entry with link
+   - **scope**: entry with link
+
+   ### 🐛 Bug Fixes
+   - entry with link
+
+   [... other categories ...]
+   ```
+
+**Supported Categories:**
+- ⚠️ BREAKING CHANGES (always first)
+- ✨ Features (feat, feature)
+- 🐛 Bug Fixes (fix)
+- 📝 Documentation (docs)
+- ⚡ Performance (perf, performance)
+- ♻️ Refactoring (refactor)
+- ✅ Tests (test, tests)
+- 💄 Style (style)
+- 🔧 Chores (chore, build, ci)
+- Other Changes (non-conventional)
+
+**Features:**
+- **Parses conventional commits** - Extracts type, scope, description
+- **Range support** - `--since v1.0.0`, `--since HEAD~10`
+- **Commit links** - Each entry links to full commit (format: `../../commit/hash`)
+- **Scope extraction** - Shows scope when present: `**api**: add endpoint`
+- **No merges** - Automatically excludes merge commits
+- **Pure bash** - No external dependencies, regex-based parsing
+
+**Limitations:**
+- Only shows conventional commits properly categorized
+- Non-conventional commits go to "Other Changes"
+- Relies on proper commit message format
+- No AI involvement (fast, deterministic)
+
+**Future Enhancements** (from IMPROVEMENTS.md):
+- Support different changelog formats (currently fixed to Keep a Changelog style)
+- Version range comparisons (e.g., v1.0.0...v2.0.0)
+- Output to file option
+- Template customization
 
 ## Performance Optimizations
 

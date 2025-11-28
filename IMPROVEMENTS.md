@@ -111,18 +111,29 @@ This document tracks potential improvements and features for gh-commit-ai.
 - [x] Passes insights to AI via prompt
 
 ### 11. Multiple Message Options
-- [ ] Generate 2-3 different commit messages
-- [ ] Let user choose between options:
+- [x] Generate 2-3 different commit messages
+- [x] Let user choose between options:
   - Option 1: Concise
   - Option 2: Detailed
-  - Option 3: With scope
-- [ ] Interactive selection menu
+  - Option 3: Alternative perspective
+- [x] Interactive selection menu
+- [x] Single API call with `---OPTION---` separator
+- [x] Numbered display of all variations
+- [x] User selection with validation (1-N or 'n' to cancel)
+- [x] Works with all providers (Ollama, Anthropic, OpenAI)
+- [x] Each option processed through lowercase enforcement
 
 ### 12. Changelog Generation
-- [ ] Implement `gh commit-ai changelog` command
-- [ ] Generate changelog from commit history
-- [ ] Support `--since` flag for version ranges
-- [ ] Support different changelog formats (Keep a Changelog, etc.)
+- [x] Implement `gh commit-ai changelog` command
+- [x] Generate changelog from commit history
+- [x] Support `--since` flag for version ranges
+- [x] Parse conventional commits and categorize by type
+- [x] Support breaking change detection
+- [x] Scope extraction and display
+- [x] Emoji category indicators
+- [x] Commit links in output
+- [x] Pure bash implementation with regex parsing
+- [ ] Support different changelog formats (Keep a Changelog is implemented, others future enhancement)
 
 ### 13. Pre-commit Hook Integration
 - [ ] Implement `gh commit-ai install-hook` command

@@ -81,10 +81,286 @@ DIFF_MAX_LINES="${DIFF_MAX_LINES:-${CONFIG_DIFF_MAX_LINES:-200}}"  # Limit diff 
 USE_SCOPE="${USE_SCOPE:-${CONFIG_USE_SCOPE:-false}}"  # Enable/disable conventional commit scopes
 LEARN_FROM_HISTORY="${LEARN_FROM_HISTORY:-${CONFIG_LEARN_FROM_HISTORY:-true}}"  # Enable/disable learning from commit history
 
+# Generate changelog from commit history
+generate_changelog() {
+    local since_ref="$1"
+    local format="$2"
+
+    # Build git log command
+    local log_cmd="git log --pretty=format:'%H|%s|%b' --no-merges"
+    if [ -n "$since_ref" ]; then
+        # Check if the reference exists
+        if ! git rev-parse "$since_ref" >/dev/null 2>&1; then
+            echo -e "${RED}Error: Reference '$since_ref' not found${NC}"
+            exit 1
+        fi
+        log_cmd="$log_cmd ${since_ref}..HEAD"
+    fi
+
+    # Get commits
+    local commits=$(eval "$log_cmd")
+
+    if [ -z "$commits" ]; then
+        echo -e "${YELLOW}No commits found${NC}"
+        exit 0
+    fi
+
+    # Initialize arrays for different types
+    local breaking_changes=()
+    local features=()
+    local fixes=()
+    local docs=()
+    local style=()
+    local refactor=()
+    local performance=()
+    local tests=()
+    local chores=()
+    local other=()
+
+    # Parse commits
+    while IFS='|' read -r hash subject body; do
+        # Parse conventional commit format
+        local type=""
+        local scope=""
+        local description=""
+        local is_breaking=false
+
+        # Check for breaking change indicator
+        if [[ "$subject" =~ ^([a-z]+)(\([a-z0-9_-]+\))?!:\ (.+)$ ]]; then
+            type="${BASH_REMATCH[1]}"
+            scope="${BASH_REMATCH[2]}"
+            description="${BASH_REMATCH[3]}"
+            is_breaking=true
+        elif [[ "$subject" =~ ^([a-z]+)(\([a-z0-9_-]+\))?:\ (.+)$ ]]; then
+            type="${BASH_REMATCH[1]}"
+            scope="${BASH_REMATCH[2]}"
+            description="${BASH_REMATCH[3]}"
+        else
+            # Not a conventional commit, skip or put in other
+            type="other"
+            description="$subject"
+        fi
+
+        # Remove parentheses from scope
+        scope="${scope#(}"
+        scope="${scope%)}"
+
+        # Check body for BREAKING CHANGE
+        if echo "$body" | grep -qiE '^BREAKING CHANGE:'; then
+            is_breaking=true
+        fi
+
+        # Format entry
+        local entry="- $description"
+        if [ -n "$scope" ]; then
+            entry="- **$scope**: $description"
+        fi
+        entry="$entry ([${hash:0:7}](../../commit/$hash))"
+
+        # Categorize by type
+        if [ "$is_breaking" = true ]; then
+            breaking_changes+=("$entry")
+        fi
+
+        case "$type" in
+            feat|feature)
+                features+=("$entry")
+                ;;
+            fix)
+                fixes+=("$entry")
+                ;;
+            docs)
+                docs+=("$entry")
+                ;;
+            style)
+                style+=("$entry")
+                ;;
+            refactor)
+                refactor+=("$entry")
+                ;;
+            perf|performance)
+                performance+=("$entry")
+                ;;
+            test|tests)
+                tests+=("$entry")
+                ;;
+            chore|build|ci)
+                chores+=("$entry")
+                ;;
+            *)
+                other+=("$entry")
+                ;;
+        esac
+    done <<< "$commits"
+
+    # Generate changelog based on format
+    echo ""
+    echo "# Changelog"
+    echo ""
+
+    # Determine version header
+    local version_header="Unreleased"
+    if [ -n "$since_ref" ]; then
+        # Try to get the next version from the since ref
+        local current_version="$since_ref"
+        version_header="[${current_version#v}...HEAD]"
+    fi
+
+    echo "## $version_header"
+    echo ""
+    echo "### Date: $(date +%Y-%m-%d)"
+    echo ""
+
+    # Breaking changes first (most important)
+    if [ ${#breaking_changes[@]} -gt 0 ]; then
+        echo "### ⚠️ BREAKING CHANGES"
+        echo ""
+        for entry in "${breaking_changes[@]}"; do
+            echo "$entry"
+        done
+        echo ""
+    fi
+
+    # Features
+    if [ ${#features[@]} -gt 0 ]; then
+        echo "### ✨ Features"
+        echo ""
+        for entry in "${features[@]}"; do
+            echo "$entry"
+        done
+        echo ""
+    fi
+
+    # Bug fixes
+    if [ ${#fixes[@]} -gt 0 ]; then
+        echo "### 🐛 Bug Fixes"
+        echo ""
+        for entry in "${fixes[@]}"; do
+            echo "$entry"
+        done
+        echo ""
+    fi
+
+    # Documentation
+    if [ ${#docs[@]} -gt 0 ]; then
+        echo "### 📝 Documentation"
+        echo ""
+        for entry in "${docs[@]}"; do
+            echo "$entry"
+        done
+        echo ""
+    fi
+
+    # Performance improvements
+    if [ ${#performance[@]} -gt 0 ]; then
+        echo "### ⚡ Performance"
+        echo ""
+        for entry in "${performance[@]}"; do
+            echo "$entry"
+        done
+        echo ""
+    fi
+
+    # Refactoring
+    if [ ${#refactor[@]} -gt 0 ]; then
+        echo "### ♻️ Refactoring"
+        echo ""
+        for entry in "${refactor[@]}"; do
+            echo "$entry"
+        done
+        echo ""
+    fi
+
+    # Tests
+    if [ ${#tests[@]} -gt 0 ]; then
+        echo "### ✅ Tests"
+        echo ""
+        for entry in "${tests[@]}"; do
+            echo "$entry"
+        done
+        echo ""
+    fi
+
+    # Style changes
+    if [ ${#style[@]} -gt 0 ]; then
+        echo "### 💄 Style"
+        echo ""
+        for entry in "${style[@]}"; do
+            echo "$entry"
+        done
+        echo ""
+    fi
+
+    # Chores
+    if [ ${#chores[@]} -gt 0 ]; then
+        echo "### 🔧 Chores"
+        echo ""
+        for entry in "${chores[@]}"; do
+            echo "$entry"
+        done
+        echo ""
+    fi
+
+    # Other
+    if [ ${#other[@]} -gt 0 ]; then
+        echo "### Other Changes"
+        echo ""
+        for entry in "${other[@]}"; do
+            echo "$entry"
+        done
+        echo ""
+    fi
+}
+
 # Parse command-line arguments
 DRY_RUN=false
 PREVIEW=false
 AMEND=false
+MULTIPLE_OPTIONS=false
+CHANGELOG_MODE=false
+CHANGELOG_SINCE=""
+CHANGELOG_FORMAT="keepachangelog"
+
+# Check for changelog subcommand
+if [ "$1" = "changelog" ]; then
+    CHANGELOG_MODE=true
+    shift
+
+    # Parse changelog-specific flags
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --since)
+                CHANGELOG_SINCE="$2"
+                shift 2
+                ;;
+            --format)
+                CHANGELOG_FORMAT="$2"
+                shift 2
+                ;;
+            --help|-h)
+                echo "gh-commit-ai changelog - Generate changelog from commit history"
+                echo ""
+                echo "Usage: gh commit-ai changelog [options]"
+                echo ""
+                echo "Options:"
+                echo "  --since <ref>   Generate changelog since tag/commit (e.g., v1.0.0)"
+                echo "  --format <fmt>  Changelog format (default: keepachangelog)"
+                echo "  --help, -h      Show this help message"
+                echo ""
+                echo "Examples:"
+                echo "  gh commit-ai changelog"
+                echo "  gh commit-ai changelog --since v1.0.0"
+                echo "  gh commit-ai changelog --since HEAD~10"
+                exit 0
+                ;;
+            *)
+                echo -e "${RED}Error: Unknown changelog option $1${NC}"
+                echo "Use 'gh commit-ai changelog --help' for usage information"
+                exit 1
+                ;;
+        esac
+    done
+fi
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -100,15 +376,25 @@ while [[ $# -gt 0 ]]; do
             AMEND=true
             shift
             ;;
+        --options)
+            MULTIPLE_OPTIONS=true
+            shift
+            ;;
         --help|-h)
             echo "gh-commit-ai - AI-powered git commit message generator"
             echo ""
             echo "Usage: gh commit-ai [options]"
+            echo "       gh commit-ai changelog [options]"
+            echo ""
+            echo "Commands:"
+            echo "  (default)    Generate commit message for current changes"
+            echo "  changelog    Generate changelog from commit history"
             echo ""
             echo "Options:"
             echo "  --dry-run    Generate commit message without committing"
             echo "  --preview    Generate and display message, then exit"
             echo "  --amend      Regenerate message for last commit"
+            echo "  --options    Generate multiple variations to choose from"
             echo "  --help, -h   Show this help message"
             echo ""
             echo "Interactive Options (when reviewing commit message):"
@@ -131,6 +417,8 @@ while [[ $# -gt 0 ]]; do
             echo "  gh commit-ai --dry-run"
             echo "  gh commit-ai --preview"
             echo "  gh commit-ai --amend"
+            echo "  gh commit-ai changelog"
+            echo "  gh commit-ai changelog --since v1.0.0"
             echo "  USE_SCOPE=false gh commit-ai"
             exit 0
             ;;
@@ -146,6 +434,13 @@ done
 if ! git rev-parse --git-dir > /dev/null 2>&1; then
     echo -e "${RED}Error: Not a git repository${NC}"
     exit 1
+fi
+
+# Handle changelog mode
+if [ "$CHANGELOG_MODE" = true ]; then
+    echo -e "${GREEN}Generating changelog...${NC}"
+    generate_changelog "$CHANGELOG_SINCE" "$CHANGELOG_FORMAT"
+    exit 0
 fi
 
 # Handle amend mode differently
@@ -547,6 +842,19 @@ BREAKING CHANGES:
 BREAKING CHANGE: Legacy /auth/login endpoint removed, use /auth/v2/login instead"
 fi
 
+# Prepare multiple options instruction if requested
+MULTIPLE_OPTIONS_INSTRUCTION=""
+if [ "$MULTIPLE_OPTIONS" = "true" ]; then
+    MULTIPLE_OPTIONS_INSTRUCTION="
+
+IMPORTANT: Generate 3 different variations of the commit message:
+1. CONCISE - Minimal details, shorter bullet list
+2. DETAILED - More comprehensive, longer bullet list
+3. ALTERNATIVE - Different perspective or scope
+
+Separate each variation with the marker: ---OPTION---"
+fi
+
 PROMPT="Analyze these git changes and create a commit message.
 
 PROCESS:
@@ -582,7 +890,7 @@ $GIT_STATS
 Diff sample:
 $GIT_DIFF
 
-$CLOSING_INSTRUCTION"
+$CLOSING_INSTRUCTION$MULTIPLE_OPTIONS_INSTRUCTION"
 
 # Escape JSON strings (replace backslash, double quote, newline, carriage return, tab)
 escape_json() {
@@ -910,6 +1218,69 @@ strip_ansi_codes() {
     echo "$text" | sed 's/\x1b\[[0-9;]*m//g' | sed 's/\\033\[[0-9;]*m//g'
 }
 
+# Parse multiple commit message options from AI response
+parse_multiple_options() {
+    local response="$1"
+
+    # Split by ---OPTION--- marker
+    # Store options in a temporary file
+    local options_file=$(mktemp)
+    echo "$response" | awk 'BEGIN{n=1} /---OPTION---/{n++; next} {print > "/tmp/option_"n".txt"}'
+
+    # If no markers found, treat as single option
+    if [ ! -f "/tmp/option_1.txt" ]; then
+        echo "$response" > "/tmp/option_1.txt"
+        echo "1"
+        return
+    fi
+
+    # Count how many options we have
+    local count=0
+    for f in /tmp/option_*.txt; do
+        [ -f "$f" ] && count=$((count + 1))
+    done
+
+    echo "$count"
+}
+
+# Display multiple options for user selection
+display_options() {
+    local num_options="$1"
+
+    echo -e "${GREEN}Generated ${num_options} commit message options:${NC}\n"
+
+    for i in $(seq 1 $num_options); do
+        local option_file="/tmp/option_${i}.txt"
+        if [ -f "$option_file" ]; then
+            local option_content=$(cat "$option_file" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            echo -e "${YELLOW}Option $i:${NC}"
+            echo -e "${YELLOW}$option_content${NC}\n"
+        fi
+    done
+}
+
+# Get user's option selection
+select_option() {
+    local num_options="$1"
+
+    while true; do
+        read -p "Select option (1-${num_options}), or 'n' to cancel: " -n 1 -r
+        echo
+
+        if [[ $REPLY =~ ^[Nn]$ ]]; then
+            echo "cancelled"
+            return
+        fi
+
+        if [[ $REPLY =~ ^[0-9]+$ ]] && [ "$REPLY" -ge 1 ] && [ "$REPLY" -le "$num_options" ]; then
+            echo "$REPLY"
+            return
+        fi
+
+        echo -e "${RED}Invalid selection. Please enter 1-${num_options} or 'n' to cancel.${NC}"
+    done
+}
+
 # Call Ollama API
 call_ollama() {
     local prompt="$1"
@@ -1008,20 +1379,68 @@ if [ -z "$COMMIT_MSG" ] || [ "$COMMIT_MSG" = "null" ]; then
     exit 1
 fi
 
-# Enforce lowercase (preserving acronyms and ticket numbers)
-COMMIT_MSG=$(enforce_lowercase "$COMMIT_MSG")
+# Handle multiple options mode
+if [ "$MULTIPLE_OPTIONS" = "true" ]; then
+    # Clean up any existing temp files
+    rm -f /tmp/option_*.txt 2>/dev/null
 
-# Show the generated commit message
-echo -e "\n${GREEN}Generated commit message:${NC}"
-echo -e "${YELLOW}$COMMIT_MSG${NC}\n"
+    # Parse options from response
+    num_options=$(parse_multiple_options "$COMMIT_MSG")
 
-# Show cost information for paid APIs
-if [ "$AI_PROVIDER" = "anthropic" ]; then
-    calculate_cost "anthropic" "$ANTHROPIC_MODEL" "$INPUT_TOKENS" "$OUTPUT_TOKENS"
+    # Enforce lowercase on each option
+    for i in $(seq 1 $num_options); do
+        if [ -f "/tmp/option_${i}.txt" ]; then
+            local option_content=$(cat "/tmp/option_${i}.txt")
+            local lowercased=$(enforce_lowercase "$option_content")
+            echo "$lowercased" > "/tmp/option_${i}.txt"
+        fi
+    done
+
+    # Display all options
     echo ""
-elif [ "$AI_PROVIDER" = "openai" ]; then
-    calculate_cost "openai" "$OPENAI_MODEL" "$INPUT_TOKENS" "$OUTPUT_TOKENS"
-    echo ""
+    display_options "$num_options"
+
+    # Show cost information for paid APIs
+    if [ "$AI_PROVIDER" = "anthropic" ]; then
+        calculate_cost "anthropic" "$ANTHROPIC_MODEL" "$INPUT_TOKENS" "$OUTPUT_TOKENS"
+        echo ""
+    elif [ "$AI_PROVIDER" = "openai" ]; then
+        calculate_cost "openai" "$OPENAI_MODEL" "$INPUT_TOKENS" "$OUTPUT_TOKENS"
+        echo ""
+    fi
+
+    # Get user selection
+    selected=$(select_option "$num_options")
+
+    if [ "$selected" = "cancelled" ]; then
+        echo -e "${YELLOW}Commit cancelled${NC}"
+        rm -f /tmp/option_*.txt 2>/dev/null
+        exit 0
+    fi
+
+    # Load selected option
+    COMMIT_MSG=$(cat "/tmp/option_${selected}.txt")
+    rm -f /tmp/option_*.txt 2>/dev/null
+
+    # Show selected message
+    echo -e "\n${GREEN}Selected commit message:${NC}"
+    echo -e "${YELLOW}$COMMIT_MSG${NC}\n"
+else
+    # Single message mode - enforce lowercase
+    COMMIT_MSG=$(enforce_lowercase "$COMMIT_MSG")
+
+    # Show the generated commit message
+    echo -e "\n${GREEN}Generated commit message:${NC}"
+    echo -e "${YELLOW}$COMMIT_MSG${NC}\n"
+
+    # Show cost information for paid APIs
+    if [ "$AI_PROVIDER" = "anthropic" ]; then
+        calculate_cost "anthropic" "$ANTHROPIC_MODEL" "$INPUT_TOKENS" "$OUTPUT_TOKENS"
+        echo ""
+    elif [ "$AI_PROVIDER" = "openai" ]; then
+        calculate_cost "openai" "$OPENAI_MODEL" "$INPUT_TOKENS" "$OUTPUT_TOKENS"
+        echo ""
+    fi
 fi
 
 # Handle preview mode - just show and exit
