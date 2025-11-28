@@ -995,3 +995,107 @@ Each provider function should:
 - Use `escape_json()` for JSON string escaping
 - Use pure bash/grep/sed for JSON parsing (no jq)
 - Return the commit message as output
+
+## Intelligent Diff Sampling
+
+### Overview
+
+For large commits, sending the entire diff to the AI can exceed token limits and increase costs. The `smart_sample_diff()` function intelligently samples large diffs to stay within limits while preserving the most important information.
+
+### Algorithm
+
+The sampling uses a priority-based system:
+
+**Priority 1: Structural Elements (MUST KEEP)**
+- File headers: `diff --git a/file b/file`
+- Index lines: `index abc123..def456`
+- File markers: `--- a/file`, `+++ b/file`
+- Chunk headers: `@@ -10,5 +10,8 @@`
+
+These are essential for diff structure and must always be included.
+
+**Priority 2: Function/Class Definitions (HIGH)**
+- Lines matching: `function`, `def `, `class `, `const `, `export `, `public `, `private `, `func `
+- Captured with: `grep -E '^\+.*(function |def |class |const |export |public |private |func )'`
+- Helps AI understand new functionality being added
+
+**Priority 3: Added Lines (MEDIUM-HIGH)**
+- All lines starting with `+` (except `+++` file markers)
+- Sampled evenly throughout the diff using modulo sampling
+- Target: ~40% of max_lines limit
+- Calculation: `sample_rate = total_added_lines / target_added + 1`
+
+**Priority 4: Context Lines (MEDIUM)**
+- Lines starting with a space (unchanged context)
+- Provides readability and structure
+- Limited to ~20% of max_lines
+- Only first N context lines are kept
+
+**Priority 5: Deleted Lines (LOW)**
+- Lines starting with `-` (except `---` file markers)
+- Only included if there's remaining space after priorities 1-4
+- Limited to remaining_space / 2
+- Deleted code is least important for understanding new changes
+
+### Implementation Details
+
+```bash
+smart_sample_diff() {
+    local full_diff="$1"
+    local max_lines="$2"
+    
+    # 1. Check if under limit (return full diff if so)
+    total_lines=$(echo "$full_diff" | wc -l)
+    if [ "$total_lines" -le "$max_lines" ]; then
+        echo "$full_diff"
+        return
+    fi
+    
+    # 2. Extract to temp file for processing
+    # 3. Build priority_file with high-priority lines
+    # 4. Sample added lines evenly (modulo sampling)
+    # 5. Add context lines for readability
+    # 6. Fill remaining space with deleted lines
+    # 7. Sort by line number, remove duplicates, limit to max_lines
+    # 8. Output sampled diff
+}
+```
+
+### Benefits
+
+1. **Function-aware**: Preserves function signatures even in large diffs
+2. **Even sampling**: Samples from entire diff, not just beginning
+3. **Prioritizes additions**: New code is more important than deleted code
+4. **Maintains structure**: Keeps file headers and chunk markers for valid diffs
+5. **Flexible**: Adapts to available line budget
+
+### Usage
+
+The function is automatically used in three places:
+
+1. **Amend mode**: `smart_sample_diff "$(git show HEAD)" "$DIFF_MAX_LINES"`
+2. **Staged changes**: `smart_sample_diff "$(git diff --cached)" "$DIFF_MAX_LINES"`
+3. **Unstaged changes**: `smart_sample_diff "$(git diff)" "$DIFF_MAX_LINES"`
+
+### Performance
+
+- **Time complexity**: O(n) where n = diff size
+- **Space complexity**: O(n) for temp files
+- **Overhead**: Minimal (<100ms for most diffs)
+- **Benefit**: Significant for large commits (1000+ line diffs)
+
+### Configuration
+
+Users can adjust the sampling via `DIFF_MAX_LINES`:
+
+```bash
+# Aggressive sampling (faster, cheaper)
+DIFF_MAX_LINES=50 gh commit-ai
+
+# Standard (default)
+DIFF_MAX_LINES=200 gh commit-ai
+
+# Generous (more context)
+DIFF_MAX_LINES=500 gh commit-ai
+```
+

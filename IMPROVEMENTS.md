@@ -148,10 +148,18 @@ This document tracks potential improvements and features for gh-commit-ai.
 - [x] Clean uninstall with safety checks
 
 ### 14. Better Token Limit Handling
-- [ ] Intelligently sample different parts of very large diffs
-- [ ] Prioritize added/changed lines over deleted lines
-- [ ] Focus on function/class names over implementation details
-- [ ] Smart truncation for massive commits
+- [x] Intelligently sample different parts of very large diffs
+- [x] Prioritize added/changed lines over deleted lines
+- [x] Focus on function/class names over implementation details
+- [x] Smart truncation for massive commits
+- [x] Priority-based sampling system:
+  - Priority 1: File headers and chunk markers (always kept)
+  - Priority 2: Function/class definitions (high priority)
+  - Priority 3: Added lines sampled evenly throughout (~40% of limit)
+  - Priority 4: Context lines for readability (~20% of limit)
+  - Priority 5: Deleted lines (low priority, only if room available)
+- [x] Maintains diff structure while reducing size
+- [x] Works with all three diff sources (amend, staged, unstaged)
 
 ### 15. Model Recommendations
 - [ ] Analyze commit size

@@ -257,11 +257,13 @@ Common scopes: `auth`, `api`, `ui`, `db`, `cli`, `docs`, `config`, `tests`, `dep
 #### Performance Configuration
 
 - `DIFF_MAX_LINES`: Maximum diff lines to send to AI (default: `200`)
+  - Uses **intelligent sampling** to prioritize important changes
   - Lower values = faster processing, especially for large commits
   - Increase if you need more context for very complex changes
+  - **Smart sampling** keeps function definitions and added lines even when truncating
 
 ```bash
-# For faster processing (fewer lines)
+# For faster processing (fewer lines, but still intelligent sampling)
 DIFF_MAX_LINES=100 gh commit-ai
 
 # For more context (more lines)
@@ -335,11 +337,16 @@ Enter new bullet (without leading dash): create user session management
 
 1. Checks if you're in a git repository
 2. Gathers git status and diff information
-3. Sends the changes to your chosen AI provider with a prompt to generate a conventional commit message
-4. Enforces lowercase formatting (while preserving acronyms and ticket numbers)
-5. Displays the generated message for your approval
-6. **Shows token usage and cost** (for Anthropic and OpenAI APIs)
-7. Commits with the approved message
+3. **Intelligently samples large diffs** to stay within token limits:
+   - Prioritizes function/class definitions and signatures
+   - Keeps added lines over deleted lines
+   - Samples evenly throughout the diff (not just the beginning)
+   - Maintains diff structure while reducing size
+4. Sends the changes to your chosen AI provider with a prompt to generate a conventional commit message
+5. Enforces lowercase formatting (while preserving acronyms and ticket numbers)
+6. Displays the generated message for your approval
+7. **Shows token usage and cost** (for Anthropic and OpenAI APIs)
+8. Commits with the approved message
 
 ### Advanced Options
 
