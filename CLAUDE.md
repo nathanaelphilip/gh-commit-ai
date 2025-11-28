@@ -87,10 +87,23 @@ AI_PROVIDER="openai" OPENAI_MODEL="gpt-4o" OPENAI_API_KEY="sk-proj-..." gh commi
 The prompt instructs the AI to generate messages that:
 - Follow conventional commit format (feat, fix, docs, style, refactor, test, chore)
 - Use imperative mood
-- Are concise (max 72 characters)
 - Use lowercase letters only (except acronyms and ticket numbers)
 - Focus on what changed, not how
 - Extract ticket information from branch names
+- **Adapt format based on commit size:**
+  - Small commits (1-3 files): Single-line message (max 72 characters)
+  - Large commits (multiple files/complex changes): Multi-line with summary + bullet points
+
+**Multi-line Format for Large Commits:**
+```
+feat: implement user authentication system
+
+- add JWT token generation and validation
+- create login and logout API endpoints
+- implement password hashing with bcrypt
+- add user session management
+- create authentication middleware
+```
 
 **Lowercase Enforcement:** Even if the AI generates uppercase letters, the `enforce_lowercase()` function automatically converts the message to lowercase while intelligently preserving:
 - Ticket number patterns (e.g., ABC-123, JIRA-456, EWQ-789)

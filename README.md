@@ -66,9 +66,12 @@ gh commit-ai
 The extension will:
 1. Analyze your staged (or unstaged) changes
 2. Generate a commit message using your chosen AI provider
-3. Enforce lowercase formatting (preserving acronyms and ticket numbers)
-4. Ask for your confirmation
-5. Commit the changes with the generated message
+3. Automatically adapt format based on commit size:
+   - **Small commits**: Single-line message
+   - **Large commits**: Multi-line with summary + bullet points for better clarity
+4. Enforce lowercase formatting (preserving acronyms and ticket numbers)
+5. Ask for your confirmation
+6. Commit the changes with the generated message
 
 **Note:** All commit messages are automatically converted to lowercase, with exceptions for:
 - Technical acronyms (API, HTTP, JSON, JWT, etc.)
@@ -147,7 +150,9 @@ When presented with a generated commit message, you can:
 5. Displays the generated message for your approval
 6. Commits with the approved message
 
-## Example
+## Examples
+
+### Simple Commit (1-3 files)
 
 ```bash
 $ gh commit-ai
@@ -156,6 +161,27 @@ Generating commit message with gemma3:12b...
 
 Generated commit message:
 feat: add user authentication with JWT tokens
+
+Use this commit message? (y/n/e to edit): y
+Staging all changes...
+✓ Committed successfully!
+```
+
+### Large Commit (multiple files/changes)
+
+```bash
+$ gh commit-ai
+Analyzing changes...
+Generating commit message with gemma3:12b...
+
+Generated commit message:
+feat: implement user authentication system
+
+- add JWT token generation and validation
+- create login and logout API endpoints
+- implement password hashing with bcrypt
+- add user session management
+- create authentication middleware
 
 Use this commit message? (y/n/e to edit): y
 Staging all changes...

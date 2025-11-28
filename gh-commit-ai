@@ -46,23 +46,34 @@ CRITICAL: All commit messages must use lowercase letters only. The ONLY exceptio
 - Acronyms (API, HTTP, JSON, etc.)
 - Ticket numbers (EWQ-123, JIRA-456, etc.)
 
-Examples of CORRECT format:
+For SMALL changes (1-3 files, simple modifications):
+Write a single-line commit message:
 - feat: add user authentication with JWT tokens
 - fix: resolve API connection timeout issue
-- chore: update dependencies for EWQ-123
 
-Examples of WRONG format (DO NOT USE):
-- feat: Add User Authentication (incorrect - uses capital letters)
-- fix: Resolve API Connection (incorrect - uses capital letters)
+For LARGE changes (multiple files, complex changes, multiple related modifications):
+Write a multi-line commit message with a summary line followed by bullet points:
+- First line: Brief summary (max 72 characters)
+- Blank line
+- Bullet points (3-6 items) describing key changes, each starting with '- '
 
-Based on the following git changes, write a single-line commit message. Requirements:
+Example of multi-line format:
+feat: implement user authentication system
+
+- add JWT token generation and validation
+- create login and logout API endpoints
+- implement password hashing with bcrypt
+- add user session management
+- create authentication middleware
+
+Based on the following git changes, write an appropriate commit message. Requirements:
 - Start with a type (feat, fix, docs, style, refactor, test, chore)
 - Use ONLY lowercase letters (except acronyms and ticket numbers)
 - Be in imperative mood (e.g., 'add' not 'added')
-- Be clear and concise (max 72 characters)
-- Do not include any explanation, just the commit message
+- Summary line should be clear and concise (max 72 characters)
+- For large commits, add bullet points describing major changes
 - Focus on what the change does, not how it does it
-- Analyze the git diff to understand the changes
+- Analyze the git diff to understand the scope and nature of changes
 - Extract ticket information from branch name if present
 
 Git Status:
@@ -71,7 +82,7 @@ $GIT_STATUS
 Git Diff:
 $GIT_DIFF
 
-Remember: Use lowercase only. Respond with ONLY the commit message, nothing else."
+Remember: Use lowercase only. If this is a large commit with multiple significant changes, use the multi-line format with bullet points."
 
 # Escape JSON strings (replace backslash, double quote, newline, carriage return, tab)
 escape_json() {
