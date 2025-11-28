@@ -48,6 +48,16 @@ use_scope: false
 # Higher values = slower, more context
 diff_max_lines: 200
 
+# History Learning
+# Learn from repository's commit history to match style
+# Default: true
+# Analyzes last 50 commits for patterns:
+# - Scope usage frequency
+# - Most common types
+# - Capitalization preferences
+# - Emoji usage
+learn_from_history: true
+
 # Note: API keys (ANTHROPIC_API_KEY, OPENAI_API_KEY) cannot be stored in config files
 # Set them as environment variables instead:
 #   export ANTHROPIC_API_KEY="sk-ant-..."

@@ -98,11 +98,17 @@ This document tracks potential improvements and features for gh-commit-ai.
   ```
 
 ### 10. Commit Message History Learning
-- [ ] Analyze last 50 commits in repo
-- [ ] Detect commit message patterns
-- [ ] Detect emoji usage patterns
-- [ ] Detect scope usage patterns
-- [ ] Match the repo's existing style automatically
+- [x] Analyze last 50 commits in repo
+- [x] Detect commit message patterns
+- [x] Detect emoji usage patterns
+- [x] Detect scope usage patterns
+- [x] Match the repo's existing style automatically
+- [x] Detect most common commit types
+- [x] Detect capitalization preferences
+- [x] Detect breaking change notation usage
+- [x] Configuration option to enable/disable (LEARN_FROM_HISTORY)
+- [x] Minimum 5 commits required for analysis
+- [x] Passes insights to AI via prompt
 
 ### 11. Multiple Message Options
 - [ ] Generate 2-3 different commit messages

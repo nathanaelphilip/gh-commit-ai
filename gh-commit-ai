@@ -51,6 +51,9 @@ parse_yaml_config() {
             diff_max_lines|DIFF_MAX_LINES)
                 CONFIG_DIFF_MAX_LINES="${CONFIG_DIFF_MAX_LINES:-$value}"
                 ;;
+            learn_from_history|LEARN_FROM_HISTORY)
+                CONFIG_LEARN_FROM_HISTORY="${CONFIG_LEARN_FROM_HISTORY:-$value}"
+                ;;
         esac
     done < "$config_file"
 }
@@ -76,6 +79,7 @@ OPENAI_MODEL="${OPENAI_MODEL:-${CONFIG_OPENAI_MODEL:-gpt-4o-mini}}"
 OPENAI_API_KEY="${OPENAI_API_KEY:-}"
 DIFF_MAX_LINES="${DIFF_MAX_LINES:-${CONFIG_DIFF_MAX_LINES:-200}}"  # Limit diff lines for faster processing
 USE_SCOPE="${USE_SCOPE:-${CONFIG_USE_SCOPE:-false}}"  # Enable/disable conventional commit scopes
+LEARN_FROM_HISTORY="${LEARN_FROM_HISTORY:-${CONFIG_LEARN_FROM_HISTORY:-true}}"  # Enable/disable learning from commit history
 
 # Parse command-line arguments
 DRY_RUN=false
@@ -359,6 +363,128 @@ BREAKING_RESULT=$(detect_breaking_changes "$GIT_DIFF")
 IS_BREAKING=$(echo "$BREAKING_RESULT" | cut -d'|' -f1)
 BREAKING_REASON=$(echo "$BREAKING_RESULT" | cut -d'|' -f2)
 
+# Analyze commit history to learn repository patterns
+analyze_commit_history() {
+    # Check if we should learn from history
+    if [ "$LEARN_FROM_HISTORY" != "true" ]; then
+        echo ""
+        return
+    fi
+
+    # Get last 50 commits (or less if repo is new)
+    local commits=$(git log --pretty=format:"%s" -n 50 2>/dev/null)
+
+    if [ -z "$commits" ]; then
+        echo ""
+        return
+    fi
+
+    local total_commits=$(echo "$commits" | wc -l | tr -d ' ')
+
+    # Return early if very few commits
+    if [ "$total_commits" -lt 5 ]; then
+        echo ""
+        return
+    fi
+
+    # Detect emoji usage
+    local emoji_count=$(echo "$commits" | grep -cE '[\x{1F600}-\x{1F64F}\x{1F300}-\x{1F5FF}\x{1F680}-\x{1F6FF}\x{1F1E0}-\x{1F1FF}\x{2600}-\x{26FF}\x{2700}-\x{27BF}]|:[a-z_]+:' 2>/dev/null || echo "0")
+    local uses_emoji=false
+    if [ "$emoji_count" -gt 0 ]; then
+        uses_emoji=true
+    fi
+
+    # Detect scope usage (look for parentheses after type)
+    local scope_count=$(echo "$commits" | grep -cE '^[a-z]+\([a-z]+\):' 2>/dev/null || echo "0")
+    scope_count=$(echo "$scope_count" | tr -d '\n' | tr -d ' ')
+    local uses_scopes=false
+    local scope_percentage=0
+    if [ "$scope_count" -gt 0 ] 2>/dev/null; then
+        uses_scopes=true
+        scope_percentage=$((scope_count * 100 / total_commits))
+    fi
+
+    # Detect conventional commit types used
+    local feat_count=$(echo "$commits" | grep -ciE '^feat[(!:]' 2>/dev/null || echo "0")
+    feat_count=$(echo "$feat_count" | tr -d '\n' | tr -d ' ')
+    local fix_count=$(echo "$commits" | grep -ciE '^fix[(!:]' 2>/dev/null || echo "0")
+    fix_count=$(echo "$fix_count" | tr -d '\n' | tr -d ' ')
+    local docs_count=$(echo "$commits" | grep -ciE '^docs[(!:]' 2>/dev/null || echo "0")
+    docs_count=$(echo "$docs_count" | tr -d '\n' | tr -d ' ')
+    local chore_count=$(echo "$commits" | grep -ciE '^chore[(!:]' 2>/dev/null || echo "0")
+    chore_count=$(echo "$chore_count" | tr -d '\n' | tr -d ' ')
+    local refactor_count=$(echo "$commits" | grep -ciE '^refactor[(!:]' 2>/dev/null || echo "0")
+    refactor_count=$(echo "$refactor_count" | tr -d '\n' | tr -d ' ')
+    local test_count=$(echo "$commits" | grep -ciE '^test[(!:]' 2>/dev/null || echo "0")
+    test_count=$(echo "$test_count" | tr -d '\n' | tr -d ' ')
+    local style_count=$(echo "$commits" | grep -ciE '^style[(!:]' 2>/dev/null || echo "0")
+    style_count=$(echo "$style_count" | tr -d '\n' | tr -d ' ')
+
+    # Detect capitalization preference (first word after type)
+    local lowercase_count=$(echo "$commits" | grep -cE '^[a-z]+(\([a-z]+\))?!?: [a-z]' 2>/dev/null || echo "0")
+    lowercase_count=$(echo "$lowercase_count" | tr -d '\n' | tr -d ' ')
+    local uppercase_count=$(echo "$commits" | grep -cE '^[a-z]+(\([a-z]+\))?!?: [A-Z]' 2>/dev/null || echo "0")
+    uppercase_count=$(echo "$uppercase_count" | tr -d '\n' | tr -d ' ')
+    local prefers_lowercase=true
+    if [ "$uppercase_count" -gt "$lowercase_count" ] 2>/dev/null; then
+        prefers_lowercase=false
+    fi
+
+    # Detect breaking change usage
+    local breaking_count=$(echo "$commits" | grep -cE '!:' 2>/dev/null || echo "0")
+    breaking_count=$(echo "$breaking_count" | tr -d '\n' | tr -d ' ')
+    local uses_breaking_changes=false
+    if [ "$breaking_count" -gt 0 ]; then
+        uses_breaking_changes=true
+    fi
+
+    # Build history insights
+    local insights="Repository commit style (based on last $total_commits commits):"
+
+    # Report scope usage
+    if [ "$uses_scopes" = "true" ]; then
+        insights="$insights\n- Uses scopes in ${scope_percentage}% of commits"
+    else
+        insights="$insights\n- Rarely uses scopes"
+    fi
+
+    # Report type preferences
+    local most_common_type="feat"
+    local max_count=$feat_count
+    [ "$fix_count" -gt "$max_count" ] 2>/dev/null && most_common_type="fix" && max_count=$fix_count
+    [ "$docs_count" -gt "$max_count" ] 2>/dev/null && most_common_type="docs" && max_count=$docs_count
+    [ "$chore_count" -gt "$max_count" ] 2>/dev/null && most_common_type="chore" && max_count=$chore_count
+
+    insights="$insights\n- Most common type: $most_common_type"
+
+    # Report capitalization
+    if [ "$prefers_lowercase" = "true" ]; then
+        insights="$insights\n- Prefers lowercase commit messages"
+    else
+        insights="$insights\n- Uses capitalized commit messages"
+    fi
+
+    # Report emoji usage
+    if [ "$uses_emoji" = "true" ]; then
+        insights="$insights\n- Sometimes uses emojis"
+    fi
+
+    # Report breaking change usage
+    if [ "$uses_breaking_changes" = "true" ]; then
+        insights="$insights\n- Uses breaking change notation (!) when appropriate"
+    fi
+
+    insights="$insights\n\nMatch this repository's style in your commit message."
+
+    echo -e "$insights"
+}
+
+# Run history analysis if enabled
+HISTORY_INSIGHTS=""
+if [ "$LEARN_FROM_HISTORY" = "true" ]; then
+    HISTORY_INSIGHTS=$(analyze_commit_history)
+fi
+
 # Prepare branch context
 BRANCH_CONTEXT="Branch context:
 - Branch name: $BRANCH_NAME"
@@ -444,6 +570,8 @@ RULES:
 $SCOPE_EXAMPLES
 
 $BRANCH_CONTEXT
+
+$HISTORY_INSIGHTS
 
 Files changed:
 $GIT_STATUS

@@ -52,6 +52,17 @@ This is a GitHub CLI extension that generates AI-powered git commit messages usi
        - Major version bumps: 1.x.x → 2.0.0
        - Signature changes: Function parameters reduced
      - Integrates with prompt to add `!` suffix and BREAKING CHANGE footer
+   - **Commit History Learning** (lines ~366-475):
+     - `analyze_commit_history()`: Analyzes last 50 commits to detect patterns
+     - Can be disabled with `LEARN_FROM_HISTORY=false`
+     - Detects:
+       - Emoji usage patterns
+       - Scope usage frequency (percentage)
+       - Most common commit types
+       - Capitalization preferences
+       - Breaking change notation usage
+     - Builds insights string passed to AI in prompt
+     - Requires minimum 5 commits in repository
 3. **Prompt Engineering** (lines ~118-191): Two-stage thinking prompt that:
    - **Stage 1**: AI identifies all significant changes and lists them as bullets
    - **Stage 2**: AI synthesizes those bullets into one concise summary line
@@ -586,6 +597,113 @@ BREAKING CHANGE: oldLogin() function removed, use login() with email instead
 - Ensures proper conventional commit format
 - Helps maintain semantic versioning discipline
 - AI can still override if detection is incorrect
+
+### 4. Commit History Learning
+
+Automatically analyzes the repository's commit history to detect and match existing commit message patterns.
+
+**Architecture:**
+
+`analyze_commit_history()` function (lines 367-469) performs statistical analysis of recent commits:
+
+**Data Collection:**
+- Retrieves last 50 commits using `git log --pretty=format:"%s" -n 50`
+- Returns empty if disabled (`LEARN_FROM_HISTORY=false`)
+- Requires minimum 5 commits (exits early for new repos)
+
+**Pattern Detection:**
+
+1. **Emoji Usage**:
+   - Searches for Unicode emoji characters or `:emoji:` shortcodes
+   - Counts occurrences across all commits
+   - Reports if repository uses emojis
+
+2. **Scope Usage**:
+   - Pattern: `^[a-z]+\([a-z]+\):`  (e.g., `feat(auth):`)
+   - Calculates percentage of commits using scopes
+   - Example: "Uses scopes in 75% of commits"
+
+3. **Type Preferences**:
+   - Counts usage of each conventional commit type
+   - Types: feat, fix, docs, chore, refactor, test, style
+   - Identifies most common type
+   - Case-insensitive detection with `grep -ciE`
+
+4. **Capitalization Preferences**:
+   - Compares lowercase vs uppercase first words
+   - Pattern lowercase: `^[a-z]+(...)?!?: [a-z]`
+   - Pattern uppercase: `^[a-z]+(...)?!?: [A-Z]`
+   - Reports which style is preferred
+
+5. **Breaking Change Notation**:
+   - Detects `!:` pattern in commit messages
+   - Notes if repository uses breaking change markers
+   - Example: `feat!: redesign API`
+
+**Integration:**
+
+- Stores insights in `HISTORY_INSIGHTS` variable
+- Inserted into prompt between `BRANCH_CONTEXT` and file changes
+- Format:
+  ```
+  Repository commit style (based on last 50 commits):
+  - Uses scopes in 60% of commits
+  - Most common type: feat
+  - Prefers lowercase commit messages
+  - Sometimes uses emojis
+  - Uses breaking change notation (!) when appropriate
+
+  Match this repository's style in your commit message.
+  ```
+
+**Configuration:**
+
+- Enable/disable: `LEARN_FROM_HISTORY` (default: `true`)
+- Can be set via:
+  - Environment variable: `LEARN_FROM_HISTORY=false gh commit-ai`
+  - Config file: `learn_from_history: false`
+- When disabled, function returns empty string
+
+**Example Scenarios:**
+
+1. **Repository with scope convention**:
+   ```
+   Last 50 commits:
+   - feat(api): add endpoints
+   - fix(ui): resolve button issue
+   - docs(readme): update setup
+
+   → AI learns: "Uses scopes in 100% of commits"
+   → Generated: feat(auth): add user login
+   ```
+
+2. **Repository without scopes**:
+   ```
+   Last 50 commits:
+   - feat: add user authentication
+   - fix: resolve database connection
+   - docs: update readme
+
+   → AI learns: "Rarely uses scopes"
+   → Generated: feat: add user login
+   ```
+
+3. **Repository with emojis**:
+   ```
+   Last 50 commits:
+   - ✨ feat: add new feature
+   - 🐛 fix: resolve bug
+
+   → AI learns: "Sometimes uses emojis"
+   → May generate: ✨ feat: add user login
+   ```
+
+**Benefits:**
+- Automatic adaptation to repository conventions
+- No manual style guide configuration needed
+- Maintains consistency across team
+- Works with existing codebases
+- Can be disabled for standardized workflows
 
 ## Performance Optimizations
 

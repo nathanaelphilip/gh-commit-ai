@@ -121,6 +121,15 @@ With scope (`USE_SCOPE=true`):
    - **Signature changes**: Function parameters reduced or changed
    - **Format**: Adds `!` after type and includes `BREAKING CHANGE:` footer
 
+4. **Commit History Learning** - Learns from your repository's commit history to match its style:
+   - **Scope usage**: Detects if the repo uses scopes and how frequently
+   - **Type preferences**: Identifies most commonly used types
+   - **Capitalization**: Matches uppercase vs lowercase preferences
+   - **Emoji usage**: Detects and matches emoji patterns
+   - **Breaking changes**: Notes if the repo uses `!` notation
+   - Analyzes last 50 commits (minimum 5 commits required)
+   - Can be disabled with `LEARN_FROM_HISTORY=false`
+
 The AI uses these suggestions but can override them if the actual changes indicate a different type.
 
 **Note:** All commit messages are automatically converted to lowercase, with exceptions for:
