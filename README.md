@@ -66,6 +66,7 @@ gh commit-ai [options]
 **Options:**
 - `--dry-run` - Generate commit message without committing (optionally save to file)
 - `--preview` - Generate and display message, then exit (no interaction)
+- `--amend` - Regenerate message for the last commit and amend it
 - `--help, -h` - Show help message
 
 The extension will:
@@ -293,6 +294,28 @@ feat: add user authentication
 - implement JWT token generation
 - create login and logout endpoints
 ```
+
+### Amend Mode
+
+Regenerate the commit message for your last commit:
+
+```bash
+$ gh commit-ai --amend
+Analyzing last commit...
+Generating commit message with gemma3:12b...
+
+Generated commit message:
+feat: add user authentication
+
+- implement JWT token generation
+- create login and logout endpoints
+- add password hashing
+
+Use this commit message? (y/n/e to edit): y
+✓ Amended commit successfully!
+```
+
+**Note:** This will rewrite the last commit. Only use on commits that haven't been pushed, or be prepared to force push.
 
 ## Troubleshooting
 

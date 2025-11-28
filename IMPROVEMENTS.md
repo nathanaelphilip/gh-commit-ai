@@ -26,8 +26,10 @@ This document tracks potential improvements and features for gh-commit-ai.
 - [x] Add `--help` flag for usage information
 
 ### 4. Amend Support
-- [ ] Implement `--amend` flag to regenerate message for last commit
-- [ ] Support editing existing commit messages
+- [x] Implement `--amend` flag to regenerate message for last commit
+- [x] Support editing existing commit messages
+- [x] Use `git show HEAD` to analyze last commit
+- [x] Use `git commit --amend` to rewrite commit
 
 ### 5. Configuration File
 - [ ] Support `.gh-commit-ai.yml` in repo root

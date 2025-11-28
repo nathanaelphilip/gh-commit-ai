@@ -16,11 +16,16 @@ This is a GitHub CLI extension that generates AI-powered git commit messages usi
 
 ### Key Components in gh-commit-ai
 
-1. **Command-Line Argument Parsing** (lines ~22-64): Handles optional flags
+1. **Command-Line Argument Parsing** (lines ~22-71): Handles optional flags
    - `--dry-run`: Generate message without committing (with optional file save)
    - `--preview`: Generate and display message, then exit
+   - `--amend`: Regenerate message for last commit
    - `--help, -h`: Show usage information
-2. **Git Integration** (lines ~66-116): Validates git repository, checks for changes, gathers status and diff
+2. **Git Integration** (lines ~73-115): Validates git repository, checks for changes, gathers status and diff
+   - **Amend Mode** (lines ~80-92): When `--amend` is used, analyzes the last commit instead of staged changes
+     - Uses `git show HEAD` to get last commit's diff
+     - Gets file changes and stats from last commit
+     - Generates new message based on what was in that commit
    - **Performance optimization**: Limits diff to configurable number of lines (default 200) via `DIFF_MAX_LINES`
    - Also captures `git diff --stat` for file-level overview without full content
    - **Branch Intelligence** (lines ~95-116):
@@ -92,6 +97,12 @@ The script supports several command-line flags:
 - Exits immediately without any interaction
 - Useful for scripting or quick previews
 
+**`--amend`**
+- Analyzes the last commit (HEAD) instead of staged changes
+- Generates a new commit message based on what's in that commit
+- Uses `git commit --amend` to rewrite the commit message
+- **Warning:** Only use on commits that haven't been pushed, or be prepared to force push
+
 **`--help, -h`**
 - Shows usage information
 - Lists all available options and environment variables
@@ -104,6 +115,9 @@ gh commit-ai --preview
 
 # Dry-run mode
 gh commit-ai --dry-run
+
+# Amend mode (rewrite last commit message)
+gh commit-ai --amend
 
 # Normal mode (default)
 gh commit-ai

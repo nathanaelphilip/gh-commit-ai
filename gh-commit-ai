@@ -22,6 +22,7 @@ USE_SCOPE="${USE_SCOPE:-false}"  # Enable/disable conventional commit scopes
 # Parse command-line arguments
 DRY_RUN=false
 PREVIEW=false
+AMEND=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -33,6 +34,10 @@ while [[ $# -gt 0 ]]; do
             PREVIEW=true
             shift
             ;;
+        --amend)
+            AMEND=true
+            shift
+            ;;
         --help|-h)
             echo "gh-commit-ai - AI-powered git commit message generator"
             echo ""
@@ -41,6 +46,7 @@ while [[ $# -gt 0 ]]; do
             echo "Options:"
             echo "  --dry-run    Generate commit message without committing"
             echo "  --preview    Generate and display message, then exit"
+            echo "  --amend      Regenerate message for last commit"
             echo "  --help, -h   Show this help message"
             echo ""
             echo "Environment Variables:"
@@ -52,6 +58,7 @@ while [[ $# -gt 0 ]]; do
             echo "  gh commit-ai"
             echo "  gh commit-ai --dry-run"
             echo "  gh commit-ai --preview"
+            echo "  gh commit-ai --amend"
             echo "  USE_SCOPE=false gh commit-ai"
             exit 0
             ;;
@@ -69,26 +76,42 @@ if ! git rev-parse --git-dir > /dev/null 2>&1; then
     exit 1
 fi
 
-# Check if there are changes to commit
-if git diff --cached --quiet && git diff --quiet; then
-    echo -e "${YELLOW}No changes to commit${NC}"
-    exit 0
-fi
+# Handle amend mode differently
+if [ "$AMEND" = true ]; then
+    # Check if there's at least one commit
+    if ! git rev-parse HEAD >/dev/null 2>&1; then
+        echo -e "${RED}Error: No commits to amend${NC}"
+        exit 1
+    fi
 
-# Get git status and diff
-echo -e "${GREEN}Analyzing changes...${NC}"
-GIT_STATUS=$(git status --short)
+    echo -e "${GREEN}Analyzing last commit...${NC}"
 
-# Get diff stats for overview
-GIT_STATS=$(git diff --cached --stat 2>/dev/null || echo "")
-if [ -z "$GIT_STATS" ]; then
-    GIT_STATS=$(git diff --stat 2>/dev/null || echo "")
-fi
+    # Get the changes from the last commit
+    GIT_STATUS=$(git show --name-status --pretty=format:"" HEAD | grep -E '^[AMDRC]' | awk '{print $1 " " $2}')
+    GIT_STATS=$(git show --stat HEAD | tail -n +2)
+    GIT_DIFF=$(git show HEAD | head -n "$DIFF_MAX_LINES")
+else
+    # Check if there are changes to commit
+    if git diff --cached --quiet && git diff --quiet; then
+        echo -e "${YELLOW}No changes to commit${NC}"
+        exit 0
+    fi
 
-# Get diff but limit lines for faster processing
-GIT_DIFF=$(git diff --cached 2>/dev/null | head -n "$DIFF_MAX_LINES" || echo "")
-if [ -z "$GIT_DIFF" ]; then
-    GIT_DIFF=$(git diff 2>/dev/null | head -n "$DIFF_MAX_LINES" || echo "")
+    # Get git status and diff
+    echo -e "${GREEN}Analyzing changes...${NC}"
+    GIT_STATUS=$(git status --short)
+
+    # Get diff stats for overview
+    GIT_STATS=$(git diff --cached --stat 2>/dev/null || echo "")
+    if [ -z "$GIT_STATS" ]; then
+        GIT_STATS=$(git diff --stat 2>/dev/null || echo "")
+    fi
+
+    # Get diff but limit lines for faster processing
+    GIT_DIFF=$(git diff --cached 2>/dev/null | head -n "$DIFF_MAX_LINES" || echo "")
+    if [ -z "$GIT_DIFF" ]; then
+        GIT_DIFF=$(git diff 2>/dev/null | head -n "$DIFF_MAX_LINES" || echo "")
+    fi
 fi
 
 # Get current branch name
@@ -362,19 +385,30 @@ read -p "Use this commit message? (y/n/e to edit): " -n 1 -r
 echo
 
 if [[ $REPLY =~ ^[Yy]$ ]]; then
-    # Stage all changes if nothing is staged
-    if git diff --cached --quiet; then
-        echo -e "${GREEN}Staging all changes...${NC}"
-        git add -A
-    fi
+    if [ "$AMEND" = true ]; then
+        # Amend the last commit with new message
+        git commit --amend -m "$COMMIT_MSG"
+        echo -e "${GREEN}✓ Amended commit successfully!${NC}"
+    else
+        # Stage all changes if nothing is staged
+        if git diff --cached --quiet; then
+            echo -e "${GREEN}Staging all changes...${NC}"
+            git add -A
+        fi
 
-    # Commit with the generated message
-    git commit -m "$COMMIT_MSG"
-    echo -e "${GREEN}✓ Committed successfully!${NC}"
+        # Commit with the generated message
+        git commit -m "$COMMIT_MSG"
+        echo -e "${GREEN}✓ Committed successfully!${NC}"
+    fi
 elif [[ $REPLY =~ ^[Ee]$ ]]; then
     # Allow user to edit the message
-    git commit -e -m "$COMMIT_MSG"
-    echo -e "${GREEN}✓ Committed with edited message!${NC}"
+    if [ "$AMEND" = true ]; then
+        git commit --amend -e -m "$COMMIT_MSG"
+        echo -e "${GREEN}✓ Amended commit with edited message!${NC}"
+    else
+        git commit -e -m "$COMMIT_MSG"
+        echo -e "${GREEN}✓ Committed with edited message!${NC}"
+    fi
 else
     echo -e "${YELLOW}Commit cancelled${NC}"
     exit 0
