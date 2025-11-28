@@ -162,13 +162,13 @@ This document tracks potential improvements and features for gh-commit-ai.
 
 ## Quick Wins (Easy to Implement)
 
-- [ ] **`--version` flag** - Show current version number
-- [ ] **`--help` flag** - Show comprehensive usage help
-- [ ] **`-v/--verbose` flag** - Show API request/response for debugging
-- [ ] **`--type <type>` flag** - Force a specific commit type: `gh commit-ai --type fix`
+- [x] **`--version` flag** - Show current version number
+- [x] **`--help` flag** - Show comprehensive usage help (already existed, improved)
+- [x] **`-v/--verbose` flag** - Show API request/response for debugging
+- [x] **`--type <type>` flag** - Force a specific commit type: `gh commit-ai --type fix`
+- [x] **`--max-lines <n>` flag** - Override DIFF_MAX_LINES from command line
 - [ ] **Message history** - Save last 5 generated messages to `/tmp` for recovery
 - [ ] **`--no-lowercase` flag** - Disable automatic lowercase enforcement
-- [ ] **`--max-lines <n>` flag** - Override DIFF_MAX_LINES from command line
 - [ ] **Better error messages** - More helpful error messages for common issues
 - [ ] **Progress indicator** - Show spinner/progress while waiting for AI
 

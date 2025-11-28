@@ -68,6 +68,10 @@ gh commit-ai [options]
 - `--preview` - Generate and display message, then exit (no interaction)
 - `--amend` - Regenerate message for the last commit and amend it
 - `--options` - Generate multiple message variations to choose from
+- `--type <type>` - Force a specific commit type (feat, fix, docs, etc.)
+- `--max-lines <n>` - Override DIFF_MAX_LINES for this run
+- `--verbose, -v` - Show detailed API request/response for debugging
+- `--version` - Show version number
 - `--help, -h` - Show help message
 
 The extension will:
@@ -335,6 +339,55 @@ Enter new bullet (without leading dash): create user session management
 5. Displays the generated message for your approval
 6. **Shows token usage and cost** (for Anthropic and OpenAI APIs)
 7. Commits with the approved message
+
+### Advanced Options
+
+**Force Commit Type**
+
+Override the automatic type detection:
+
+```bash
+$ gh commit-ai --type fix
+# Forces "fix:" regardless of what AI or branch intelligence suggests
+
+$ gh commit-ai --type docs
+# Forces "docs:" for documentation changes
+```
+
+**Adjust Diff Size**
+
+Override the maximum diff lines sent to AI (default: 200):
+
+```bash
+$ gh commit-ai --max-lines 500
+# Sends more context for complex commits
+
+$ gh commit-ai --max-lines 100
+# Faster generation for simple commits
+```
+
+**Verbose Mode**
+
+See detailed API requests and responses for debugging:
+
+```bash
+$ gh commit-ai --verbose
+# or
+$ gh commit-ai -v
+
+# Shows:
+# - API endpoint being called
+# - Full request payload
+# - Complete API response
+# - Useful for debugging or understanding AI behavior
+```
+
+**Version Check**
+
+```bash
+$ gh commit-ai --version
+gh-commit-ai version 1.0.0
+```
 
 ### Cost Tracking
 

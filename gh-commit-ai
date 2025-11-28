@@ -2,6 +2,8 @@
 
 set -e
 
+VERSION="1.0.0"
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -320,6 +322,9 @@ MULTIPLE_OPTIONS=false
 CHANGELOG_MODE=false
 CHANGELOG_SINCE=""
 CHANGELOG_FORMAT="keepachangelog"
+VERBOSE=false
+FORCED_TYPE=""
+CUSTOM_MAX_LINES=""
 
 # Check for subcommands
 if [ "$1" = "changelog" ]; then
@@ -493,6 +498,22 @@ while [[ $# -gt 0 ]]; do
             MULTIPLE_OPTIONS=true
             shift
             ;;
+        --version)
+            echo "gh-commit-ai version $VERSION"
+            exit 0
+            ;;
+        --verbose|-v)
+            VERBOSE=true
+            shift
+            ;;
+        --type)
+            FORCED_TYPE="$2"
+            shift 2
+            ;;
+        --max-lines)
+            CUSTOM_MAX_LINES="$2"
+            shift 2
+            ;;
         --help|-h)
             echo "gh-commit-ai - AI-powered git commit message generator"
             echo ""
@@ -506,11 +527,15 @@ while [[ $# -gt 0 ]]; do
             echo "  uninstall-hook  Remove git hook"
             echo ""
             echo "Options:"
-            echo "  --dry-run    Generate commit message without committing"
-            echo "  --preview    Generate and display message, then exit"
-            echo "  --amend      Regenerate message for last commit"
-            echo "  --options    Generate multiple variations to choose from"
-            echo "  --help, -h   Show this help message"
+            echo "  --dry-run           Generate commit message without committing"
+            echo "  --preview           Generate and display message, then exit"
+            echo "  --amend             Regenerate message for last commit"
+            echo "  --options           Generate multiple variations to choose from"
+            echo "  --type <type>       Force a specific commit type (feat, fix, docs, etc.)"
+            echo "  --max-lines <n>     Override DIFF_MAX_LINES for this run"
+            echo "  --verbose, -v       Show detailed API request/response info"
+            echo "  --version           Show version number"
+            echo "  --help, -h          Show this help message"
             echo ""
             echo "Interactive Options (when reviewing commit message):"
             echo "  y - Accept and commit"
@@ -547,6 +572,11 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# Apply command-line overrides
+if [ -n "$CUSTOM_MAX_LINES" ]; then
+    DIFF_MAX_LINES="$CUSTOM_MAX_LINES"
+fi
 
 # Check if we're in a git repository
 if ! git rev-parse --git-dir > /dev/null 2>&1; then
@@ -705,6 +735,12 @@ if [ -z "$SUGGESTED_TYPE" ] && [ -n "$SMART_TYPE" ]; then
 elif [ -n "$SMART_TYPE" ] && [ "$SMART_TYPE" != "$SUGGESTED_TYPE" ]; then
     # Both exist but differ - mention both in context
     TYPE_SOURCE="branch name (smart detection also suggests: $SMART_TYPE)"
+fi
+
+# Override with forced type if provided
+if [ -n "$FORCED_TYPE" ]; then
+    SUGGESTED_TYPE="$FORCED_TYPE"
+    TYPE_SOURCE="user-specified via --type flag"
 fi
 
 # Detect breaking changes
@@ -1408,9 +1444,22 @@ call_ollama() {
     local prompt_escaped=$(escape_json "$prompt")
     local json_payload=$(printf '{"model":"%s","prompt":"%s","stream":false}' "$model_escaped" "$prompt_escaped")
 
+    if [ "$VERBOSE" = "true" ]; then
+        echo -e "${YELLOW}[Verbose] API Endpoint:${NC} $OLLAMA_HOST/api/generate"
+        echo -e "${YELLOW}[Verbose] Request payload:${NC}"
+        echo "$json_payload" | jq '.' 2>/dev/null || echo "$json_payload"
+        echo ""
+    fi
+
     local response=$(curl -s -X POST "$OLLAMA_HOST/api/generate" \
         -H "Content-Type: application/json" \
         -d "$json_payload")
+
+    if [ "$VERBOSE" = "true" ]; then
+        echo -e "${YELLOW}[Verbose] Response:${NC}"
+        echo "$response" | jq '.' 2>/dev/null || echo "$response"
+        echo ""
+    fi
 
     # Extract commit message from response
     echo "$response" | grep -o '"response":"[^"]*"' | sed 's/"response":"//;s/"$//' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
@@ -1430,11 +1479,25 @@ call_anthropic() {
     local prompt_escaped=$(escape_json "$prompt")
     local json_payload=$(printf '{"model":"%s","max_tokens":1024,"messages":[{"role":"user","content":"%s"}]}' "$ANTHROPIC_MODEL" "$prompt_escaped")
 
+    if [ "$VERBOSE" = "true" ]; then
+        echo -e "${YELLOW}[Verbose] API Endpoint:${NC} https://api.anthropic.com/v1/messages"
+        echo -e "${YELLOW}[Verbose] Model:${NC} $ANTHROPIC_MODEL"
+        echo -e "${YELLOW}[Verbose] Request payload:${NC}"
+        echo "$json_payload" | jq '.' 2>/dev/null || echo "$json_payload"
+        echo ""
+    fi
+
     local response=$(curl -s -X POST "https://api.anthropic.com/v1/messages" \
         -H "Content-Type: application/json" \
         -H "x-api-key: $ANTHROPIC_API_KEY" \
         -H "anthropic-version: 2023-06-01" \
         -d "$json_payload")
+
+    if [ "$VERBOSE" = "true" ]; then
+        echo -e "${YELLOW}[Verbose] Response:${NC}"
+        echo "$response" | jq '.' 2>/dev/null || echo "$response"
+        echo ""
+    fi
 
     # Extract token usage (global variables for cost tracking)
     INPUT_TOKENS=$(echo "$response" | grep -o '"input_tokens":[0-9]*' | head -1 | grep -o '[0-9]*')
@@ -1459,10 +1522,24 @@ call_openai() {
     local prompt_escaped=$(escape_json "$prompt")
     local json_payload=$(printf '{"model":"%s","messages":[{"role":"user","content":"%s"}],"temperature":0.7}' "$OPENAI_MODEL" "$prompt_escaped")
 
+    if [ "$VERBOSE" = "true" ]; then
+        echo -e "${YELLOW}[Verbose] API Endpoint:${NC} https://api.openai.com/v1/chat/completions"
+        echo -e "${YELLOW}[Verbose] Model:${NC} $OPENAI_MODEL"
+        echo -e "${YELLOW}[Verbose] Request payload:${NC}"
+        echo "$json_payload" | jq '.' 2>/dev/null || echo "$json_payload"
+        echo ""
+    fi
+
     local response=$(curl -s -X POST "https://api.openai.com/v1/chat/completions" \
         -H "Content-Type: application/json" \
         -H "Authorization: Bearer $OPENAI_API_KEY" \
         -d "$json_payload")
+
+    if [ "$VERBOSE" = "true" ]; then
+        echo -e "${YELLOW}[Verbose] Response:${NC}"
+        echo "$response" | jq '.' 2>/dev/null || echo "$response"
+        echo ""
+    fi
 
     # Extract token usage (global variables for cost tracking)
     INPUT_TOKENS=$(echo "$response" | grep -o '"prompt_tokens":[0-9]*' | head -1 | grep -o '[0-9]*')
