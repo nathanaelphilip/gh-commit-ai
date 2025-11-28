@@ -33,7 +33,7 @@ This is a GitHub CLI extension that generates AI-powered git commit messages usi
      - Detects ticket numbers using pattern `[A-Z][A-Z0-9]+-[0-9]+` (e.g., ABC-123, JIRA-456)
      - Suggests commit type based on branch prefix (feat/*, fix/*, docs/*, etc.)
      - Passes branch context to AI for better commit messages
-   - **Smart Type Detection** (lines ~208-281):
+   - **Smart Type Detection** (lines ~208-273):
      - `detect_smart_type()`: Analyzes changed files and diff content
      - Categorizes files: docs, tests, config, code
      - Detects patterns:
@@ -43,6 +43,15 @@ This is a GitHub CLI extension that generates AI-powered git commit messages usi
        - Bug keywords in diff (fix, bug, error, crash, etc.) → "fix"
      - Smart suggestions can override branch suggestions when branch gives no hint
      - When both exist, mentions both for AI to consider
+   - **Breaking Change Detection** (lines ~293-360):
+     - `detect_breaking_changes()`: Analyzes diff for breaking changes
+     - Returns "true|reason" or "false|" to indicate if breaking change detected
+     - Detection methods:
+       - Explicit keywords: BREAKING CHANGE, breaking:, etc.
+       - API removal: Removed export/public functions
+       - Major version bumps: 1.x.x → 2.0.0
+       - Signature changes: Function parameters reduced
+     - Integrates with prompt to add `!` suffix and BREAKING CHANGE footer
 3. **Prompt Engineering** (lines ~118-191): Two-stage thinking prompt that:
    - **Stage 1**: AI identifies all significant changes and lists them as bullets
    - **Stage 2**: AI synthesizes those bullets into one concise summary line
@@ -508,6 +517,75 @@ Smart detection: "fix"
 - Catches common patterns (docs-only, tests-only, version bumps)
 - Detects bug fixes from code comments and commit intent
 - Works alongside branch intelligence for best results
+
+### 3. Breaking Change Detection
+
+Automatically detects breaking changes in the diff and instructs the AI to add the `!` suffix and BREAKING CHANGE footer.
+
+**Architecture:**
+
+`detect_breaking_changes()` function (lines 294-355) performs pattern-based analysis:
+
+**Detection Methods:**
+
+1. **Explicit Keywords**:
+   - Searches for "BREAKING CHANGE", "breaking change", "BREAKING:", "breaking:" in added lines
+   - Case-insensitive grep: `grep -qiE '^\+.*(BREAKING CHANGE|...)'`
+   - Most reliable method - developer explicitly marked it
+
+2. **API Removal Detection**:
+   - Detects removed lines with public API declarations
+   - Patterns: `export (function|class|const|...)`, `public (class|function|...)`, `def ...`, `function ...`
+   - Regex: `grep -qE '^-.*\b(export (function|class|...)|public |def |function )'`
+   - Assumes removed public APIs are breaking changes
+
+3. **Major Version Bumps**:
+   - Extracts version numbers from config file diffs
+   - Looks for version changes in `package.json`, `setup.py`, `Cargo.toml`, etc.
+   - Compares major version number: if `new_major > old_major` → breaking
+   - Example: 1.5.3 → 2.0.0 is detected as breaking
+
+4. **Function Signature Changes**:
+   - Detects when function signatures change (parameters removed)
+   - Compares removed and added function definitions
+   - Counts commas to estimate parameter count
+   - If `new_count < old_count` → likely breaking
+   - Heuristic-based, not 100% accurate
+
+**Integration:**
+
+- Stores result in `IS_BREAKING` ("true" or "false") and `BREAKING_REASON` (explanation)
+- Adds to `BRANCH_CONTEXT`: "BREAKING CHANGE DETECTED: {reason}"
+- Updates `CLOSING_INSTRUCTION`: "This is a BREAKING CHANGE - add ! after type and include BREAKING CHANGE footer."
+- Updates `SCOPE_INSTRUCTION` and examples to show breaking change format
+
+**Output Format:**
+
+Without scope:
+```
+feat!: redesign authentication API
+
+- replace oldLogin with new login function
+- change username to email parameter
+
+BREAKING CHANGE: oldLogin() function removed, use login() with email instead
+```
+
+With scope:
+```
+feat!(auth): redesign authentication API
+
+- replace oldLogin with new login function
+- change username to email parameter
+
+BREAKING CHANGE: oldLogin() function removed, use login() with email instead
+```
+
+**Benefits:**
+- Automatic detection of common breaking change patterns
+- Ensures proper conventional commit format
+- Helps maintain semantic versioning discipline
+- AI can still override if detection is incorrect
 
 ## Performance Optimizations
 

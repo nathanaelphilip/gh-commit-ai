@@ -114,6 +114,13 @@ With scope (`USE_SCOPE=true`):
    - **Version bumps**: Changes to `version` in `package.json`, `setup.py`, etc. → Suggests "chore"
    - **Bug fixes**: Diff contains keywords like "fix", "bug", "error", "crash" → Suggests "fix"
 
+3. **Breaking Change Detection** - Automatically detects breaking changes and adds appropriate markers:
+   - **Explicit keywords**: "BREAKING CHANGE", "breaking change", "BREAKING:" in diff
+   - **API removal**: Removed `export`, `public`, or function definitions
+   - **Major version bumps**: Version changes like 1.x.x → 2.0.0
+   - **Signature changes**: Function parameters reduced or changed
+   - **Format**: Adds `!` after type and includes `BREAKING CHANGE:` footer
+
 The AI uses these suggestions but can override them if the actual changes indicate a different type.
 
 **Note:** All commit messages are automatically converted to lowercase, with exceptions for:
@@ -448,6 +455,34 @@ Use this commit message? (y/n/e to edit): y
 ```
 
 The extension detected bug-related keywords ("fix", "bug") in the diff and suggested "fix" type.
+
+```bash
+# Scenario: Breaking change - removing public API
+$ git diff
+--- a/api.js
++++ b/api.js
+-export function oldLogin(username, password) {
++export function login(email, password, options) {
+
+$ gh commit-ai
+Analyzing changes...
+Generating commit message with gemma3:12b...
+
+Generated commit message:
+feat!: redesign authentication API
+
+- replace oldLogin with new login function
+- change username to email parameter
+- add options parameter for future extensibility
+
+BREAKING CHANGE: oldLogin() function removed, use login() with email instead
+
+Use this commit message? (y/n/e to edit/i for interactive): y
+```
+
+The extension detected the removal of a public API (`export function`) and automatically:
+- Added `!` suffix to indicate breaking change
+- Included `BREAKING CHANGE:` footer with explanation
 
 ### Dry-Run Mode
 

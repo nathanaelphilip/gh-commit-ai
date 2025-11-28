@@ -77,10 +77,17 @@ This document tracks potential improvements and features for gh-commit-ai.
 - [x] Works on main branch without branch naming conventions
 
 ### 9. Breaking Change Detection
-- [ ] Detect breaking changes in diff
-- [ ] Add `!` to type for breaking changes: `feat!:`
-- [ ] Add BREAKING CHANGE footer automatically
-- [ ] Example:
+- [x] Detect breaking changes in diff
+- [x] Add `!` to type for breaking changes: `feat!:`
+- [x] Add BREAKING CHANGE footer automatically
+- [x] Detection methods:
+  - [x] Explicit keywords (BREAKING CHANGE, breaking:, etc.)
+  - [x] Removal of public APIs/exports
+  - [x] Major version bumps (1.x.x → 2.0.0)
+  - [x] Function signature changes (parameter reduction)
+- [x] Automatic prompt modification to include breaking change instructions
+- [x] Works with both scoped and non-scoped formats
+- [x] Example:
   ```
   feat!: redesign authentication API
 

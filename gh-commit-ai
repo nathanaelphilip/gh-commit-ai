@@ -290,6 +290,75 @@ elif [ -n "$SMART_TYPE" ] && [ "$SMART_TYPE" != "$SUGGESTED_TYPE" ]; then
     TYPE_SOURCE="branch name (smart detection also suggests: $SMART_TYPE)"
 fi
 
+# Detect breaking changes
+detect_breaking_changes() {
+    local diff="$1"
+    local breaking_detected=false
+    local breaking_reason=""
+
+    # Check for explicit breaking change keywords in diff
+    if echo "$diff" | grep -qiE '^\+.*(BREAKING CHANGE|breaking change|BREAKING:|breaking:)'; then
+        breaking_detected=true
+        breaking_reason="explicit breaking change keyword in diff"
+        echo "true|$breaking_reason"
+        return
+    fi
+
+    # Check for removal of public APIs/exports
+    # Look for lines being removed that contain export, public, or function definitions
+    if echo "$diff" | grep -qE '^-.*\b(export (function|class|const|let|var|default|interface|type)|public (class|function|static|final)|def [a-zA-Z_]|function [a-zA-Z_])'; then
+        breaking_detected=true
+        breaking_reason="removal of public API/function"
+        echo "true|$breaking_reason"
+        return
+    fi
+
+    # Check for major version bumps (0.x.x -> 1.0.0, 1.x.x -> 2.0.0, etc.)
+    # Look for version changes in package.json, setup.py, Cargo.toml, etc.
+    local old_version=$(echo "$diff" | grep -E '^-.*"version".*:|^-.*version\s*=' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+    local new_version=$(echo "$diff" | grep -E '^\+.*"version".*:|^\+.*version\s*=' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+
+    if [ -n "$old_version" ] && [ -n "$new_version" ]; then
+        local old_major=$(echo "$old_version" | cut -d. -f1)
+        local new_major=$(echo "$new_version" | cut -d. -f1)
+
+        if [ "$new_major" -gt "$old_major" ]; then
+            breaking_detected=true
+            breaking_reason="major version bump ($old_version -> $new_version)"
+            echo "true|$breaking_reason"
+            return
+        fi
+    fi
+
+    # Check for signature changes (parameter removal/change)
+    if echo "$diff" | grep -qE '^-.*\(.*\).*\{' && echo "$diff" | grep -qE '^\+.*\(.*\).*\{'; then
+        # Function signatures changed - might be breaking
+        # This is a heuristic, not 100% accurate
+        local removed_params=$(echo "$diff" | grep -E '^-.*\(.*\)' | grep -oE '\([^)]*\)' | head -1)
+        local added_params=$(echo "$diff" | grep -E '^\+.*\(.*\)' | grep -oE '\([^)]*\)' | head -1)
+
+        if [ -n "$removed_params" ] && [ -n "$added_params" ] && [ "$removed_params" != "$added_params" ]; then
+            # Count commas to estimate parameter count
+            local old_count=$(echo "$removed_params" | tr -cd ',' | wc -c)
+            local new_count=$(echo "$added_params" | tr -cd ',' | wc -c)
+
+            if [ "$new_count" -lt "$old_count" ]; then
+                breaking_detected=true
+                breaking_reason="function signature changed (parameters reduced)"
+                echo "true|$breaking_reason"
+                return
+            fi
+        fi
+    fi
+
+    echo "false|"
+}
+
+# Run breaking change detection
+BREAKING_RESULT=$(detect_breaking_changes "$GIT_DIFF")
+IS_BREAKING=$(echo "$BREAKING_RESULT" | cut -d'|' -f1)
+BREAKING_REASON=$(echo "$BREAKING_RESULT" | cut -d'|' -f2)
+
 # Prepare branch context
 BRANCH_CONTEXT="Branch context:
 - Branch name: $BRANCH_NAME"
@@ -304,10 +373,18 @@ if [ -n "$SUGGESTED_TYPE" ]; then
 - Suggested type: $SUGGESTED_TYPE (based on $TYPE_SOURCE)"
 fi
 
+if [ "$IS_BREAKING" = "true" ]; then
+    BRANCH_CONTEXT="$BRANCH_CONTEXT
+- BREAKING CHANGE DETECTED: $BREAKING_REASON"
+fi
+
 # Prepare closing instruction
 CLOSING_INSTRUCTION="Think: What are all the changes? Then: What's the one-line summary that captures all of them?"
 if [ -n "$TICKET_NUMBER" ]; then
     CLOSING_INSTRUCTION="$CLOSING_INSTRUCTION Include ticket $TICKET_NUMBER in the summary."
+fi
+if [ "$IS_BREAKING" = "true" ]; then
+    CLOSING_INSTRUCTION="$CLOSING_INSTRUCTION This is a BREAKING CHANGE - add ! after type and include BREAKING CHANGE footer."
 fi
 
 # Prepare prompt for Ollama
@@ -318,16 +395,30 @@ if [ "$USE_SCOPE" = "true" ]; then
 The scope should be a short noun describing what part of the codebase changed:
 - auth, api, ui, db, cli, docs, config, tests, deps, etc.
 - Choose the most relevant scope based on which files/areas changed
-- If changes span multiple areas, pick the primary one"
+- If changes span multiple areas, pick the primary one
+
+BREAKING CHANGES:
+- If this is a breaking change, add ! after type: <type>!(<scope>):
+- Add a BREAKING CHANGE footer after the bullets explaining the breaking change"
     SCOPE_EXAMPLES="Examples:
 - feat(auth): add JWT token validation
 - fix(api): resolve timeout in user endpoint
-- docs(readme): add installation instructions
-- chore(deps): update dependencies"
+- feat!(api): redesign authentication flow
+
+BREAKING CHANGE: Legacy /auth/login endpoint removed, use /auth/v2/login instead"
 else
     SCOPE_INSTRUCTION="OUTPUT FORMAT (summary line MUST be first):
-<type>: <concise summary of all changes below>"
-    SCOPE_EXAMPLES=""
+<type>: <concise summary of all changes below>
+
+BREAKING CHANGES:
+- If this is a breaking change, add ! after type: <type>!:
+- Add a BREAKING CHANGE footer after the bullets explaining the breaking change"
+    SCOPE_EXAMPLES="Examples:
+- feat: add user authentication
+- fix: resolve database connection issue
+- feat!: redesign authentication API
+
+BREAKING CHANGE: Legacy /auth/login endpoint removed, use /auth/v2/login instead"
 fi
 
 PROMPT="Analyze these git changes and create a commit message.
