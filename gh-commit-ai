@@ -78,6 +78,49 @@ escape_json() {
     echo "$1" | sed 's/\\/\\\\/g; s/"/\\"/g; s/\n/\\n/g; s/\r/\\r/g; s/\t/\\t/g' | awk '{printf "%s\\n", $0}' | sed '$ s/\\n$//'
 }
 
+# Enforce lowercase on commit message while preserving acronyms and ticket numbers
+enforce_lowercase() {
+    local message="$1"
+
+    # List of common acronyms to preserve (add more as needed)
+    local acronyms=("API" "HTTP" "HTTPS" "JSON" "XML" "SQL" "JWT" "OAuth" "REST" "CLI" "UI" "UX" "CSS" "HTML" "JS" "TS" "URL" "URI" "PDF" "CSV" "IDE" "SDK" "CI" "CD" "AWS" "GCP" "DNS" "SSL" "TLS" "SSH" "FTP" "SMTP" "TCP" "UDP" "IP" "DOM" "npm" "NPM" "README" "TODO" "FIXME")
+
+    # First, find and temporarily replace ticket numbers (pattern: ABC-123, WORD-123, etc.)
+    # Store them with placeholders
+    local temp_message="$message"
+    local ticket_pattern='[A-Z][A-Z0-9]+-[0-9]+'
+    local counter=0
+    declare -A ticket_map
+
+    # Extract ticket numbers
+    while read -r ticket; do
+        if [ -n "$ticket" ]; then
+            local placeholder="__TICKET${counter}__"
+            ticket_map["$placeholder"]="$ticket"
+            temp_message=$(echo "$temp_message" | sed "s/$ticket/$placeholder/g")
+            ((counter++))
+        fi
+    done < <(echo "$message" | grep -oE "$ticket_pattern")
+
+    # Convert to lowercase
+    temp_message=$(echo "$temp_message" | tr '[:upper:]' '[:lower:]')
+
+    # Restore ticket numbers
+    for placeholder in "${!ticket_map[@]}"; do
+        local ticket="${ticket_map[$placeholder]}"
+        temp_message=$(echo "$temp_message" | sed "s/$(echo $placeholder | tr '[:upper:]' '[:lower:]')/$ticket/g")
+    done
+
+    # Restore common acronyms
+    for acronym in "${acronyms[@]}"; do
+        local lowercase_acronym=$(echo "$acronym" | tr '[:upper:]' '[:lower:]')
+        # Use word boundaries to avoid partial matches
+        temp_message=$(echo "$temp_message" | sed "s/\b$lowercase_acronym\b/$acronym/g")
+    done
+
+    echo "$temp_message"
+}
+
 # Call Ollama API
 call_ollama() {
     local prompt="$1"
@@ -167,6 +210,9 @@ if [ -z "$COMMIT_MSG" ] || [ "$COMMIT_MSG" = "null" ]; then
     echo "Please check your API configuration and try again."
     exit 1
 fi
+
+# Enforce lowercase (preserving acronyms and ticket numbers)
+COMMIT_MSG=$(enforce_lowercase "$COMMIT_MSG")
 
 # Show the generated commit message
 echo -e "\n${GREEN}Generated commit message:${NC}"

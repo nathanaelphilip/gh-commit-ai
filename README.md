@@ -65,9 +65,14 @@ gh commit-ai
 
 The extension will:
 1. Analyze your staged (or unstaged) changes
-2. Generate a commit message using Ollama
-3. Ask for your confirmation
-4. Commit the changes with the generated message
+2. Generate a commit message using your chosen AI provider
+3. Enforce lowercase formatting (preserving acronyms and ticket numbers)
+4. Ask for your confirmation
+5. Commit the changes with the generated message
+
+**Note:** All commit messages are automatically converted to lowercase, with exceptions for:
+- Technical acronyms (API, HTTP, JSON, JWT, etc.)
+- Ticket numbers (e.g., ABC-123, JIRA-456)
 
 ### Configuration
 
@@ -138,8 +143,9 @@ When presented with a generated commit message, you can:
 1. Checks if you're in a git repository
 2. Gathers git status and diff information
 3. Sends the changes to your chosen AI provider with a prompt to generate a conventional commit message
-4. Displays the generated message for your approval
-5. Commits with the approved message
+4. Enforces lowercase formatting (while preserving acronyms and ticket numbers)
+5. Displays the generated message for your approval
+6. Commits with the approved message
 
 ## Example
 

@@ -17,15 +17,19 @@ This is a GitHub CLI extension that generates AI-powered git commit messages usi
 ### Key Components in gh-commit-ai
 
 1. **Git Integration** (lines 20-35): Validates git repository, checks for changes, gathers status and diff
-2. **Prompt Engineering** (lines 37-61): Constructs the prompt for AI with specific commit message guidelines
-3. **JSON Handling** (lines 63-66): Pure bash JSON creation using `escape_json()` function to avoid `jq` dependency
-4. **Provider Functions** (lines 68-132):
+2. **Prompt Engineering** (lines 37-74): Constructs the prompt for AI with specific commit message guidelines, emphasizing lowercase usage
+3. **JSON Handling** (lines 76-79): Pure bash JSON creation using `escape_json()` function to avoid `jq` dependency
+4. **Lowercase Enforcement** (lines 81-122): `enforce_lowercase()` function that converts commit messages to lowercase while preserving:
+   - Ticket numbers (e.g., ABC-123, JIRA-456)
+   - Common acronyms (API, HTTP, JSON, JWT, SQL, etc.)
+5. **Provider Functions**:
    - `call_ollama()`: Integrates with local Ollama API
    - `call_anthropic()`: Integrates with Anthropic Claude API (requires API key)
    - `call_openai()`: Integrates with OpenAI GPT API (requires API key)
-5. **Provider Routing** (lines 134-150): Case statement that routes to the appropriate provider based on `AI_PROVIDER`
-6. **JSON Parsing**: Each provider function extracts responses using grep/sed to avoid `jq` dependency
-7. **Interactive Workflow** (lines 158-180): User confirmation with options to accept, reject, or edit
+6. **Provider Routing**: Case statement that routes to the appropriate provider based on `AI_PROVIDER`
+7. **JSON Parsing**: Each provider function extracts responses using grep/sed to avoid `jq` dependency
+8. **Message Post-Processing** (line 215): Applies lowercase enforcement to ensure consistent formatting
+9. **Interactive Workflow**: User confirmation with options to accept, reject, or edit
 
 ## Configuration
 
@@ -84,9 +88,17 @@ The prompt instructs the AI to generate messages that:
 - Follow conventional commit format (feat, fix, docs, style, refactor, test, chore)
 - Use imperative mood
 - Are concise (max 72 characters)
-- Start with lowercase letter
+- Use lowercase letters only (except acronyms and ticket numbers)
 - Focus on what changed, not how
 - Extract ticket information from branch names
+
+**Lowercase Enforcement:** Even if the AI generates uppercase letters, the `enforce_lowercase()` function automatically converts the message to lowercase while intelligently preserving:
+- Ticket number patterns (e.g., ABC-123, JIRA-456, EWQ-789)
+- Common technical acronyms (API, HTTP, JSON, JWT, SQL, etc.)
+
+Examples:
+- Input: "Feat: Add User Authentication With JWT" → Output: "feat: add user authentication with JWT"
+- Input: "Fix: Resolve API Connection Issue For EWQ-123" → Output: "fix: resolve API connection issue for EWQ-123"
 
 ## Dependency Philosophy
 
