@@ -1,0 +1,133 @@
+# Product Improvements
+
+This document tracks potential improvements and features for gh-commit-ai.
+
+## High-Impact Improvements
+
+### 1. Conventional Commit Scopes
+- [x] Add support for scopes to be more specific
+- [x] Format: `feat(auth): add user authentication`
+- [x] Format: `fix(api): resolve connection timeout`
+- [x] Format: `docs(readme): update installation steps`
+- [x] Allow configuration via `USE_SCOPE` environment variable (default: enabled)
+- [ ] Allow configuration of custom scope names per project (future enhancement)
+
+### 2. Branch Name Intelligence
+- [ ] Better extraction of context from branch names
+- [ ] Auto-detect ticket numbers: `feature/ABC-123-user-auth` → include "ABC-123" in commit
+- [ ] Auto-suggest type from branch: `fix/login-bug` → suggest "fix" type
+- [ ] Extract feature/ticket info to include in summary
+
+### 3. Dry-Run Mode
+- [ ] Implement `--dry-run` flag (generate message without committing)
+- [ ] Implement `--preview` flag (show message and exit)
+- [ ] Allow saving generated message to file
+
+### 4. Amend Support
+- [ ] Implement `--amend` flag to regenerate message for last commit
+- [ ] Support editing existing commit messages
+
+### 5. Configuration File
+- [ ] Support `.gh-commit-ai.yml` in repo root
+- [ ] Support project-specific settings:
+  - [ ] Default provider
+  - [ ] Default model
+  - [ ] Diff max lines
+  - [ ] Use scopes
+  - [ ] Default scope
+  - [ ] Custom ticket pattern
+- [ ] Support global config in `~/.gh-commit-ai.yml`
+
+### 6. Interactive Bullet Editing
+- [ ] Allow adding/removing individual bullets after generation
+- [ ] Allow reordering bullets
+- [ ] Allow editing summary line separately
+- [ ] Interactive menu for modifications
+
+### 7. Cost Tracking (for paid APIs)
+- [ ] Show token count after generation
+- [ ] Show estimated cost for Anthropic API calls
+- [ ] Show estimated cost for OpenAI API calls
+- [ ] Track cumulative costs per session/day
+
+### 8. Smart Type Detection
+- [ ] Analyze changes to suggest type automatically:
+  - [ ] Only docs files changed → `docs`
+  - [ ] Only test files changed → `test`
+  - [ ] Version bumps → `chore`
+  - [ ] Bug keywords in diff → `fix`
+- [ ] Make suggestions but allow override
+
+### 9. Breaking Change Detection
+- [ ] Detect breaking changes in diff
+- [ ] Add `!` to type for breaking changes: `feat!:`
+- [ ] Add BREAKING CHANGE footer automatically
+- [ ] Example:
+  ```
+  feat!: redesign authentication API
+
+  - remove legacy login endpoint
+  - change token format to JWT
+
+  BREAKING CHANGE: Legacy /auth/login endpoint removed
+  ```
+
+### 10. Commit Message History Learning
+- [ ] Analyze last 50 commits in repo
+- [ ] Detect commit message patterns
+- [ ] Detect emoji usage patterns
+- [ ] Detect scope usage patterns
+- [ ] Match the repo's existing style automatically
+
+### 11. Multiple Message Options
+- [ ] Generate 2-3 different commit messages
+- [ ] Let user choose between options:
+  - Option 1: Concise
+  - Option 2: Detailed
+  - Option 3: With scope
+- [ ] Interactive selection menu
+
+### 12. Changelog Generation
+- [ ] Implement `gh commit-ai changelog` command
+- [ ] Generate changelog from commit history
+- [ ] Support `--since` flag for version ranges
+- [ ] Support different changelog formats (Keep a Changelog, etc.)
+
+### 13. Pre-commit Hook Integration
+- [ ] Implement `gh commit-ai install-hook` command
+- [ ] Automatically generate messages on commit
+- [ ] Support `prepare-commit-msg` hook
+- [ ] Easy uninstall option
+
+### 14. Better Token Limit Handling
+- [ ] Intelligently sample different parts of very large diffs
+- [ ] Prioritize added/changed lines over deleted lines
+- [ ] Focus on function/class names over implementation details
+- [ ] Smart truncation for massive commits
+
+### 15. Model Recommendations
+- [ ] Analyze commit size
+- [ ] Suggest optimal model based on size:
+  - Small commits (<100 lines) → faster, cheaper models
+  - Large commits (>500 lines) → more capable models
+- [ ] Auto-select if configured
+
+## Quick Wins (Easy to Implement)
+
+- [ ] **`--version` flag** - Show current version number
+- [ ] **`--help` flag** - Show comprehensive usage help
+- [ ] **`-v/--verbose` flag** - Show API request/response for debugging
+- [ ] **`--type <type>` flag** - Force a specific commit type: `gh commit-ai --type fix`
+- [ ] **Message history** - Save last 5 generated messages to `/tmp` for recovery
+- [ ] **`--no-lowercase` flag** - Disable automatic lowercase enforcement
+- [ ] **`--max-lines <n>` flag** - Override DIFF_MAX_LINES from command line
+- [ ] **Better error messages** - More helpful error messages for common issues
+- [ ] **Progress indicator** - Show spinner/progress while waiting for AI
+
+## Community Requests
+
+Add feature requests from users here as they come in.
+
+---
+
+**Note**: Check off items with `[x]` as they are completed.

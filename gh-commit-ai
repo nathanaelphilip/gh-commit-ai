@@ -17,6 +17,7 @@ ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"
 OPENAI_MODEL="${OPENAI_MODEL:-gpt-4o-mini}"
 OPENAI_API_KEY="${OPENAI_API_KEY:-}"
 DIFF_MAX_LINES="${DIFF_MAX_LINES:-200}"  # Limit diff lines for faster processing
+USE_SCOPE="${USE_SCOPE:-true}"  # Enable/disable conventional commit scopes
 
 # Check if we're in a git repository
 if ! git rev-parse --git-dir > /dev/null 2>&1; then
@@ -47,6 +48,25 @@ if [ -z "$GIT_DIFF" ]; then
 fi
 
 # Prepare prompt for Ollama
+if [ "$USE_SCOPE" = "true" ]; then
+    SCOPE_INSTRUCTION="OUTPUT FORMAT (summary line MUST be first):
+<type>(<scope>): <concise summary of all changes below>
+
+The scope should be a short noun describing what part of the codebase changed:
+- auth, api, ui, db, cli, docs, config, tests, deps, etc.
+- Choose the most relevant scope based on which files/areas changed
+- If changes span multiple areas, pick the primary one"
+    SCOPE_EXAMPLES="Examples:
+- feat(auth): add JWT token validation
+- fix(api): resolve timeout in user endpoint
+- docs(readme): add installation instructions
+- chore(deps): update dependencies"
+else
+    SCOPE_INSTRUCTION="OUTPUT FORMAT (summary line MUST be first):
+<type>: <concise summary of all changes below>"
+    SCOPE_EXAMPLES=""
+fi
+
 PROMPT="Analyze these git changes and create a commit message.
 
 PROCESS:
@@ -54,8 +74,7 @@ PROCESS:
 2. Then, synthesize those changes into ONE concise summary line
 3. Choose the right type: feat, fix, docs, style, refactor, test, or chore
 
-OUTPUT FORMAT (summary line MUST be first):
-<type>: <concise summary of all changes below>
+$SCOPE_INSTRUCTION
 
 - <change 1>
 - <change 2>
@@ -67,6 +86,8 @@ RULES:
 - Use lowercase only (except API, HTTP, JSON, JWT, SQL, ABC-123 tickets)
 - Use imperative mood (add/fix not added/fixed)
 - The summary should capture the essence of all bullets below it
+
+$SCOPE_EXAMPLES
 
 Files changed:
 $GIT_STATUS

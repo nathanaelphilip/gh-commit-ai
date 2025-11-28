@@ -76,6 +76,17 @@ The extension will:
 5. Commit the changes with the generated message
 
 **Commit Message Format:**
+
+With scope (default):
+```
+<type>(<scope>): <concise summary>
+
+- <change 1>
+- <change 2>
+- <change 3>
+```
+
+Without scope:
 ```
 <type>: <concise summary>
 
@@ -132,6 +143,22 @@ export AI_PROVIDER="openai"
 gh commit-ai
 ```
 
+#### Commit Format Configuration
+
+- `USE_SCOPE`: Enable/disable conventional commit scopes (default: `true`)
+  - When enabled: `feat(auth): add login`
+  - When disabled: `feat: add login`
+
+```bash
+# Disable scopes (simpler format)
+USE_SCOPE=false gh commit-ai
+
+# Enable scopes (default, more specific)
+USE_SCOPE=true gh commit-ai
+```
+
+Common scopes: `auth`, `api`, `ui`, `db`, `cli`, `docs`, `config`, `tests`, `deps`
+
 #### Performance Configuration
 
 - `DIFF_MAX_LINES`: Maximum diff lines to send to AI (default: `200`)
@@ -183,7 +210,7 @@ Analyzing changes...
 Generating commit message with gemma3:12b...
 
 Generated commit message:
-feat: add user authentication
+feat(auth): add user authentication
 
 - implement JWT token generation
 - create login and logout endpoints

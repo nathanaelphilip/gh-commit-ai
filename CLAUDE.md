@@ -19,10 +19,11 @@ This is a GitHub CLI extension that generates AI-powered git commit messages usi
 1. **Git Integration** (lines ~20-47): Validates git repository, checks for changes, gathers status and diff
    - **Performance optimization**: Limits diff to configurable number of lines (default 200) via `DIFF_MAX_LINES`
    - Also captures `git diff --stat` for file-level overview without full content
-2. **Prompt Engineering** (lines ~49-80): Two-stage thinking prompt that:
+2. **Prompt Engineering** (lines ~50-101): Two-stage thinking prompt that:
    - **Stage 1**: AI identifies all significant changes and lists them as bullets
    - **Stage 2**: AI synthesizes those bullets into one concise summary line
-   - **Output**: Summary line first (with type prefix), then the detailed bullet list
+   - **Output**: Summary line first (with type prefix and optional scope), then the detailed bullet list
+   - **Scope support**: Conditionally includes scope instructions based on `USE_SCOPE` setting
    - This ensures the summary accurately captures ALL changes, not just some of them
 3. **JSON Handling** (~line 73-75): Pure bash JSON creation using `escape_json()` function to avoid `jq` dependency
 4. **Lowercase Enforcement** (~lines 77-110): `enforce_lowercase()` function that converts commit messages to lowercase while preserving:
@@ -55,6 +56,11 @@ Environment variables (defined at lines 12-18):
 **OpenAI (API key required):**
 - `OPENAI_API_KEY`: Your OpenAI API key
 - `OPENAI_MODEL`: Model to use (default: `gpt-4o-mini`)
+
+**Commit Format:**
+- `USE_SCOPE`: Enable/disable conventional commit scopes (default: `true`)
+  - When enabled, generates: `feat(auth): add login`
+  - When disabled, generates: `feat: add login`
 
 **Performance:**
 - `DIFF_MAX_LINES`: Maximum diff lines to send to AI (default: `200`) - Reduces token usage and speeds up generation
@@ -101,6 +107,17 @@ The prompt uses a two-stage approach to ensure accurate summaries:
 3. **Output**: Summary line appears first, followed by the detailed bullets
 
 **Mandatory Format:**
+
+With scope (default, `USE_SCOPE=true`):
+```
+<type>(<scope>): <concise summary capturing all changes (max 50 chars)>
+
+- <change 1>
+- <change 2>
+- <change 3>
+```
+
+Without scope (`USE_SCOPE=false`):
 ```
 <type>: <concise summary capturing all changes (max 50 chars)>
 
@@ -108,6 +125,8 @@ The prompt uses a two-stage approach to ensure accurate summaries:
 - <change 2>
 - <change 3>
 ```
+
+Common scopes: `auth`, `api`, `ui`, `db`, `cli`, `docs`, `config`, `tests`, `deps`
 
 **Rules enforced by the prompt:**
 1. First line MUST start with: feat, fix, docs, style, refactor, test, or chore
@@ -118,9 +137,9 @@ The prompt uses a two-stage approach to ensure accurate summaries:
 6. Use imperative mood (add, fix, update - not added, fixed, updated)
 7. Use lowercase only (except acronyms and ticket numbers)
 
-**Example:**
+**Example (with scope):**
 ```
-feat: add user authentication
+feat(auth): add user authentication
 
 - implement JWT token generation
 - create login endpoint
@@ -128,7 +147,7 @@ feat: add user authentication
 - create user session management
 ```
 
-The summary "add user authentication" captures the overall purpose of all four changes listed below it.
+The summary "add user authentication" captures the overall purpose of all four changes listed below it, and the scope "(auth)" indicates this is authentication-related.
 
 **Lowercase Enforcement:** Even if the AI generates uppercase letters, the `enforce_lowercase()` function automatically converts the message to lowercase while intelligently preserving:
 - Ticket number patterns (e.g., ABC-123, JIRA-456, EWQ-789)
