@@ -65,13 +65,22 @@ gh commit-ai
 
 The extension will:
 1. Analyze your staged (or unstaged) changes
-2. Generate a commit message using your chosen AI provider
-3. Automatically adapt format based on commit size:
-   - **Small commits**: Single-line message
-   - **Large commits**: Multi-line with summary + bullet points for better clarity
-4. Enforce lowercase formatting (preserving acronyms and ticket numbers)
-5. Ask for your confirmation
-6. Commit the changes with the generated message
+2. Generate a commit message using your chosen AI provider in the format:
+   - **Line 1**: Conventional commit prefix + concise summary (max 50 chars)
+   - **Line 2**: Blank line
+   - **Lines 3+**: Bulleted list of all significant changes
+3. Enforce lowercase formatting (preserving acronyms and ticket numbers)
+4. Ask for your confirmation
+5. Commit the changes with the generated message
+
+**Commit Message Format:**
+```
+<type>: <concise summary>
+
+- <change 1>
+- <change 2>
+- <change 3>
+```
 
 **Note:** All commit messages are automatically converted to lowercase, with exceptions for:
 - Technical acronyms (API, HTTP, JSON, JWT, etc.)
@@ -121,6 +130,20 @@ export AI_PROVIDER="openai"
 gh commit-ai
 ```
 
+#### Performance Configuration
+
+- `DIFF_MAX_LINES`: Maximum diff lines to send to AI (default: `200`)
+  - Lower values = faster processing, especially for large commits
+  - Increase if you need more context for very complex changes
+
+```bash
+# For faster processing (fewer lines)
+DIFF_MAX_LINES=100 gh commit-ai
+
+# For more context (more lines)
+DIFF_MAX_LINES=500 gh commit-ai
+```
+
 #### Quick Examples
 
 ```bash
@@ -150,9 +173,7 @@ When presented with a generated commit message, you can:
 5. Displays the generated message for your approval
 6. Commits with the approved message
 
-## Examples
-
-### Simple Commit (1-3 files)
+## Example
 
 ```bash
 $ gh commit-ai
@@ -160,28 +181,13 @@ Analyzing changes...
 Generating commit message with gemma3:12b...
 
 Generated commit message:
-feat: add user authentication with JWT tokens
+feat: add user authentication
 
-Use this commit message? (y/n/e to edit): y
-Staging all changes...
-✓ Committed successfully!
-```
-
-### Large Commit (multiple files/changes)
-
-```bash
-$ gh commit-ai
-Analyzing changes...
-Generating commit message with gemma3:12b...
-
-Generated commit message:
-feat: implement user authentication system
-
-- add JWT token generation and validation
-- create login and logout API endpoints
-- implement password hashing with bcrypt
-- add user session management
-- create authentication middleware
+- implement JWT token generation
+- create login and logout endpoints
+- add password hashing with bcrypt
+- create user session management
+- add authentication middleware
 
 Use this commit message? (y/n/e to edit): y
 Staging all changes...

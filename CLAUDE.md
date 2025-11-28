@@ -16,10 +16,15 @@ This is a GitHub CLI extension that generates AI-powered git commit messages usi
 
 ### Key Components in gh-commit-ai
 
-1. **Git Integration** (lines 20-35): Validates git repository, checks for changes, gathers status and diff
-2. **Prompt Engineering** (lines 37-74): Constructs the prompt for AI with specific commit message guidelines, emphasizing lowercase usage
-3. **JSON Handling** (lines 76-79): Pure bash JSON creation using `escape_json()` function to avoid `jq` dependency
-4. **Lowercase Enforcement** (lines 81-122): `enforce_lowercase()` function that converts commit messages to lowercase while preserving:
+1. **Git Integration** (lines ~20-47): Validates git repository, checks for changes, gathers status and diff
+   - **Performance optimization**: Limits diff to configurable number of lines (default 200) via `DIFF_MAX_LINES`
+   - Also captures `git diff --stat` for file-level overview without full content
+2. **Prompt Engineering** (lines ~49-71): Simplified, concise prompt that enforces conventional commit format with:
+   - Mandatory type prefix (feat/fix/docs/style/refactor/test/chore)
+   - Concise summary line (max 50 chars)
+   - Bulleted list of all changes
+3. **JSON Handling** (~line 73-75): Pure bash JSON creation using `escape_json()` function to avoid `jq` dependency
+4. **Lowercase Enforcement** (~lines 77-110): `enforce_lowercase()` function that converts commit messages to lowercase while preserving:
    - Ticket numbers (e.g., ABC-123, JIRA-456)
    - Common acronyms (API, HTTP, JSON, JWT, SQL, etc.)
 5. **Provider Functions**:
@@ -28,7 +33,7 @@ This is a GitHub CLI extension that generates AI-powered git commit messages usi
    - `call_openai()`: Integrates with OpenAI GPT API (requires API key)
 6. **Provider Routing**: Case statement that routes to the appropriate provider based on `AI_PROVIDER`
 7. **JSON Parsing**: Each provider function extracts responses using grep/sed to avoid `jq` dependency
-8. **Message Post-Processing** (line 215): Applies lowercase enforcement to ensure consistent formatting
+8. **Message Post-Processing**: Applies lowercase enforcement to ensure consistent formatting
 9. **Interactive Workflow**: User confirmation with options to accept, reject, or edit
 
 ## Configuration
@@ -49,6 +54,9 @@ Environment variables (defined at lines 12-18):
 **OpenAI (API key required):**
 - `OPENAI_API_KEY`: Your OpenAI API key
 - `OPENAI_MODEL`: Model to use (default: `gpt-4o-mini`)
+
+**Performance:**
+- `DIFF_MAX_LINES`: Maximum diff lines to send to AI (default: `200`) - Reduces token usage and speeds up generation
 
 ## Testing the Extension
 
@@ -84,25 +92,33 @@ AI_PROVIDER="openai" OPENAI_MODEL="gpt-4o" OPENAI_API_KEY="sk-proj-..." gh commi
 
 ## Commit Message Guidelines
 
-The prompt instructs the AI to generate messages that:
-- Follow conventional commit format (feat, fix, docs, style, refactor, test, chore)
-- Use imperative mood
-- Use lowercase letters only (except acronyms and ticket numbers)
-- Focus on what changed, not how
-- Extract ticket information from branch names
-- **Adapt format based on commit size:**
-  - Small commits (1-3 files): Single-line message (max 72 characters)
-  - Large commits (multiple files/complex changes): Multi-line with summary + bullet points
+The prompt strictly enforces this format for ALL commits:
 
-**Multi-line Format for Large Commits:**
+**Mandatory Format:**
 ```
-feat: implement user authentication system
+<type>: <concise summary (max 50 chars)>
 
-- add JWT token generation and validation
-- create login and logout API endpoints
-- implement password hashing with bcrypt
-- add user session management
-- create authentication middleware
+- <change 1>
+- <change 2>
+- <change 3>
+```
+
+**Rules enforced by the prompt:**
+1. First line MUST start with: feat, fix, docs, style, refactor, test, or chore
+2. First line must be 50 characters or less
+3. Blank line after first line
+4. All significant changes listed as bullet points
+5. Use imperative mood (add, fix, update - not added, fixed, updated)
+6. Use lowercase only (except acronyms and ticket numbers)
+
+**Example:**
+```
+feat: add user authentication
+
+- implement JWT token generation
+- create login endpoint
+- add password hashing
+- create user session management
 ```
 
 **Lowercase Enforcement:** Even if the AI generates uppercase letters, the `enforce_lowercase()` function automatically converts the message to lowercase while intelligently preserving:
@@ -112,6 +128,19 @@ feat: implement user authentication system
 Examples:
 - Input: "Feat: Add User Authentication With JWT" → Output: "feat: add user authentication with JWT"
 - Input: "Fix: Resolve API Connection Issue For EWQ-123" → Output: "fix: resolve API connection issue for EWQ-123"
+
+## Performance Optimizations
+
+The script is optimized for speed:
+- **Limited diff context**: Only sends first 200 lines of diff to AI (configurable via `DIFF_MAX_LINES`)
+- **Concise prompt**: Minimal prompt text (compared to verbose examples in previous versions)
+- **Stat overview**: Uses `git diff --stat` to give file-level overview without full content
+- **Result**: Significantly faster processing, especially for large commits with many changes
+
+For very large commits, the AI still gets enough context from:
+- File list from `git status --short`
+- Summary stats from `git diff --stat`
+- First 200 lines of actual diff showing the nature of changes
 
 ## Dependency Philosophy
 

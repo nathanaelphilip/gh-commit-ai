@@ -16,6 +16,7 @@ ANTHROPIC_MODEL="${ANTHROPIC_MODEL:-claude-3-5-sonnet-20241022}"
 ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"
 OPENAI_MODEL="${OPENAI_MODEL:-gpt-4o-mini}"
 OPENAI_API_KEY="${OPENAI_API_KEY:-}"
+DIFF_MAX_LINES="${DIFF_MAX_LINES:-200}"  # Limit diff lines for faster processing
 
 # Check if we're in a git repository
 if ! git rev-parse --git-dir > /dev/null 2>&1; then
@@ -32,57 +33,42 @@ fi
 # Get git status and diff
 echo -e "${GREEN}Analyzing changes...${NC}"
 GIT_STATUS=$(git status --short)
-GIT_DIFF=$(git diff --cached 2>/dev/null || echo "")
 
-# If nothing is staged, get unstaged diff
+# Get diff stats for overview
+GIT_STATS=$(git diff --cached --stat 2>/dev/null || echo "")
+if [ -z "$GIT_STATS" ]; then
+    GIT_STATS=$(git diff --stat 2>/dev/null || echo "")
+fi
+
+# Get diff but limit lines for faster processing
+GIT_DIFF=$(git diff --cached 2>/dev/null | head -n "$DIFF_MAX_LINES" || echo "")
 if [ -z "$GIT_DIFF" ]; then
-    GIT_DIFF=$(git diff 2>/dev/null || echo "")
+    GIT_DIFF=$(git diff 2>/dev/null | head -n "$DIFF_MAX_LINES" || echo "")
 fi
 
 # Prepare prompt for Ollama
-PROMPT="You are a helpful assistant that writes concise, clear git commit messages following conventional commit format.
+PROMPT="Generate a git commit message in this EXACT format:
 
-CRITICAL: All commit messages must use lowercase letters only. The ONLY exceptions are:
-- Acronyms (API, HTTP, JSON, etc.)
-- Ticket numbers (EWQ-123, JIRA-456, etc.)
+<type>: <summary max 50 chars>
 
-For SMALL changes (1-3 files, simple modifications):
-Write a single-line commit message:
-- feat: add user authentication with JWT tokens
-- fix: resolve API connection timeout issue
+- <change 1>
+- <change 2>
+- <change 3>
 
-For LARGE changes (multiple files, complex changes, multiple related modifications):
-Write a multi-line commit message with a summary line followed by bullet points:
-- First line: Brief summary (max 72 characters)
-- Blank line
-- Bullet points (3-6 items) describing key changes, each starting with '- '
+RULES:
+1. Type must be: feat, fix, docs, style, refactor, test, or chore
+2. Use lowercase only (except API, HTTP, JSON, JWT, SQL, ABC-123 style tickets)
+3. Use imperative mood (add/fix, not added/fixed)
+4. List all significant changes as bullets
 
-Example of multi-line format:
-feat: implement user authentication system
-
-- add JWT token generation and validation
-- create login and logout API endpoints
-- implement password hashing with bcrypt
-- add user session management
-- create authentication middleware
-
-Based on the following git changes, write an appropriate commit message. Requirements:
-- Start with a type (feat, fix, docs, style, refactor, test, chore)
-- Use ONLY lowercase letters (except acronyms and ticket numbers)
-- Be in imperative mood (e.g., 'add' not 'added')
-- Summary line should be clear and concise (max 72 characters)
-- For large commits, add bullet points describing major changes
-- Focus on what the change does, not how it does it
-- Analyze the git diff to understand the scope and nature of changes
-- Extract ticket information from branch name if present
-
-Git Status:
+Files changed:
 $GIT_STATUS
 
-Git Diff:
-$GIT_DIFF
+Stats:
+$GIT_STATS
 
-Remember: Use lowercase only. If this is a large commit with multiple significant changes, use the multi-line format with bullet points."
+Diff sample:
+$GIT_DIFF"
 
 # Escape JSON strings (replace backslash, double quote, newline, carriage return, tab)
 escape_json() {
@@ -92,38 +78,42 @@ escape_json() {
 # Enforce lowercase on commit message while preserving acronyms and ticket numbers
 enforce_lowercase() {
     local message="$1"
-
-    # List of common acronyms to preserve (add more as needed)
-    local acronyms=("API" "HTTP" "HTTPS" "JSON" "XML" "SQL" "JWT" "OAuth" "REST" "CLI" "UI" "UX" "CSS" "HTML" "JS" "TS" "URL" "URI" "PDF" "CSV" "IDE" "SDK" "CI" "CD" "AWS" "GCP" "DNS" "SSL" "TLS" "SSH" "FTP" "SMTP" "TCP" "UDP" "IP" "DOM" "npm" "NPM" "README" "TODO" "FIXME")
-
-    # First, find and temporarily replace ticket numbers (pattern: ABC-123, WORD-123, etc.)
-    # Store them with placeholders
     local temp_message="$message"
-    local ticket_pattern='[A-Z][A-Z0-9]+-[0-9]+'
-    local counter=0
-    declare -A ticket_map
 
-    # Extract ticket numbers
-    while read -r ticket; do
+    # First, protect ticket numbers by replacing them with placeholders
+    # Pattern: ABC-123, JIRA-456, etc.
+    local ticket_counter=0
+    local tickets_file=$(mktemp)
+
+    # Find all ticket numbers and store them
+    echo "$message" | grep -oE '[A-Z][A-Z0-9]+-[0-9]+' > "$tickets_file"
+
+    # Replace tickets with placeholders
+    while IFS= read -r ticket; do
         if [ -n "$ticket" ]; then
-            local placeholder="__TICKET${counter}__"
-            ticket_map["$placeholder"]="$ticket"
-            temp_message=$(echo "$temp_message" | sed "s/$ticket/$placeholder/g")
-            ((counter++))
+            temp_message=$(echo "$temp_message" | sed "s/$ticket/__TICKET${ticket_counter}__/g")
+            ((ticket_counter++))
         fi
-    done < <(echo "$message" | grep -oE "$ticket_pattern")
+    done < "$tickets_file"
 
-    # Convert to lowercase
+    # Convert entire message to lowercase
     temp_message=$(echo "$temp_message" | tr '[:upper:]' '[:lower:]')
 
     # Restore ticket numbers
-    for placeholder in "${!ticket_map[@]}"; do
-        local ticket="${ticket_map[$placeholder]}"
-        temp_message=$(echo "$temp_message" | sed "s/$(echo $placeholder | tr '[:upper:]' '[:lower:]')/$ticket/g")
-    done
+    ticket_counter=0
+    while IFS= read -r ticket; do
+        if [ -n "$ticket" ]; then
+            temp_message=$(echo "$temp_message" | sed "s/__ticket${ticket_counter}__/$ticket/g")
+            ((ticket_counter++))
+        fi
+    done < "$tickets_file"
 
-    # Restore common acronyms
-    for acronym in "${acronyms[@]}"; do
+    rm -f "$tickets_file"
+
+    # Restore common acronyms (case-insensitive search and replace)
+    local acronyms="API HTTP HTTPS JSON XML SQL JWT OAuth REST CLI UI UX CSS HTML JS TS URL URI PDF CSV IDE SDK CI CD AWS GCP DNS SSL TLS SSH FTP SMTP TCP UDP IP DOM npm NPM README TODO FIXME"
+
+    for acronym in $acronyms; do
         local lowercase_acronym=$(echo "$acronym" | tr '[:upper:]' '[:lower:]')
         # Use word boundaries to avoid partial matches
         temp_message=$(echo "$temp_message" | sed "s/\b$lowercase_acronym\b/$acronym/g")
