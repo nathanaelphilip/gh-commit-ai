@@ -55,10 +55,14 @@ This document tracks potential improvements and features for gh-commit-ai.
 - [x] Pure bash implementation (no external dependencies)
 
 ### 7. Cost Tracking (for paid APIs)
-- [ ] Show token count after generation
-- [ ] Show estimated cost for Anthropic API calls
-- [ ] Show estimated cost for OpenAI API calls
-- [ ] Track cumulative costs per session/day
+- [x] Show token count after generation
+- [x] Show estimated cost for Anthropic API calls
+- [x] Show estimated cost for OpenAI API calls
+- [x] Track cumulative costs per day
+- [x] Support all major Anthropic models (Sonnet, Opus, Haiku)
+- [x] Support all major OpenAI models (GPT-4o, GPT-4o-mini, GPT-4, GPT-4 Turbo)
+- [x] Daily cost files stored in /tmp with automatic cleanup
+- [x] Fallback to awk when bc not available
 
 ### 8. Smart Type Detection
 - [ ] Analyze changes to suggest type automatically:

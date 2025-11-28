@@ -306,7 +306,44 @@ Enter new bullet (without leading dash): create user session management
 3. Sends the changes to your chosen AI provider with a prompt to generate a conventional commit message
 4. Enforces lowercase formatting (while preserving acronyms and ticket numbers)
 5. Displays the generated message for your approval
-6. Commits with the approved message
+6. **Shows token usage and cost** (for Anthropic and OpenAI APIs)
+7. Commits with the approved message
+
+### Cost Tracking
+
+When using paid AI providers (Anthropic or OpenAI), the extension automatically displays:
+
+- **Token usage**: Input and output tokens used for the request
+- **Estimated cost**: Cost for the current generation
+- **Daily total**: Cumulative cost for all generations today
+
+**Example output:**
+```bash
+Generated commit message:
+feat: add user authentication
+
+- implement JWT token generation
+- create login endpoint
+
+Token usage: 245 tokens (198 input + 47 output)
+Estimated cost: $0.0016 USD
+Today's total: $0.0048 USD
+```
+
+**Supported models with pricing:**
+
+**Anthropic:**
+- Claude 3.5 Sonnet: $3/$15 per MTok (input/output)
+- Claude 3 Opus: $15/$75 per MTok
+- Claude 3 Haiku: $0.25/$1.25 per MTok
+
+**OpenAI:**
+- GPT-4o: $2.50/$10 per MTok (input/output)
+- GPT-4o-mini: $0.15/$0.60 per MTok
+- GPT-4 Turbo: $10/$30 per MTok
+- GPT-4: $30/$60 per MTok
+
+**Note:** Ollama (local) is free and does not display cost information.
 
 ## Examples
 

@@ -58,11 +58,17 @@ This is a GitHub CLI extension that generates AI-powered git commit messages usi
     - `rebuild_commit_message()`: Rebuilds message from components
     - `interactive_edit_message()`: Provides menu-driven editing interface
     - Features: Edit summary, add/remove/reorder bullets
-12. **Interactive Workflow** (lines ~589-639): User confirmation with loop support for interactive editing
+12. **Cost Tracking** (lines ~483-600): Token usage and cost calculation for paid APIs
+    - `calculate_cost()`: Calculates costs based on provider and model pricing
+    - Supports Anthropic (Claude models) and OpenAI (GPT models) pricing
+    - Uses bc or awk for floating-point calculations
+    - `track_cumulative_cost()`: Tracks daily cumulative costs in /tmp
+    - Extracts token usage from API responses (INPUT_TOKENS, OUTPUT_TOKENS)
+13. **Interactive Workflow** (lines ~737-787): User confirmation with loop support for interactive editing
     - `y`: Accept and commit
     - `n`: Cancel
     - `e`: Edit in default editor
-    - `i`: Interactive editing mode (new)
+    - `i`: Interactive editing mode
 
 ## Configuration
 
@@ -212,6 +218,54 @@ The interactive editing feature (invoked with `i` during confirmation) allows fi
 - Visual feedback after each operation
 - Can make multiple changes in sequence
 - Reorder provides better organization of changes
+
+## Cost Tracking for Paid APIs
+
+The extension automatically tracks and displays costs when using Anthropic or OpenAI APIs.
+
+**Architecture:**
+
+1. **Token Extraction**:
+   - `call_anthropic()`: Extracts `input_tokens` and `output_tokens` from API response
+   - `call_openai()`: Extracts `prompt_tokens` and `completion_tokens` from API response
+   - Stores values in global variables: `INPUT_TOKENS` and `OUTPUT_TOKENS`
+
+2. **Cost Calculation** (`calculate_cost()`):
+   - Takes provider, model, input tokens, and output tokens as parameters
+   - Maintains pricing table for all supported models (as of early 2025)
+   - Uses bc for floating-point arithmetic (with awk fallback)
+   - Calculates: `(input_tokens / 1M * input_price) + (output_tokens / 1M * output_price)`
+   - Formats output with appropriate precision (more decimals for very small costs)
+
+3. **Cumulative Tracking** (`track_cumulative_cost()`):
+   - Stores individual costs in daily file: `/tmp/gh-commit-ai-costs-YYYYMMDD`
+   - Calculates sum of all costs for the current day
+   - Displays "Today's total" after each generation
+   - Files are automatically cleaned up by system (in /tmp)
+
+4. **Display**:
+   - Shows after message generation but before confirmation
+   - Format: "Token usage: X tokens (Y input + Z output)"
+   - Format: "Estimated cost: $X.XXXX USD"
+   - Format: "Today's total: $X.XXXX USD"
+   - Only displayed for Anthropic and OpenAI (not Ollama)
+
+**Supported Models and Pricing:**
+
+| Provider | Model | Input (per MTok) | Output (per MTok) |
+|----------|-------|------------------|-------------------|
+| Anthropic | Claude 3.5 Sonnet | $3.00 | $15.00 |
+| Anthropic | Claude 3 Opus | $15.00 | $75.00 |
+| Anthropic | Claude 3 Haiku | $0.25 | $1.25 |
+| OpenAI | GPT-4o | $2.50 | $10.00 |
+| OpenAI | GPT-4o-mini | $0.15 | $0.60 |
+| OpenAI | GPT-4 Turbo | $10.00 | $30.00 |
+| OpenAI | GPT-4 | $30.00 | $60.00 |
+
+**Notes:**
+- Ollama is free (runs locally) and does not show cost information
+- Costs are estimates based on published pricing
+- Daily totals reset at midnight (tracked by date in filename)
 
 ## Testing
 
