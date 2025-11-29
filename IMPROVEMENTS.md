@@ -164,11 +164,14 @@ This document tracks potential improvements and features for gh-commit-ai.
 - [x] Works with all three diff sources (amend, staged, unstaged)
 
 ### 15. Model Recommendations
-- [ ] Analyze commit size
-- [ ] Suggest optimal model based on size:
-  - Small commits (<100 lines) → faster, cheaper models
-  - Large commits (>500 lines) → more capable models
-- [ ] Auto-select if configured
+- [x] Analyze commit size (lines added + deleted)
+- [x] Suggest optimal model based on size:
+  - Small commits (<100 lines) → faster, cheaper models (haiku, gpt-4o-mini, gemma2:2b)
+  - Medium commits (100-500 lines) → balanced models (current defaults)
+  - Large commits (>500 lines) → more capable models (sonnet, gpt-4o, llama3.3:70b)
+- [x] Auto-select if configured via AUTO_SELECT_MODEL environment variable
+- [x] Shows tip when recommendation differs from current model
+- [x] Works with all three providers (Ollama, Anthropic, OpenAI)
 
 ## Quick Wins (Easy to Implement)
 

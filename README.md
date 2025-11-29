@@ -270,6 +270,44 @@ DIFF_MAX_LINES=100 gh commit-ai
 DIFF_MAX_LINES=500 gh commit-ai
 ```
 
+#### Model Recommendations
+
+The tool automatically analyzes your commit size and can recommend optimal models:
+
+- **Small commits** (<100 lines): Faster, cheaper models
+  - Ollama: `gemma2:2b`
+  - Anthropic: `claude-3-5-haiku-20241022`
+  - OpenAI: `gpt-4o-mini`
+
+- **Medium commits** (100-500 lines): Balanced models (default)
+  - Ollama: `gemma3:12b`
+  - Anthropic: `claude-3-5-sonnet-20241022`
+  - OpenAI: `gpt-4o-mini`
+
+- **Large commits** (>500 lines): More capable models
+  - Ollama: `llama3.3:70b`
+  - Anthropic: `claude-3-5-sonnet-20241022`
+  - OpenAI: `gpt-4o`
+
+**Usage:**
+
+```bash
+# Show recommendation as a tip (default)
+gh commit-ai
+
+# Auto-select recommended model
+AUTO_SELECT_MODEL=true gh commit-ai
+
+# Or configure in .gh-commit-ai.yml:
+# auto_select_model: true
+```
+
+When recommendations are enabled (but not auto-selected), you'll see:
+```
+✓ Changes analyzed
+Tip: For 250 lines changed, consider using gpt-4o
+```
+
 #### Quick Examples
 
 ```bash

@@ -58,6 +58,16 @@ diff_max_lines: 200
 # - Emoji usage
 learn_from_history: true
 
+# Model Recommendations
+# Auto-select recommended model based on commit size
+# Default: false
+# When enabled, automatically selects:
+# - Small commits (<100 lines): Faster, cheaper models
+# - Medium commits (100-500): Balanced models
+# - Large commits (>500 lines): More capable models
+# When disabled, shows recommendations as tips
+auto_select_model: false
+
 # Note: API keys (ANTHROPIC_API_KEY, OPENAI_API_KEY) cannot be stored in config files
 # Set them as environment variables instead:
 #   export ANTHROPIC_API_KEY="sk-ant-..."
