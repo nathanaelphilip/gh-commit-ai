@@ -562,7 +562,6 @@ while [[ $# -gt 0 ]]; do
             echo "  y - Accept and commit"
             echo "  n - Cancel"
             echo "  e - Edit in your default editor"
-            echo "  i - Interactive editing (modify summary/bullets)"
             echo ""
             echo "Environment Variables:"
             echo "  AI_PROVIDER      AI provider to use (ollama, anthropic, openai)"
@@ -1234,156 +1233,6 @@ enforce_lowercase() {
     echo "$temp_message"
 }
 
-# Parse commit message into components
-# Sets global arrays: SUMMARY_LINE and BULLETS
-parse_commit_message() {
-    local message="$1"
-    local line_num=0
-
-    SUMMARY_LINE=""
-    BULLETS=()
-
-    while IFS= read -r line; do
-        line_num=$((line_num + 1))
-        if [ $line_num -eq 1 ]; then
-            SUMMARY_LINE="$line"
-        elif [ -n "$line" ] && [[ "$line" =~ ^[[:space:]]*-[[:space:]]+ ]]; then
-            # This is a bullet point
-            BULLETS+=("$line")
-        fi
-    done <<< "$message"
-}
-
-# Rebuild commit message from components
-rebuild_commit_message() {
-    local result="$SUMMARY_LINE"
-
-    if [ ${#BULLETS[@]} -gt 0 ]; then
-        result="$result\n"
-        for bullet in "${BULLETS[@]}"; do
-            result="$result\n$bullet"
-        done
-    fi
-
-    echo -e "$result"
-}
-
-# Interactive editing menu
-interactive_edit_message() {
-    local message="$1"
-
-    parse_commit_message "$message"
-
-    while true; do
-        clear
-        echo -e "✏️  Interactive Commit Message Editor\n"
-        echo "Summary:"
-        echo "  $SUMMARY_LINE"
-        echo ""
-        echo "Changes:"
-
-        if [ ${#BULLETS[@]} -eq 0 ]; then
-            echo -e "  (no bullets)\n"
-        else
-            for i in "${!BULLETS[@]}"; do
-                echo -e "  $((i+1)). ${BULLETS[$i]}"
-            done
-            echo ""
-        fi
-
-        echo "Options:"
-        echo "  s - Edit summary line"
-        echo "  a - Add bullet"
-        echo "  r - Remove bullet"
-        echo "  o - Reorder bullets"
-        echo "  d - Done (return to confirmation)"
-        echo "  c - Cancel"
-        echo ""
-
-        echo -n "Choose option: "
-        read -n 1 -r
-        echo
-
-        case $REPLY in
-            [Ss])
-                echo "Current summary: $SUMMARY_LINE"
-                read -p "Enter new summary: " new_summary
-                if [ -n "$new_summary" ]; then
-                    SUMMARY_LINE="$new_summary"
-                fi
-                ;;
-            [Aa])
-                read -p "Enter new bullet (without leading dash): " new_bullet
-                if [ -n "$new_bullet" ]; then
-                    BULLETS+=("- $new_bullet")
-                fi
-                ;;
-            [Rr])
-                if [ ${#BULLETS[@]} -eq 0 ]; then
-                    echo -e "${RED}No bullets to remove"
-                    read -p "Press enter to continue..."
-                else
-                    read -p "Enter bullet number to remove (1-${#BULLETS[@]}): " bullet_num
-                    if [[ "$bullet_num" =~ ^[0-9]+$ ]] && [ "$bullet_num" -ge 1 ] && [ "$bullet_num" -le ${#BULLETS[@]} ]; then
-                        unset 'BULLETS[$((bullet_num-1))]'
-                        BULLETS=("${BULLETS[@]}")  # Re-index array
-                    else
-                        echo -e "${RED}Invalid bullet number"
-                        read -p "Press enter to continue..."
-                    fi
-                fi
-                ;;
-            [Oo])
-                if [ ${#BULLETS[@]} -lt 2 ]; then
-                    echo -e "${RED}Need at least 2 bullets to reorder"
-                    read -p "Press enter to continue..."
-                else
-                    read -p "Move bullet number (1-${#BULLETS[@]}): " from_num
-                    read -p "To position (1-${#BULLETS[@]}): " to_num
-
-                    if [[ "$from_num" =~ ^[0-9]+$ ]] && [[ "$to_num" =~ ^[0-9]+$ ]] && \
-                       [ "$from_num" -ge 1 ] && [ "$from_num" -le ${#BULLETS[@]} ] && \
-                       [ "$to_num" -ge 1 ] && [ "$to_num" -le ${#BULLETS[@]} ]; then
-
-                        local from_idx=$((from_num-1))
-                        local to_idx=$((to_num-1))
-                        local temp="${BULLETS[$from_idx]}"
-
-                        # Remove from old position
-                        unset 'BULLETS[$from_idx]'
-                        BULLETS=("${BULLETS[@]}")
-
-                        # Adjust target index if needed
-                        if [ $from_idx -lt $to_idx ]; then
-                            to_idx=$((to_idx-1))
-                        fi
-
-                        # Insert at new position
-                        BULLETS=("${BULLETS[@]:0:$to_idx}" "$temp" "${BULLETS[@]:$to_idx}")
-                    else
-                        echo -e "${RED}Invalid bullet numbers"
-                        read -p "Press enter to continue..."
-                    fi
-                fi
-                ;;
-            [Dd])
-                # Return the edited message
-                rebuild_commit_message
-                return 0
-                ;;
-            [Cc])
-                # Return original message
-                echo "$message"
-                return 1
-                ;;
-            *)
-                echo -e "${RED}Invalid option"
-                read -p "Press enter to continue..."
-                ;;
-        esac
-    done
-}
-
 # Calculate cost for API usage
 calculate_cost() {
     local provider="$1"
@@ -1884,9 +1733,9 @@ if [ "$DRY_RUN" = true ]; then
     exit 0
 fi
 
-# Ask for confirmation (with loop for interactive editing)
+# Ask for confirmation
 while true; do
-    echo -n "Use this commit message? (y/n/e to edit/i for interactive): "
+    echo -n "Use this commit message? (y/n/e to edit): "
     read -n 1 -r
     echo
 
@@ -1923,21 +1772,6 @@ while true; do
             echo "✓ Committed with edited message!"
         fi
         break
-    elif [[ $REPLY =~ ^[Ii]$ ]]; then
-        # Interactive editing mode
-        EDITED_MSG=$(interactive_edit_message "$COMMIT_MSG")
-        if [ $? -eq 0 ]; then
-            # User completed editing - strip any color codes that might have leaked
-            COMMIT_MSG=$(strip_ansi_codes "$EDITED_MSG")
-            echo -e "\nUpdated commit message:"
-            echo "$COMMIT_MSG"
-            echo ""
-            # Loop back to confirmation
-        else
-            # User cancelled interactive editing
-            echo "Commit cancelled"
-            exit 0
-        fi
     else
         echo "Commit cancelled"
         exit 0

@@ -45,14 +45,16 @@ This document tracks potential improvements and features for gh-commit-ai.
 - [x] Configuration precedence: env vars > local config > global config > defaults
 - [x] Example configuration file (.gh-commit-ai.example.yml)
 
-### 6. Interactive Bullet Editing
-- [x] Allow adding/removing individual bullets after generation
-- [x] Allow reordering bullets
-- [x] Allow editing summary line separately
-- [x] Interactive menu for modifications
-- [x] Menu-driven interface with single-key commands (s/a/r/o/d/c)
-- [x] Real-time preview after each edit
-- [x] Pure bash implementation (no external dependencies)
+### 6. Interactive Bullet Editing (REMOVED)
+**Note**: This feature was implemented but later removed to keep the tool simple and focused. Users can edit commit messages using the standard 'e' option which opens their default editor.
+
+- ~~Allow adding/removing individual bullets after generation~~
+- ~~Allow reordering bullets~~
+- ~~Allow editing summary line separately~~
+- ~~Interactive menu for modifications~~
+- ~~Menu-driven interface with single-key commands (s/a/r/o/d/c)~~
+- ~~Real-time preview after each edit~~
+- ~~Pure bash implementation (no external dependencies)~~
 
 ### 7. Cost Tracking (for paid APIs)
 - [x] Show token count after generation
