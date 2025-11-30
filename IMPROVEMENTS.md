@@ -191,4 +191,159 @@ Add feature requests from users here as they come in.
 
 ---
 
+## Future Enhancements
+
+### Additional AI Provider Support
+
+- [ ] **Google Gemini** - Integrate Google AI Studio API
+- [ ] **Azure OpenAI** - Support Azure-hosted OpenAI models
+- [ ] **LM Studio** - Support local models via LM Studio
+- [ ] **Groq** - Ultra-fast inference with Groq API
+- [ ] **Cohere** - Add Cohere Command models
+- [ ] **Mistral AI** - Support Mistral API
+
+### Advanced Features
+
+#### 16. Gitmoji Support
+- [ ] Add emoji prefixes to commit types
+- [ ] Configuration option to enable/disable gitmoji
+- [ ] Standard mappings:
+  - ✨ feat: new feature
+  - 🐛 fix: bug fix
+  - 📝 docs: documentation
+  - 💄 style: formatting
+  - ♻️ refactor: code refactoring
+  - ✅ test: adding tests
+  - 🔧 chore: tooling/config
+  - 🚀 perf: performance improvement
+  - 🔒 security: security fix
+- [ ] Learn emoji usage from commit history
+
+#### 17. Commit Templates
+- [ ] Support custom commit message templates per project
+- [ ] Template variables: `{{type}}`, `{{scope}}`, `{{message}}`, etc.
+- [ ] Project type detection (web app, library, CLI tool, etc.)
+- [ ] Template file: `.gh-commit-ai-template`
+- [ ] Built-in templates for common project types
+
+#### 18. Multi-language Support
+- [ ] Generate commit messages in different languages
+- [ ] Configuration: `COMMIT_LANGUAGE` (en, es, fr, de, ja, zh, etc.)
+- [ ] Auto-detect from git config or system locale
+- [ ] Maintain conventional commit format across languages
+
+#### 19. PR Description Generator
+- [ ] New command: `gh commit-ai pr-description`
+- [ ] Analyze commits since branch diverged from main
+- [ ] Generate comprehensive PR description
+- [ ] Include summary, changes, testing notes
+- [ ] Integration with `gh pr create --body`
+
+#### 20. Commit Splitting Suggestions
+- [ ] Detect when commit is too large (>1000 lines)
+- [ ] AI suggests logical ways to split the commit
+- [ ] Group related changes together
+- [ ] Interactive mode to review and apply splits
+- [ ] Preserve git history properly
+
+#### 21. Code Review Mode
+- [ ] New command: `gh commit-ai review`
+- [ ] Analyze diff for potential issues:
+  - Security vulnerabilities
+  - Performance concerns
+  - Code style violations
+  - Missing error handling
+  - TODO/FIXME comments
+- [ ] Provide suggestions before committing
+
+#### 22. Semantic Versioning Suggestions
+- [ ] Analyze commits since last tag
+- [ ] Suggest next version number based on changes:
+  - Major: breaking changes detected
+  - Minor: new features added
+  - Patch: only bug fixes
+- [ ] Consider conventional commit types
+- [ ] Integration with version bump commands
+
+#### 23. Auto-fix Formatting
+- [ ] Detect and fix common formatting issues before commit
+- [ ] Trailing whitespace removal
+- [ ] Consistent line endings
+- [ ] Missing newline at end of file
+- [ ] Configurable rules per project
+
+### Quality & Polish
+
+#### Testing & Reliability
+- [ ] **Integration tests** - Test with actual API calls (Ollama, Anthropic, OpenAI)
+- [ ] **Unit tests** - Test individual bash functions
+- [ ] **Mock API responses** - Test without real API calls
+- [ ] **Test fixtures** - Sample diffs and expected outputs
+- [ ] **CI/CD pipeline** - Automated testing on push
+- [ ] **Cross-platform testing** - macOS, Linux, WSL
+
+#### Performance
+- [ ] **Performance profiling** - Identify slow operations
+- [ ] **Optimize git commands** - Reduce number of git calls
+- [ ] **Parallel processing** - Process multiple files concurrently
+- [ ] **Caching** - Cache API responses for identical diffs
+- [ ] **Benchmark suite** - Track performance over time
+
+#### Security
+- [ ] **Security audit** - Review for vulnerabilities
+- [ ] **Input validation** - Sanitize all user inputs
+- [ ] **API key handling** - Secure storage recommendations
+- [ ] **Dependency scanning** - Check for vulnerable dependencies (none currently)
+- [ ] **Code signing** - Sign releases for verification
+
+#### Error Handling
+- [ ] **Network failure recovery** - Retry with exponential backoff
+- [ ] **Timeout handling** - Configurable timeouts for API calls
+- [ ] **Offline mode** - Better messaging when APIs unreachable
+- [ ] **Partial failure recovery** - Handle incomplete responses
+- [ ] **Better error messages** - More context and suggestions
+
+### Developer Experience
+
+#### Documentation & Discoverability
+- [ ] **Bash completion** - Tab completion for commands and flags
+- [ ] **Man page** - Traditional Unix man page (`man gh-commit-ai`)
+- [ ] **Demo video** - Screencast showing features
+- [ ] **Animated GIFs** - Visual examples in README
+- [ ] **Tutorial** - Step-by-step getting started guide
+- [ ] **FAQ section** - Common questions and answers
+- [ ] **Troubleshooting guide** - Debug common issues
+
+#### Development Tools
+- [ ] **Development mode** - Easy setup for contributors
+- [ ] **Debug mode** - Enhanced logging for debugging
+- [ ] **Test helpers** - Scripts to test locally
+- [ ] **Contribution guide** - Clear guidelines for contributors
+- [ ] **Code style guide** - Bash style conventions
+
+#### Release Management
+- [ ] **Automated releases** - GitHub Actions for releases
+- [ ] **Semantic versioning** - Follow semver strictly
+- [ ] **Release notes** - Auto-generate from commits
+- [ ] **Binary distribution** - Pre-packaged downloads
+- [ ] **Homebrew formula** - Easy install on macOS
+- [ ] **Package managers** - apt, yum, pacman support
+
+### Analytics & Insights
+
+#### Usage Statistics (Privacy-respecting)
+- [ ] **Local analytics** - Track feature usage (opt-in, local only)
+- [ ] **Performance metrics** - API latency, success rates
+- [ ] **Model comparison** - Track which models work best
+- [ ] **Cost tracking dashboard** - Visualize API costs over time
+- [ ] **Export reports** - Generate usage summaries
+
+#### Commit Insights
+- [ ] **Repository health** - Analyze commit patterns
+- [ ] **Team statistics** - Aggregate team commit metrics
+- [ ] **Commit quality score** - Rate commit message quality
+- [ ] **Trends over time** - Track improvements
+
+---
+
 **Note**: Check off items with `[x]` as they are completed.
