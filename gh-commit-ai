@@ -1476,6 +1476,13 @@ strip_ansi_codes() {
     echo "$text" | sed 's/\x1b\[[0-9;]*m//g' | sed 's/\\033\[[0-9;]*m//g'
 }
 
+# Convert literal \n to actual newlines for better display in GitHub
+convert_newlines() {
+    local text="$1"
+    # Use printf %b to interpret backslash escapes
+    printf "%b" "$text"
+}
+
 # Parse multiple commit message options from AI response
 parse_multiple_options() {
     local response="$1"
@@ -1815,9 +1822,10 @@ else
     # Save to message history
     save_message_history "$COMMIT_MSG"
 
-    # Show the generated commit message
+    # Show the generated commit message with proper newlines
     echo -e "\n✓ Generated commit message:"
-    echo -e "$COMMIT_MSG\n"
+    DISPLAY_MSG=$(convert_newlines "$COMMIT_MSG")
+    printf "%s\n\n" "$DISPLAY_MSG"
 
     # Show cost information for paid APIs
     if [ "$AI_PROVIDER" = "anthropic" ]; then
@@ -1840,9 +1848,10 @@ if [ "$DRY_RUN" = true ]; then
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         COMMIT_FILE=".git/COMMIT_MSG_$(date +%s)"
-        # Strip ANSI codes before saving
+        # Strip ANSI codes and convert newlines before saving
         CLEAN_MSG=$(strip_ansi_codes "$COMMIT_MSG")
-        echo "$CLEAN_MSG" > "$COMMIT_FILE"
+        CLEAN_MSG=$(convert_newlines "$CLEAN_MSG")
+        printf "%s" "$CLEAN_MSG" > "$COMMIT_FILE"
         echo "✓ Saved to $COMMIT_FILE"
     else
         echo "Message not saved"
@@ -1859,10 +1868,15 @@ while true; do
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         # Strip any ANSI color codes before committing
         CLEAN_MSG=$(strip_ansi_codes "$COMMIT_MSG")
+        # Convert literal \n to actual newlines
+        CLEAN_MSG=$(convert_newlines "$CLEAN_MSG")
 
         if [ "$AMEND" = true ]; then
-            # Amend the last commit with new message
-            git commit --amend -m "$CLEAN_MSG"
+            # Amend the last commit with new message using HEREDOC for proper newline handling
+            git commit --amend -m "$(cat <<EOF
+$CLEAN_MSG
+EOF
+)"
             echo "✓ Amended commit successfully!"
         else
             # Stage all changes if nothing is staged
@@ -1871,21 +1885,32 @@ while true; do
                 git add -A
             fi
 
-            # Commit with the generated message
-            git commit -m "$CLEAN_MSG"
+            # Commit with the generated message using HEREDOC for proper newline handling
+            git commit -m "$(cat <<EOF
+$CLEAN_MSG
+EOF
+)"
             echo "✓ Committed successfully!"
         fi
         break
     elif [[ $REPLY =~ ^[Ee]$ ]]; then
         # Strip any ANSI color codes before editing
         CLEAN_MSG=$(strip_ansi_codes "$COMMIT_MSG")
+        # Convert literal \n to actual newlines
+        CLEAN_MSG=$(convert_newlines "$CLEAN_MSG")
 
-        # Allow user to edit the message in editor
+        # Allow user to edit the message in editor using HEREDOC for proper newline handling
         if [ "$AMEND" = true ]; then
-            git commit --amend -e -m "$CLEAN_MSG"
+            git commit --amend -e -m "$(cat <<EOF
+$CLEAN_MSG
+EOF
+)"
             echo "✓ Amended commit with edited message!"
         else
-            git commit -e -m "$CLEAN_MSG"
+            git commit -e -m "$(cat <<EOF
+$CLEAN_MSG
+EOF
+)"
             echo "✓ Committed with edited message!"
         fi
         break

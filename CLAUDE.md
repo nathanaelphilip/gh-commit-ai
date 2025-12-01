@@ -80,21 +80,26 @@ This is a GitHub CLI extension that generates AI-powered git commit messages usi
 7. **Provider Routing**: Case statement that routes to the appropriate provider based on `AI_PROVIDER`
 8. **JSON Parsing**: Each provider function extracts responses using grep/sed to avoid `jq` dependency
 9. **Message Post-Processing**: Applies lowercase enforcement to ensure consistent formatting
-10. **Dry-Run and Preview Modes** (lines ~577-587):
+10. **Newline Conversion** (~line 1479-1484): `convert_newlines()` function that converts literal `\n` sequences to actual newlines
+   - AI responses contain literal `\n` characters (from JSON encoding)
+   - Uses `printf "%b"` to interpret backslash escapes
+   - Applied before committing to ensure proper multi-line display in GitHub
+   - Also applied when displaying messages to users and saving to files
+11. **Dry-Run and Preview Modes** (lines ~577-587):
     - `--preview`: Shows message and exits immediately
     - `--dry-run`: Shows message and optionally saves to `.git/COMMIT_MSG_<timestamp>` file
-11. **Interactive Editing** (lines ~325-471): Fine-grained message editing without opening a text editor
+12. **Interactive Editing** (lines ~325-471): Fine-grained message editing without opening a text editor
     - `parse_commit_message()`: Parses message into SUMMARY_LINE and BULLETS arrays
     - `rebuild_commit_message()`: Rebuilds message from components
     - `interactive_edit_message()`: Provides menu-driven editing interface
     - Features: Edit summary, add/remove/reorder bullets
-12. **Cost Tracking** (lines ~483-600): Token usage and cost calculation for paid APIs
+13. **Cost Tracking** (lines ~483-600): Token usage and cost calculation for paid APIs
     - `calculate_cost()`: Calculates costs based on provider and model pricing
     - Supports Anthropic (Claude models) and OpenAI (GPT models) pricing
     - Uses bc or awk for floating-point calculations
     - `track_cumulative_cost()`: Tracks daily cumulative costs in /tmp
     - Extracts token usage from API responses (INPUT_TOKENS, OUTPUT_TOKENS)
-13. **Interactive Workflow** (lines ~737-787): User confirmation with loop support for interactive editing
+14. **Interactive Workflow** (lines ~737-787): User confirmation with loop support for interactive editing
     - `y`: Accept and commit
     - `n`: Cancel
     - `e`: Edit in default editor

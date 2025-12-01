@@ -121,3 +121,33 @@ teardown() {
     result=$(enforce_lowercase "")
     [ "$result" = "" ]
 }
+
+# Tests for convert_newlines function
+
+@test "convert_newlines: converts literal backslash-n to newlines" {
+    result=$(convert_newlines 'Line1\nLine2')
+    expected=$'Line1\nLine2'
+    [ "$result" = "$expected" ]
+}
+
+@test "convert_newlines: handles multiple newlines" {
+    result=$(convert_newlines 'Line1\n\nLine2\nLine3')
+    expected=$'Line1\n\nLine2\nLine3'
+    [ "$result" = "$expected" ]
+}
+
+@test "convert_newlines: handles commit message format" {
+    result=$(convert_newlines 'feat: add feature\n\n- change 1\n- change 2')
+    expected=$'feat: add feature\n\n- change 1\n- change 2'
+    [ "$result" = "$expected" ]
+}
+
+@test "convert_newlines: handles empty string" {
+    result=$(convert_newlines '')
+    [ "$result" = "" ]
+}
+
+@test "convert_newlines: handles string with no newlines" {
+    result=$(convert_newlines 'Simple text')
+    [ "$result" = "Simple text" ]
+}
