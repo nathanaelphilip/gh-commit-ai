@@ -1360,6 +1360,27 @@ escape_json() {
     echo "$1" | sed 's/\\/\\\\/g; s/"/\\"/g; s/\n/\\n/g; s/\r/\\r/g; s/\t/\\t/g' | awk '{printf "%s\\n", $0}' | sed '$ s/\\n$//'
 }
 
+# Unescape JSON strings (handle unicode escapes like \u0026)
+unescape_json() {
+    local text="$1"
+
+    # First, decode unicode escapes (\uXXXX)
+    # This handles common cases like \u0026 (&), \u003c (<), \u003e (>)
+    while [[ "$text" =~ \\u([0-9a-fA-F]{4}) ]]; do
+        local hex="${BASH_REMATCH[1]}"
+        local dec=$((16#$hex))
+        # Use printf to convert to actual character
+        local char=$(printf "\\$(printf '%03o' "$dec")")
+        text="${text/\\u$hex/$char}"
+    done
+
+    # Then handle standard JSON escapes
+    text="${text//\\\\/\\}"    # \\ -> \
+    text="${text//\\\"/\"}"    # \" -> "
+
+    echo "$text"
+}
+
 # Enforce lowercase on commit message while preserving acronyms and ticket numbers
 enforce_lowercase() {
     local message="$1"
@@ -1649,7 +1670,8 @@ call_ollama() {
     fi
 
     # Extract commit message from response
-    echo "$response" | grep -o '"response":"[^"]*"' | sed 's/"response":"//;s/"$//' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
+    local raw_message=$(echo "$response" | grep -o '"response":"[^"]*"' | sed 's/"response":"//;s/"$//' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    unescape_json "$raw_message"
 }
 
 # Call Anthropic API
@@ -1717,7 +1739,8 @@ call_anthropic() {
 
     # Extract commit message from response
     # Anthropic returns: {"content":[{"text":"...","type":"text"}],...}
-    echo "$response" | grep -o '"text":"[^"]*"' | head -1 | sed 's/"text":"//;s/"$//' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
+    local raw_message=$(echo "$response" | grep -o '"text":"[^"]*"' | head -1 | sed 's/"text":"//;s/"$//' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    unescape_json "$raw_message"
 }
 
 # Call OpenAI API
@@ -1791,7 +1814,8 @@ call_openai() {
 
     # Extract commit message from response
     # OpenAI returns: {"choices":[{"message":{"content":"..."},...}],...}
-    echo "$response" | grep -o '"content":"[^"]*"' | head -1 | sed 's/"content":"//;s/"$//' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
+    local raw_message=$(echo "$response" | grep -o '"content":"[^"]*"' | head -1 | sed 's/"content":"//;s/"$//' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    unescape_json "$raw_message"
 }
 
 # Call the appropriate AI provider
