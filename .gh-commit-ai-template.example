@@ -1,0 +1,117 @@
+# Example Commit Message Templates for gh-commit-ai
+#
+# Copy this file to .gh-commit-ai-template in your repo root to customize
+# your commit message format.
+#
+# Available template variables:
+#   {{emoji}}          - Gitmoji emoji (if USE_GITMOJI=true)
+#   {{type}}           - Commit type (feat, fix, docs, etc.)
+#   {{scope}}          - Scope with parentheses (auth), or empty
+#   {{breaking_marker}} - ! if breaking change, empty otherwise
+#   {{message}}        - Summary message
+#   {{bullets}}        - Bullet points with changes
+#   {{breaking}}       - BREAKING CHANGE footer if present
+#   {{ticket}}         - Ticket number from branch (e.g., ABC-123)
+#   {{branch}}         - Current branch name
+#   {{author}}         - Git author name
+#   {{date}}           - Current date (YYYY-MM-DD)
+#   {{files_changed}}  - Number of files changed
+#
+# Note: Empty variables are automatically removed from the output.
+
+# ============================================================================
+# DEFAULT TEMPLATE (same as built-in format)
+# ============================================================================
+# This is the standard conventional commit format used by gh-commit-ai:
+
+{{emoji}} {{type}}{{scope}}: {{message}}
+
+{{bullets}}
+{{breaking}}
+
+
+# ============================================================================
+# TEMPLATE WITH TICKET NUMBER
+# ============================================================================
+# Automatically includes ticket number from branch name:
+
+{{emoji}} {{type}}{{scope}}: {{message}}
+
+{{bullets}}
+{{breaking}}
+
+Ticket: {{ticket}}
+
+
+# ============================================================================
+# DETAILED TEMPLATE WITH METADATA
+# ============================================================================
+# Includes additional context about the commit:
+
+{{emoji}} {{type}}{{scope}}: {{message}}
+
+{{bullets}}
+{{breaking}}
+
+Branch: {{branch}}
+Ticket: {{ticket}}
+Files: {{files_changed}} changed
+Date: {{date}}
+
+
+# ============================================================================
+# ANGULAR STYLE TEMPLATE
+# ============================================================================
+# Follows Angular commit message conventions:
+
+{{type}}{{scope}}: {{message}}
+
+{{bullets}}
+
+{{breaking}}
+
+
+# ============================================================================
+# MINIMAL TEMPLATE (no bullets)
+# ============================================================================
+# Just the summary line:
+
+{{emoji}} {{type}}{{scope}}: {{message}}
+
+
+# ============================================================================
+# CUSTOM PROJECT TEMPLATE
+# ============================================================================
+# Example for projects with specific requirements:
+
+[{{ticket}}] {{emoji}} {{type}}{{scope}}: {{message}}
+
+Changes:
+{{bullets}}
+
+{{breaking}}
+
+Reviewed-by: {{author}}
+Committed: {{date}}
+
+
+# ============================================================================
+# USAGE INSTRUCTIONS
+# ============================================================================
+#
+# 1. Choose one of the templates above (or create your own)
+# 2. Copy it to .gh-commit-ai-template in your repo root
+# 3. Remove all the comments and example templates
+# 4. The AI will automatically format messages using your template
+#
+# Example minimal setup:
+#   $ cp .gh-commit-ai-template.example .gh-commit-ai-template
+#   $ edit .gh-commit-ai-template  # Keep only the template you want
+#   $ gh commit-ai                 # Will use your custom template
+#
+# Tips:
+# - Variables that are empty will be removed automatically
+# - Blank lines in the template are preserved
+# - The AI generates the content; template just formats it
+# - You can mix and match variables however you like
+#

@@ -468,6 +468,305 @@ Examples:
 - Input: "Feat: Add User Authentication With JWT" → Output: "feat: add user authentication with JWT"
 - Input: "Fix: Resolve API Connection Issue For EWQ-123" → Output: "fix: resolve API connection issue for EWQ-123"
 
+## Commit Templates
+
+The extension supports custom commit message templates that allow you to control the exact format of your commit messages. Templates are applied after the AI generates the message content, giving you full control over the final format.
+
+### Overview
+
+**Template System Architecture:**
+1. AI generates commit message with standard format (type, scope, summary, bullets)
+2. Template system parses the AI-generated message into components
+3. If `.gh-commit-ai-template` exists, applies custom template
+4. Otherwise, uses built-in format (no change)
+
+**Key Functions:**
+- `detect_project_type()` (lines ~1794-1842): Detects project type from files (web-app, library, cli, general)
+- `load_template()` (lines ~1844-1892): Loads custom template or returns built-in template
+- `parse_commit_components()` (lines ~1894-1948): Parses AI message into template variables
+- `apply_template()` (lines ~1950-2023): Substitutes variables and returns formatted message
+
+### Template Variables
+
+All available variables that can be used in templates:
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `{{emoji}}` | Gitmoji emoji (if enabled) | ✨ |
+| `{{type}}` | Commit type | feat |
+| `{{scope}}` | Scope with parentheses | (auth) |
+| `{{breaking_marker}}` | ! if breaking change | ! |
+| `{{message}}` | Summary message | add user authentication |
+| `{{bullets}}` | Bullet points | - implement JWT<br>- create login endpoint |
+| `{{breaking}}` | BREAKING CHANGE footer | BREAKING CHANGE: removed... |
+| `{{ticket}}` | Ticket from branch | ABC-123 |
+| `{{branch}}` | Current branch name | feature/ABC-123-auth |
+| `{{author}}` | Git author name | John Doe |
+| `{{date}}` | Current date | 2025-12-02 |
+| `{{files_changed}}` | Number of files | 5 |
+
+**Note:** Empty variables are automatically removed from the output.
+
+### Template File
+
+**Location:** `.gh-commit-ai-template` in repository root
+
+**Format:** Plain text file with template variables using `{{variable}}` syntax
+
+**When to Use:**
+- Only applied if `.gh-commit-ai-template` file exists
+- Without this file, uses standard conventional commit format
+- Opt-in by design - doesn't affect default behavior
+
+### Built-in Templates
+
+The extension includes built-in templates based on detected project type:
+
+**Web App Template** (detects: package.json with react/vue/angular/webpack/vite):
+```
+{{emoji}} {{type}}{{scope}}: {{message}}
+
+{{bullets}}
+{{breaking}}
+```
+
+**Library Template** (detects: setup.py, Cargo.toml, go.mod):
+```
+{{emoji}} {{type}}{{scope}}: {{message}}
+
+{{bullets}}
+{{breaking}}
+
+Changes: {{files_changed}} files changed
+```
+
+**CLI Tool Template** (detects: bin/ or cmd/ directory):
+```
+{{emoji}} {{type}}{{scope}}: {{message}}
+
+{{bullets}}
+{{breaking}}
+```
+
+**General Template** (default fallback):
+```
+{{emoji}} {{type}}{{scope}}: {{message}}
+
+{{bullets}}
+{{breaking}}
+```
+
+### Example Templates
+
+**Standard Template (default):**
+```
+{{emoji}} {{type}}{{scope}}: {{message}}
+
+{{bullets}}
+{{breaking}}
+```
+
+**Template with Ticket Number:**
+```
+{{emoji}} {{type}}{{scope}}: {{message}}
+
+{{bullets}}
+{{breaking}}
+
+Ticket: {{ticket}}
+```
+
+**Detailed Template with Metadata:**
+```
+{{emoji}} {{type}}{{scope}}: {{message}}
+
+{{bullets}}
+{{breaking}}
+
+Branch: {{branch}}
+Ticket: {{ticket}}
+Files: {{files_changed}} changed
+Date: {{date}}
+```
+
+**Angular Style (no emoji):**
+```
+{{type}}{{scope}}: {{message}}
+
+{{bullets}}
+
+{{breaking}}
+```
+
+**Minimal (summary only):**
+```
+{{emoji}} {{type}}{{scope}}: {{message}}
+```
+
+**Custom Project Format:**
+```
+[{{ticket}}] {{emoji}} {{type}}{{scope}}: {{message}}
+
+Changes:
+{{bullets}}
+
+{{breaking}}
+
+Reviewed-by: {{author}}
+Committed: {{date}}
+```
+
+### Usage
+
+**1. Create Template File:**
+```bash
+# Copy example template
+cp .gh-commit-ai-template.example .gh-commit-ai-template
+
+# Edit to keep only the template you want
+nano .gh-commit-ai-template
+```
+
+**2. Customize Template:**
+```bash
+# Example: Add ticket number to all commits
+cat > .gh-commit-ai-template << 'EOF'
+{{emoji}} {{type}}{{scope}}: {{message}}
+
+{{bullets}}
+{{breaking}}
+
+Ticket: {{ticket}}
+EOF
+```
+
+**3. Generate Commit:**
+```bash
+# Template will be automatically applied
+gh commit-ai
+```
+
+### Integration with Existing Features
+
+Templates work seamlessly with all existing features:
+
+- **USE_SCOPE=true**: `{{scope}}` will include (scope) or be empty
+- **USE_GITMOJI=true**: `{{emoji}}` will include emoji or be empty
+- **Branch Intelligence**: `{{ticket}}` extracted from branch name
+- **Breaking Changes**: `{{breaking_marker}}` becomes ! and `{{breaking}}` includes footer
+- **Lowercase Enforcement**: Applied before template processing
+- **Multiple Options Mode**: Each option formatted with same template
+
+### Project Type Detection
+
+The extension automatically detects project type to select appropriate built-in template:
+
+**Detection Logic:**
+1. **Web App**: package.json contains react/vue/angular/svelte/next/nuxt/webpack/vite
+2. **Library**:
+   - Python: setup.py or pyproject.toml exists
+   - Rust: Cargo.toml with [lib] section
+   - Go: go.mod exists without main.go
+   - Node: package.json with "type": "module"
+3. **CLI Tool**:
+   - bin/ or cmd/ directory exists
+   - Cargo.toml without [lib]
+   - Go with package main
+4. **General**: Default fallback for all other projects
+
+**Note:** Project type only affects built-in templates. Custom `.gh-commit-ai-template` always takes precedence.
+
+### Template Processing Flow
+
+**Execution Order (lines 2603-2613 for single message, 2556-2567 for multiple options):**
+```
+1. AI generates message → COMMIT_MSG
+2. Strip markdown fences
+3. Validate message not empty
+4. Enforce lowercase (unless NO_LOWERCASE=true)
+5. IF .gh-commit-ai-template exists:
+   a. Detect project type
+   b. Load template
+   c. Parse message components
+   d. Apply template substitution
+   e. Clean up empty lines
+6. Save to history
+7. Display to user
+```
+
+**Example Flow:**
+```bash
+# AI generates:
+feat: add user authentication
+
+- implement JWT token generation
+- create login endpoint
+
+# Template (.gh-commit-ai-template):
+[{{ticket}}] {{type}}: {{message}}
+
+Changes:
+{{bullets}}
+
+# Final output (branch: feature/ABC-123-auth):
+[ABC-123] feat: add user authentication
+
+Changes:
+- implement JWT token generation
+- create login endpoint
+```
+
+### Tips and Best Practices
+
+1. **Start Simple**: Copy one of the example templates and customize incrementally
+2. **Test First**: Use `--dry-run` or `--preview` to test templates without committing
+3. **Remove Comments**: Template file should only contain the template itself
+4. **Empty Variables**: Don't worry about empty variables - they're automatically removed
+5. **Preserve Format**: The AI generates the content; template just rearranges it
+6. **Version Control**: Add `.gh-commit-ai-template` to your repo for team consistency
+7. **Per-Project**: Each repo can have its own template for project-specific needs
+
+### Example: Setting Up Team Template
+
+```bash
+# Create team template
+cat > .gh-commit-ai-template << 'EOF'
+{{emoji}} {{type}}{{scope}}: {{message}}
+
+{{bullets}}
+{{breaking}}
+
+Ticket: {{ticket}}
+Reviewed-by: {{author}}
+EOF
+
+# Commit to repo
+git add .gh-commit-ai-template
+git commit -m "chore: add commit message template for team"
+
+# Team members pull and automatically use template
+git pull
+gh commit-ai  # Uses team template
+```
+
+### Troubleshooting
+
+**Template not being applied:**
+- Verify `.gh-commit-ai-template` exists in repo root
+- Check file has no syntax errors (just plain text with {{variables}})
+- Run with `--preview` to test without committing
+
+**Variables showing as empty:**
+- `{{ticket}}`: Requires branch name with pattern ABC-123
+- `{{emoji}}`: Requires USE_GITMOJI=true
+- `{{scope}}`: Requires USE_SCOPE=true or AI detected scope
+- `{{breaking}}`: Only present for actual breaking changes
+
+**Formatting issues:**
+- Template uses exact spacing/newlines from template file
+- Empty lines are preserved
+- Lines with only empty variables are removed
+
 ## Intelligent Type Detection
 
 The extension uses two complementary systems to suggest the appropriate commit type:

@@ -240,11 +240,15 @@ Add feature requests from users here as they come in.
 - [x] Learn emoji usage from commit history (already supported via history learning feature)
 
 #### 18. Commit Templates
-- [ ] Support custom commit message templates per project
-- [ ] Template variables: `{{type}}`, `{{scope}}`, `{{message}}`, etc.
-- [ ] Project type detection (web app, library, CLI tool, etc.)
-- [ ] Template file: `.gh-commit-ai-template`
-- [ ] Built-in templates for common project types
+- [x] Support custom commit message templates per project
+- [x] Template variables: `{{type}}`, `{{scope}}`, `{{message}}`, `{{emoji}}`, `{{bullets}}`, `{{breaking}}`, `{{ticket}}`, `{{branch}}`, `{{author}}`, `{{date}}`, `{{files_changed}}`
+- [x] Project type detection (web app, library, CLI tool, general)
+- [x] Template file: `.gh-commit-ai-template`
+- [x] Built-in templates for common project types
+- [x] Example template file: `.gh-commit-ai-template.example`
+- [x] Comprehensive documentation in CLAUDE.md
+- [x] Parsing and variable substitution system
+- [x] Integration with all existing features (scopes, gitmoji, breaking changes, etc.)
 
 #### 19. Multi-language Support
 - [ ] Generate commit messages in different languages
@@ -253,11 +257,14 @@ Add feature requests from users here as they come in.
 - [ ] Maintain conventional commit format across languages
 
 #### 20. PR Description Generator
-- [ ] New command: `gh commit-ai pr-description`
-- [ ] Analyze commits since branch diverged from main
-- [ ] Generate comprehensive PR description
-- [ ] Include summary, changes, testing notes
-- [ ] Integration with `gh pr create --body`
+- [x] New command: `gh commit-ai pr-description`
+- [x] Analyze commits since branch diverged from main
+- [x] Generate comprehensive PR description
+- [x] Include summary, changes, testing notes
+- [x] Support `--base` flag to specify base branch
+- [x] Support `--output` flag to save to file
+- [x] Auto-detect base branch (main/master)
+- [x] Comprehensive help with examples
 
 #### 21. Commit Splitting Suggestions
 - [ ] Detect when commit is too large (>1000 lines)
