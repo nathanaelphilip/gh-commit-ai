@@ -1670,7 +1670,29 @@ call_ollama() {
     fi
 
     # Extract commit message from response
-    local raw_message=$(echo "$response" | grep -o '"response":"[^"]*"' | sed 's/"response":"//;s/"$//' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    # Use awk to properly extract JSON string value (handles escaped quotes)
+    local raw_message=$(echo "$response" | awk -F'"response":"' '{
+        if (NF > 1) {
+            str = $2
+            result = ""
+            escaped = 0
+            for (i = 1; i <= length(str); i++) {
+                c = substr(str, i, 1)
+                if (escaped) {
+                    result = result c
+                    escaped = 0
+                } else if (c == "\\") {
+                    result = result c
+                    escaped = 1
+                } else if (c == "\"") {
+                    break
+                } else {
+                    result = result c
+                }
+            }
+            print result
+        }
+    }')
     unescape_json "$raw_message"
 }
 
@@ -1739,7 +1761,30 @@ call_anthropic() {
 
     # Extract commit message from response
     # Anthropic returns: {"content":[{"text":"...","type":"text"}],...}
-    local raw_message=$(echo "$response" | grep -o '"text":"[^"]*"' | head -1 | sed 's/"text":"//;s/"$//' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    # Use awk to properly extract JSON string value (handles escaped quotes)
+    local raw_message=$(echo "$response" | awk -F'"text":"' '{
+        if (NF > 1) {
+            str = $2
+            result = ""
+            escaped = 0
+            for (i = 1; i <= length(str); i++) {
+                c = substr(str, i, 1)
+                if (escaped) {
+                    result = result c
+                    escaped = 0
+                } else if (c == "\\") {
+                    result = result c
+                    escaped = 1
+                } else if (c == "\"") {
+                    break
+                } else {
+                    result = result c
+                }
+            }
+            print result
+            exit
+        }
+    }')
     unescape_json "$raw_message"
 }
 
@@ -1814,7 +1859,30 @@ call_openai() {
 
     # Extract commit message from response
     # OpenAI returns: {"choices":[{"message":{"content":"..."},...}],...}
-    local raw_message=$(echo "$response" | grep -o '"content":"[^"]*"' | head -1 | sed 's/"content":"//;s/"$//' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    # Use awk to properly extract JSON string value (handles escaped quotes)
+    local raw_message=$(echo "$response" | awk -F'"content":"' '{
+        if (NF > 1) {
+            str = $2
+            result = ""
+            escaped = 0
+            for (i = 1; i <= length(str); i++) {
+                c = substr(str, i, 1)
+                if (escaped) {
+                    result = result c
+                    escaped = 0
+                } else if (c == "\\") {
+                    result = result c
+                    escaped = 1
+                } else if (c == "\"") {
+                    break
+                } else {
+                    result = result c
+                }
+            }
+            print result
+            exit
+        }
+    }')
     unescape_json "$raw_message"
 }
 
