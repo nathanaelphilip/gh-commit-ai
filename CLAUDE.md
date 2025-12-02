@@ -167,6 +167,21 @@ Environment variables take precedence over config files (defined at lines 69-78)
   - When disabled (default), generates: `feat: add login`
   - When enabled, generates: `feat(auth): add login`
 
+- `USE_GITMOJI`: Enable/disable gitmoji emoji prefixes (default: `false`)
+  - When disabled (default), generates: `feat: add login`
+  - When enabled, generates: `✨ feat: add login`
+  - Gitmoji mappings:
+    - ✨ feat: new feature
+    - 🐛 fix: bug fix
+    - 📝 docs: documentation
+    - 💄 style: formatting/styling
+    - ♻️ refactor: code refactoring
+    - ✅ test: adding tests
+    - 🔧 chore: tooling/config/maintenance
+    - 🚀 perf: performance improvement
+    - 🔒 security: security fix
+  - Can be combined with `USE_SCOPE`: `✨ feat(auth): add login`
+
 **Performance:**
 - `DIFF_MAX_LINES`: Maximum diff lines to send to AI (default: `200`) - Reduces token usage and speeds up generation
 

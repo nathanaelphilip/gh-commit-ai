@@ -205,19 +205,24 @@ Add feature requests from users here as they come in.
 ### Advanced Features
 
 #### 16. Gitmoji Support
-- [ ] Add emoji prefixes to commit types
-- [ ] Configuration option to enable/disable gitmoji
-- [ ] Standard mappings:
+- [x] Add emoji prefixes to commit types
+- [x] Configuration option to enable/disable gitmoji
+- [x] Standard mappings:
   - ✨ feat: new feature
   - 🐛 fix: bug fix
   - 📝 docs: documentation
   - 💄 style: formatting
   - ♻️ refactor: code refactoring
   - ✅ test: adding tests
-  - 🔧 chore: tooling/config
+  - 🔧 chore: tooling/config/maintenance
   - 🚀 perf: performance improvement
   - 🔒 security: security fix
-- [ ] Learn emoji usage from commit history
+- [x] Works with both scoped and non-scoped formats
+- [x] Examples:
+  - `✨ feat: add user authentication`
+  - `🐛 fix(api): resolve timeout issue`
+  - `✨ feat!(auth): redesign authentication API`
+- [x] Learn emoji usage from commit history (already supported via history learning feature)
 
 #### 17. Commit Templates
 - [ ] Support custom commit message templates per project

@@ -57,6 +57,9 @@ parse_yaml_config() {
             auto_select_model|AUTO_SELECT_MODEL)
                 CONFIG_AUTO_SELECT_MODEL="${CONFIG_AUTO_SELECT_MODEL:-$value}"
                 ;;
+            use_gitmoji|USE_GITMOJI)
+                CONFIG_USE_GITMOJI="${CONFIG_USE_GITMOJI:-$value}"
+                ;;
         esac
     done < "$config_file"
 }
@@ -82,6 +85,7 @@ OPENAI_MODEL="${OPENAI_MODEL:-${CONFIG_OPENAI_MODEL:-gpt-4o-mini}}"
 OPENAI_API_KEY="${OPENAI_API_KEY:-}"
 DIFF_MAX_LINES="${DIFF_MAX_LINES:-${CONFIG_DIFF_MAX_LINES:-200}}"  # Limit diff lines for faster processing
 USE_SCOPE="${USE_SCOPE:-${CONFIG_USE_SCOPE:-false}}"  # Enable/disable conventional commit scopes
+USE_GITMOJI="${USE_GITMOJI:-${CONFIG_USE_GITMOJI:-false}}"  # Enable/disable gitmoji prefixes
 LEARN_FROM_HISTORY="${LEARN_FROM_HISTORY:-${CONFIG_LEARN_FROM_HISTORY:-true}}"  # Enable/disable learning from commit history
 AUTO_SELECT_MODEL="${AUTO_SELECT_MODEL:-${CONFIG_AUTO_SELECT_MODEL:-false}}"  # Auto-select recommended model based on commit size
 
@@ -570,6 +574,7 @@ while [[ $# -gt 0 ]]; do
             echo "Environment Variables:"
             echo "  AI_PROVIDER         AI provider to use (ollama, anthropic, openai)"
             echo "  USE_SCOPE           Enable/disable scopes (true/false)"
+            echo "  USE_GITMOJI         Enable/disable gitmoji prefixes (true/false)"
             echo "  DIFF_MAX_LINES      Maximum diff lines to send to AI"
             echo "  AUTO_SELECT_MODEL   Auto-select model based on commit size (true/false)"
             echo "  GH_COMMIT_AI        Set to 1 to enable hook (opt-in)"
@@ -588,6 +593,7 @@ while [[ $# -gt 0 ]]; do
             echo "  gh commit-ai install-hook"
             echo "  GH_COMMIT_AI=1 git commit    # With hook installed"
             echo "  USE_SCOPE=false gh commit-ai"
+            echo "  USE_GITMOJI=true gh commit-ai"
             exit 0
             ;;
         *)
@@ -1214,8 +1220,45 @@ if [ "$IS_BREAKING" = "true" ]; then
     CLOSING_INSTRUCTION="$CLOSING_INSTRUCTION This is a BREAKING CHANGE - add ! after type and include BREAKING CHANGE footer."
 fi
 
-# Prepare prompt for Ollama
-if [ "$USE_SCOPE" = "true" ]; then
+# Prepare prompt with scope and gitmoji options
+# Define gitmoji mappings
+GITMOJI_INSTRUCTION=""
+if [ "$USE_GITMOJI" = "true" ]; then
+    GITMOJI_INSTRUCTION="
+GITMOJI PREFIXES:
+Add the appropriate emoji prefix before the type:
+- ✨ feat: new feature
+- 🐛 fix: bug fix
+- 📝 docs: documentation
+- 💄 style: formatting/styling
+- ♻️ refactor: code refactoring
+- ✅ test: adding tests
+- 🔧 chore: tooling/config/maintenance
+- 🚀 perf: performance improvement
+- 🔒 security: security fix"
+fi
+
+# Build format instruction based on USE_SCOPE and USE_GITMOJI
+if [ "$USE_SCOPE" = "true" ] && [ "$USE_GITMOJI" = "true" ]; then
+    SCOPE_INSTRUCTION="OUTPUT FORMAT (summary line MUST be first):
+<emoji> <type>(<scope>): <concise summary of all changes below>
+$GITMOJI_INSTRUCTION
+
+The scope should be a short noun describing what part of the codebase changed:
+- auth, api, ui, db, cli, docs, config, tests, deps, etc.
+- Choose the most relevant scope based on which files/areas changed
+- If changes span multiple areas, pick the primary one
+
+BREAKING CHANGES:
+- If this is a breaking change, add ! after type: <emoji> <type>!(<scope>):
+- Add a BREAKING CHANGE footer after the bullets explaining the breaking change"
+    SCOPE_EXAMPLES="Examples:
+- ✨ feat(auth): add JWT token validation
+- 🐛 fix(api): resolve timeout in user endpoint
+- ✨ feat!(api): redesign authentication flow
+
+BREAKING CHANGE: Legacy /auth/login endpoint removed, use /auth/v2/login instead"
+elif [ "$USE_SCOPE" = "true" ]; then
     SCOPE_INSTRUCTION="OUTPUT FORMAT (summary line MUST be first):
 <type>(<scope>): <concise summary of all changes below>
 
@@ -1231,6 +1274,20 @@ BREAKING CHANGES:
 - feat(auth): add JWT token validation
 - fix(api): resolve timeout in user endpoint
 - feat!(api): redesign authentication flow
+
+BREAKING CHANGE: Legacy /auth/login endpoint removed, use /auth/v2/login instead"
+elif [ "$USE_GITMOJI" = "true" ]; then
+    SCOPE_INSTRUCTION="OUTPUT FORMAT (summary line MUST be first):
+<emoji> <type>: <concise summary of all changes below>
+$GITMOJI_INSTRUCTION
+
+BREAKING CHANGES:
+- If this is a breaking change, add ! after type: <emoji> <type>!:
+- Add a BREAKING CHANGE footer after the bullets explaining the breaking change"
+    SCOPE_EXAMPLES="Examples:
+- ✨ feat: add user authentication
+- 🐛 fix: resolve database connection issue
+- ✨ feat!: redesign authentication API
 
 BREAKING CHANGE: Legacy /auth/login endpoint removed, use /auth/v2/login instead"
 else

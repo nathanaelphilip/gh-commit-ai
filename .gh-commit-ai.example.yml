@@ -41,6 +41,23 @@ openai_model: gpt-4o-mini
 #   true:  feat(auth): add user authentication
 use_scope: false
 
+# Enable/disable gitmoji prefixes
+# Default: false
+# Examples:
+#   false: feat: add user authentication
+#   true:  ✨ feat: add user authentication
+# Gitmoji mappings:
+#   ✨ feat (new feature)
+#   🐛 fix (bug fix)
+#   📝 docs (documentation)
+#   💄 style (formatting)
+#   ♻️ refactor (code refactoring)
+#   ✅ test (adding tests)
+#   🔧 chore (tooling/config)
+#   🚀 perf (performance)
+#   🔒 security (security fix)
+use_gitmoji: false
+
 # Performance Configuration
 # Maximum number of diff lines to send to AI
 # Default: 200
