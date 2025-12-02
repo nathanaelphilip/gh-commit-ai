@@ -1458,6 +1458,7 @@ RULES:
 - Use lowercase only (except API, HTTP, JSON, JWT, SQL, ABC-123 tickets)
 - Use imperative mood (add/fix not added/fixed)
 - The summary should capture the essence of all bullets below it
+- Output plain text only, NO markdown formatting, NO code fences
 
 $SCOPE_EXAMPLES
 
@@ -2024,6 +2025,14 @@ case "$AI_PROVIDER" in
         exit 1
         ;;
 esac
+
+# Strip markdown code fences if AI wrapped the response
+# Remove lines that are just code fences (```diff, ```markdown, ```, etc.)
+COMMIT_MSG=$(echo "$COMMIT_MSG" | awk '
+    /^```[a-zA-Z]*$/ { next }  # Skip opening fence line
+    /^```$/ { next }            # Skip closing fence line
+    { print }
+')
 
 if [ -z "$COMMIT_MSG" ] || [ "$COMMIT_MSG" = "null" ]; then
     echo -e "${RED}Error: Failed to generate commit message"
