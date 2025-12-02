@@ -1370,13 +1370,16 @@ The scope should be a short noun describing what part of the codebase changed:
 - Choose the most relevant scope based on which files/areas changed
 - If changes span multiple areas, pick the primary one
 
-BREAKING CHANGES:
-- If this is a breaking change, add ! after type: <emoji> <type>!(<scope>):
-- Add a BREAKING CHANGE footer after the bullets explaining the breaking change"
-    SCOPE_EXAMPLES="Examples:
+BREAKING CHANGES (RARE - only for incompatible changes):
+- ONLY add ! if this breaks existing functionality for users
+- Examples: removing APIs, changing CLI flags, changing config format
+- Bug fixes, new features, and refactors are NOT breaking changes
+- If breaking, add ! after type: <emoji> <type>!(<scope>):
+- Add a BREAKING CHANGE footer explaining what breaks"
+    SCOPE_EXAMPLES="Examples (note: most commits should NOT have !):
 - ✨ feat(auth): add JWT token validation
 - 🐛 fix(api): resolve timeout in user endpoint
-- ✨ feat!(api): redesign authentication flow
+- ✨ feat!(api): remove legacy login endpoint
 
 BREAKING CHANGE: Legacy /auth/login endpoint removed, use /auth/v2/login instead"
 elif [ "$USE_SCOPE" = "true" ]; then
@@ -1388,13 +1391,16 @@ The scope should be a short noun describing what part of the codebase changed:
 - Choose the most relevant scope based on which files/areas changed
 - If changes span multiple areas, pick the primary one
 
-BREAKING CHANGES:
-- If this is a breaking change, add ! after type: <type>!(<scope>):
-- Add a BREAKING CHANGE footer after the bullets explaining the breaking change"
-    SCOPE_EXAMPLES="Examples:
+BREAKING CHANGES (RARE - only for incompatible changes):
+- ONLY add ! if this breaks existing functionality for users
+- Examples: removing APIs, changing CLI flags, changing config format
+- Bug fixes, new features, and refactors are NOT breaking changes
+- If breaking, add ! after type: <type>!(<scope>):
+- Add a BREAKING CHANGE footer explaining what breaks"
+    SCOPE_EXAMPLES="Examples (note: most commits should NOT have !):
 - feat(auth): add JWT token validation
 - fix(api): resolve timeout in user endpoint
-- feat!(api): redesign authentication flow
+- feat!(api): remove legacy login endpoint
 
 BREAKING CHANGE: Legacy /auth/login endpoint removed, use /auth/v2/login instead"
 elif [ "$USE_GITMOJI" = "true" ]; then
@@ -1402,26 +1408,32 @@ elif [ "$USE_GITMOJI" = "true" ]; then
 <emoji> <type>: <concise summary of all changes below>
 $GITMOJI_INSTRUCTION
 
-BREAKING CHANGES:
-- If this is a breaking change, add ! after type: <emoji> <type>!:
-- Add a BREAKING CHANGE footer after the bullets explaining the breaking change"
-    SCOPE_EXAMPLES="Examples:
+BREAKING CHANGES (RARE - only for incompatible changes):
+- ONLY add ! if this breaks existing functionality for users
+- Examples: removing APIs, changing CLI flags, changing config format
+- Bug fixes, new features, and refactors are NOT breaking changes
+- If breaking, add ! after type: <emoji> <type>!:
+- Add a BREAKING CHANGE footer explaining what breaks"
+    SCOPE_EXAMPLES="Examples (note: most commits should NOT have !):
 - ✨ feat: add user authentication
 - 🐛 fix: resolve database connection issue
-- ✨ feat!: redesign authentication API
+- ✨ feat!: remove legacy login endpoint
 
 BREAKING CHANGE: Legacy /auth/login endpoint removed, use /auth/v2/login instead"
 else
     SCOPE_INSTRUCTION="OUTPUT FORMAT (summary line MUST be first):
 <type>: <concise summary of all changes below>
 
-BREAKING CHANGES:
-- If this is a breaking change, add ! after type: <type>!:
-- Add a BREAKING CHANGE footer after the bullets explaining the breaking change"
-    SCOPE_EXAMPLES="Examples:
+BREAKING CHANGES (RARE - only for incompatible changes):
+- ONLY add ! if this breaks existing functionality for users
+- Examples: removing APIs, changing CLI flags, changing config format
+- Bug fixes, new features, and refactors are NOT breaking changes
+- If breaking, add ! after type: <type>!:
+- Add a BREAKING CHANGE footer explaining what breaks"
+    SCOPE_EXAMPLES="Examples (note: most commits should NOT have !):
 - feat: add user authentication
 - fix: resolve database connection issue
-- feat!: redesign authentication API
+- feat!: remove legacy login endpoint
 
 BREAKING CHANGE: Legacy /auth/login endpoint removed, use /auth/v2/login instead"
 fi
@@ -1458,7 +1470,8 @@ RULES:
 - Use lowercase only (except API, HTTP, JSON, JWT, SQL, ABC-123 tickets)
 - Use imperative mood (add/fix not added/fixed)
 - The summary should capture the essence of all bullets below it
-- Output plain text only, NO markdown formatting, NO code fences
+- Do NOT use ! unless instructions above say this breaks existing functionality
+- Output ONLY the commit message, NO explanations, NO markdown, NO code fences
 
 $SCOPE_EXAMPLES
 
@@ -2026,12 +2039,28 @@ case "$AI_PROVIDER" in
         ;;
 esac
 
-# Strip markdown code fences if AI wrapped the response
-# Remove lines that are just code fences (```diff, ```markdown, ```, etc.)
+# Strip markdown code fences and explanations if AI added them
+# Remove lines that are just code fences and any explanatory text after the commit
 COMMIT_MSG=$(echo "$COMMIT_MSG" | awk '
-    /^```[a-zA-Z]*$/ { next }  # Skip opening fence line
-    /^```$/ { next }            # Skip closing fence line
+    /^```[a-zA-Z]*$/ { next }   # Skip opening fence line
+    /^```$/ { next }             # Skip closing fence line
+    /^\*\*explanation/ { exit }  # Stop at explanation section
+    /^\*\*why/ { exit }          # Stop at why section
+    /^\*\*note/ { exit }         # Stop at note section
     { print }
+' | awk '
+    # Remove trailing blank lines
+    { lines[NR] = $0 }
+    END {
+        for (i = 1; i <= NR; i++) {
+            if (i == NR) {
+                # Last line - check if followed by blanks
+                if (lines[i] != "") print lines[i]
+            } else if (lines[i] != "" || lines[i+1] != "") {
+                print lines[i]
+            }
+        }
+    }
 ')
 
 if [ -z "$COMMIT_MSG" ] || [ "$COMMIT_MSG" = "null" ]; then
