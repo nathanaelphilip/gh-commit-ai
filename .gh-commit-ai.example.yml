@@ -8,9 +8,12 @@
 # 4. Built-in defaults
 
 # AI Provider Selection
-# Options: ollama, anthropic, openai
-# Default: ollama
-ai_provider: ollama
+# Options: auto, ollama, anthropic, openai
+# Default: auto (automatically detects what's available)
+# - "auto" will prefer Ollama (free, local) if running, otherwise tries API providers
+# - Ollama: Free, runs locally, requires ollama to be installed and running
+# - Anthropic/OpenAI: Requires API key, paid but high quality
+ai_provider: auto
 
 # Ollama Configuration
 # Model to use when ai_provider is ollama

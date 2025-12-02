@@ -173,6 +173,21 @@ This document tracks potential improvements and features for gh-commit-ai.
 - [x] Shows tip when recommendation differs from current model
 - [x] Works with all three providers (Ollama, Anthropic, OpenAI)
 
+### 16. Automatic Provider & Model Detection
+- [x] Auto-detect available AI providers on first run
+- [x] Check for Anthropic/OpenAI API keys
+- [x] Check if Ollama is running and has models installed
+- [x] Automatically select best available provider
+- [x] Auto-select best Ollama model from installed models
+- [x] Priority list of preferred models for commit messages:
+  - Prefer code-focused models (qwen2.5-coder, codellama)
+  - Prefer small-to-medium models (faster, good quality)
+  - Fall back to any available model
+- [x] Show detection message: "Using Ollama with model: X (auto-detected)"
+- [x] Helpful error when no providers available with setup instructions
+- [x] Default AI_PROVIDER set to "auto" for zero-config experience
+- [x] Manual override still supported (set AI_PROVIDER explicitly)
+
 ## Quick Wins (Easy to Implement)
 
 - [x] **`--version` flag** - Show current version number
@@ -204,7 +219,7 @@ Add feature requests from users here as they come in.
 
 ### Advanced Features
 
-#### 16. Gitmoji Support
+#### 17. Gitmoji Support
 - [x] Add emoji prefixes to commit types
 - [x] Configuration option to enable/disable gitmoji
 - [x] Standard mappings:
@@ -224,34 +239,34 @@ Add feature requests from users here as they come in.
   - `✨ feat!(auth): redesign authentication API`
 - [x] Learn emoji usage from commit history (already supported via history learning feature)
 
-#### 17. Commit Templates
+#### 18. Commit Templates
 - [ ] Support custom commit message templates per project
 - [ ] Template variables: `{{type}}`, `{{scope}}`, `{{message}}`, etc.
 - [ ] Project type detection (web app, library, CLI tool, etc.)
 - [ ] Template file: `.gh-commit-ai-template`
 - [ ] Built-in templates for common project types
 
-#### 18. Multi-language Support
+#### 19. Multi-language Support
 - [ ] Generate commit messages in different languages
 - [ ] Configuration: `COMMIT_LANGUAGE` (en, es, fr, de, ja, zh, etc.)
 - [ ] Auto-detect from git config or system locale
 - [ ] Maintain conventional commit format across languages
 
-#### 19. PR Description Generator
+#### 20. PR Description Generator
 - [ ] New command: `gh commit-ai pr-description`
 - [ ] Analyze commits since branch diverged from main
 - [ ] Generate comprehensive PR description
 - [ ] Include summary, changes, testing notes
 - [ ] Integration with `gh pr create --body`
 
-#### 20. Commit Splitting Suggestions
+#### 21. Commit Splitting Suggestions
 - [ ] Detect when commit is too large (>1000 lines)
 - [ ] AI suggests logical ways to split the commit
 - [ ] Group related changes together
 - [ ] Interactive mode to review and apply splits
 - [ ] Preserve git history properly
 
-#### 21. Code Review Mode
+#### 22. Code Review Mode
 - [ ] New command: `gh commit-ai review`
 - [ ] Analyze diff for potential issues:
   - Security vulnerabilities
@@ -261,7 +276,7 @@ Add feature requests from users here as they come in.
   - TODO/FIXME comments
 - [ ] Provide suggestions before committing
 
-#### 22. Semantic Versioning Suggestions
+#### 23. Semantic Versioning Suggestions
 - [ ] Analyze commits since last tag
 - [ ] Suggest next version number based on changes:
   - Major: breaking changes detected
@@ -270,7 +285,7 @@ Add feature requests from users here as they come in.
 - [ ] Consider conventional commit types
 - [ ] Integration with version bump commands
 
-#### 23. Auto-fix Formatting
+#### 24. Auto-fix Formatting
 - [ ] Detect and fix common formatting issues before commit
 - [ ] Trailing whitespace removal
 - [ ] Consistent line endings

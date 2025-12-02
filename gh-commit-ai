@@ -76,7 +76,7 @@ if [ -f ".gh-commit-ai.yml" ]; then
 fi
 
 # Configuration (priority: env vars > local config > global config > defaults)
-AI_PROVIDER="${AI_PROVIDER:-${CONFIG_AI_PROVIDER:-ollama}}"  # Options: ollama, anthropic, openai
+AI_PROVIDER="${AI_PROVIDER:-${CONFIG_AI_PROVIDER:-auto}}"  # Options: auto, ollama, anthropic, openai
 OLLAMA_MODEL="${OLLAMA_MODEL:-${CONFIG_OLLAMA_MODEL:-gemma3:12b}}"
 OLLAMA_HOST="${OLLAMA_HOST:-${CONFIG_OLLAMA_HOST:-http://localhost:11434}}"
 ANTHROPIC_MODEL="${ANTHROPIC_MODEL:-${CONFIG_ANTHROPIC_MODEL:-claude-3-5-sonnet-20241022}}"
@@ -88,6 +88,111 @@ USE_SCOPE="${USE_SCOPE:-${CONFIG_USE_SCOPE:-false}}"  # Enable/disable conventio
 USE_GITMOJI="${USE_GITMOJI:-${CONFIG_USE_GITMOJI:-false}}"  # Enable/disable gitmoji prefixes
 LEARN_FROM_HISTORY="${LEARN_FROM_HISTORY:-${CONFIG_LEARN_FROM_HISTORY:-true}}"  # Enable/disable learning from commit history
 AUTO_SELECT_MODEL="${AUTO_SELECT_MODEL:-${CONFIG_AUTO_SELECT_MODEL:-false}}"  # Auto-select recommended model based on commit size
+
+# Auto-detect available AI providers and models
+detect_available_providers() {
+    local available=""
+
+    # Check Anthropic (API key set)
+    if [ -n "$ANTHROPIC_API_KEY" ]; then
+        available="${available}anthropic "
+    fi
+
+    # Check OpenAI (API key set)
+    if [ -n "$OPENAI_API_KEY" ]; then
+        available="${available}openai "
+    fi
+
+    # Check Ollama (running and has models)
+    if curl -s --connect-timeout 1 "$OLLAMA_HOST/api/tags" >/dev/null 2>&1; then
+        local models=$(curl -s "$OLLAMA_HOST/api/tags" 2>/dev/null | grep -o '"name":"[^"]*"' | sed 's/"name":"//;s/"//' | wc -l)
+        if [ "$models" -gt 0 ]; then
+            available="${available}ollama "
+        fi
+    fi
+
+    echo "$available" | xargs  # Trim whitespace
+}
+
+# Get best available Ollama model
+get_best_ollama_model() {
+    # Query Ollama for available models
+    local models=$(curl -s "$OLLAMA_HOST/api/tags" 2>/dev/null | grep -o '"name":"[^"]*"' | sed 's/"name":"//;s/"//')
+
+    if [ -z "$models" ]; then
+        echo ""
+        return
+    fi
+
+    # Priority list of preferred models (in order of preference)
+    # Prefer small-to-medium models that are fast and good for commit messages
+    local preferred_models=(
+        "qwen2.5-coder:7b"
+        "qwen2.5-coder:3b"
+        "qwen2.5-coder:1.5b"
+        "codellama:7b"
+        "codellama:13b"
+        "gemma2:9b"
+        "gemma2:2b"
+        "llama3.2:3b"
+        "llama3.2:1b"
+        "llama3.1:8b"
+        "llama3:8b"
+        "mistral:7b"
+        "phi3:3.8b"
+        "phi3:mini"
+    )
+
+    # Check each preferred model in order
+    for preferred in "${preferred_models[@]}"; do
+        if echo "$models" | grep -q "^${preferred}$"; then
+            echo "$preferred"
+            return
+        fi
+    done
+
+    # If no preferred model found, return the first available model
+    echo "$models" | head -1
+}
+
+# Auto-select provider if set to "auto"
+AUTO_DETECTED=false
+if [ "$AI_PROVIDER" = "auto" ]; then
+    # Detect what's available
+    available_providers=$(detect_available_providers)
+
+    if [ -z "$available_providers" ]; then
+        echo -e "${RED}Error: No AI providers available${NC}"
+        echo ""
+        echo "Available options:"
+        echo "  1. Install Ollama (free, local): https://ollama.ai"
+        echo "     Then run: ollama pull qwen2.5-coder:7b"
+        echo ""
+        echo "  2. Set up Anthropic API:"
+        echo "     export ANTHROPIC_API_KEY=\"sk-ant-...\""
+        echo ""
+        echo "  3. Set up OpenAI API:"
+        echo "     export OPENAI_API_KEY=\"sk-proj-...\""
+        exit 1
+    fi
+
+    # Pick the best available provider (prefer local/free first, then API providers)
+    if echo "$available_providers" | grep -q "ollama"; then
+        AI_PROVIDER="ollama"
+        # Auto-select best Ollama model
+        detected_model=$(get_best_ollama_model)
+        if [ -n "$detected_model" ]; then
+            OLLAMA_MODEL="$detected_model"
+            AUTO_DETECTED=true
+        fi
+    elif echo "$available_providers" | grep -q "anthropic"; then
+        AI_PROVIDER="anthropic"
+        AUTO_DETECTED=true
+    elif echo "$available_providers" | grep -q "openai"; then
+        AI_PROVIDER="openai"
+        AUTO_DETECTED=true
+    fi
+fi
 
 # Generate changelog from commit history
 generate_changelog() {
@@ -572,7 +677,8 @@ while [[ $# -gt 0 ]]; do
             echo "  e - Edit in your default editor"
             echo ""
             echo "Environment Variables:"
-            echo "  AI_PROVIDER         AI provider to use (ollama, anthropic, openai)"
+            echo "  AI_PROVIDER         AI provider (auto, ollama, anthropic, openai)"
+            echo "                      Default: auto (detects what's available)"
             echo "  USE_SCOPE           Enable/disable scopes (true/false)"
             echo "  USE_GITMOJI         Enable/disable gitmoji prefixes (true/false)"
             echo "  DIFF_MAX_LINES      Maximum diff lines to send to AI"
@@ -858,6 +964,21 @@ else
     rm -f /tmp/gh-commit-ai-status-$$ /tmp/gh-commit-ai-stats-$$ /tmp/gh-commit-ai-diff-$$ /tmp/gh-commit-ai-size-$$
 
     echo "✓ Changes analyzed"
+
+    # Show auto-detection info if applicable
+    if [ "$AUTO_DETECTED" = "true" ]; then
+        case "$AI_PROVIDER" in
+            ollama)
+                echo "Using Ollama with model: $OLLAMA_MODEL (auto-detected)"
+                ;;
+            anthropic)
+                echo "Using Anthropic Claude (auto-detected)"
+                ;;
+            openai)
+                echo "Using OpenAI (auto-detected)"
+                ;;
+        esac
+    fi
 fi
 
 # Model recommendation based on commit size

@@ -148,7 +148,11 @@ Example: `AI_PROVIDER="${AI_PROVIDER:-${CONFIG_AI_PROVIDER:-ollama}}"`
 Environment variables take precedence over config files (defined at lines 69-78):
 
 **Provider Selection:**
-- `AI_PROVIDER`: Choose provider (default: `ollama`) - Options: `ollama`, `anthropic`, `openai`
+- `AI_PROVIDER`: Choose provider (default: `auto`) - Options: `auto`, `ollama`, `anthropic`, `openai`
+  - `auto`: Automatically detects available providers (prefers Ollama if running, then API providers)
+  - Detects Ollama availability by checking if it's running and has models installed
+  - Detects Anthropic/OpenAI by checking for API keys
+  - Shows helpful error if no providers are available
 
 **Ollama (default, local, free):**
 - `OLLAMA_MODEL`: Model to use (default: `gemma3:12b`)
