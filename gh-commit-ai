@@ -125,21 +125,50 @@ get_best_ollama_model() {
     fi
 
     # Priority list of preferred models (in order of preference)
-    # Prefer small-to-medium models that are fast and good for commit messages
+    # Prefer larger, more capable models for better instruction following
+    # Quality > Speed for commit messages
     local preferred_models=(
-        "qwen2.5-coder:7b"
-        "qwen2.5-coder:3b"
-        "qwen2.5-coder:1.5b"
-        "codellama:7b"
+        # Large code-focused models (best quality)
+        "qwen2.5-coder:32b"
+        "qwen2.5-coder:14b"
+        "codellama:34b"
         "codellama:13b"
-        "gemma2:9b"
-        "gemma2:2b"
-        "llama3.2:3b"
-        "llama3.2:1b"
+        "deepseek-coder:33b"
+        "deepseek-coder:6.7b"
+
+        # Medium code-focused models (good balance)
+        "qwen2.5-coder:7b"
+        "codellama:7b"
+        "codellama"  # Alias for latest (usually 7B)
+        "starcoder2:15b"
+        "starcoder2:7b"
+
+        # Large general models (good instruction following)
+        "llama3.3:70b"
+        "llama3.1:70b"
+        "gemma3:12b"
+        "qwen2.5:14b"
+        "qwen2.5:7b"
+
+        # Medium general models (decent quality)
         "llama3.1:8b"
         "llama3:8b"
+        "llama3"  # Alias for latest
+        "gemma2:9b"
         "mistral:7b"
+        "mistral"
+
+        # Smaller code models (faster but less capable)
+        "qwen2.5-coder:3b"
+        "starcoder2:3b"
+        "qwen2.5-coder:1.5b"
+
+        # Small general models (fast but struggle with instructions)
+        "gemma3:4b"
         "phi3:3.8b"
+        "llama3.2:3b"
+        "gemma2:2b"
+        "llama3.2:1b"
         "phi3:mini"
     )
 
