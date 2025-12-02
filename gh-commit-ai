@@ -454,6 +454,163 @@ generate_changelog() {
     fi
 }
 
+# Generate PR description from commits
+generate_pr_description() {
+    local base_branch="$1"
+    local output_file="$2"
+
+    # Check if we're in a git repository
+    if ! git rev-parse --git-dir > /dev/null 2>&1; then
+        echo -e "${RED}Error: Not a git repository${NC}" >&2
+        exit 1
+    fi
+
+    # Get current branch
+    local current_branch=$(git branch --show-current)
+    if [ -z "$current_branch" ]; then
+        echo -e "${RED}Error: Not on a branch (detached HEAD)${NC}" >&2
+        exit 1
+    fi
+
+    # Auto-detect base branch if not provided
+    if [ -z "$base_branch" ]; then
+        # Try common base branches
+        for candidate in main master develop development; do
+            if git show-ref --verify --quiet refs/heads/$candidate; then
+                base_branch=$candidate
+                break
+            fi
+        done
+
+        if [ -z "$base_branch" ]; then
+            echo -e "${RED}Error: Could not auto-detect base branch${NC}" >&2
+            echo "Please specify with --base <branch>" >&2
+            exit 1
+        fi
+    fi
+
+    # Verify base branch exists
+    if ! git show-ref --verify --quiet refs/heads/$base_branch; then
+        echo -e "${RED}Error: Base branch '$base_branch' does not exist${NC}" >&2
+        exit 1
+    fi
+
+    # Get merge base (where branch diverged)
+    local merge_base=$(git merge-base $base_branch HEAD 2>/dev/null)
+    if [ -z "$merge_base" ]; then
+        echo -e "${RED}Error: Could not find common ancestor with $base_branch${NC}" >&2
+        exit 1
+    fi
+
+    # Get commits since divergence
+    local commits=$(git log --pretty=format:"%H|%s|%b" ${merge_base}..HEAD)
+    if [ -z "$commits" ]; then
+        echo -e "${RED}Error: No commits found since divergence from $base_branch${NC}" >&2
+        exit 1
+    fi
+
+    # Count commits
+    local num_commits=$(echo "$commits" | wc -l | tr -d ' ')
+
+    # Get overall diff stats
+    local diff_stats=$(git diff --stat ${merge_base}..HEAD)
+
+    # Get file changes summary
+    local files_changed=$(git diff --name-status ${merge_base}..HEAD)
+
+    # Build commit summary (for AI)
+    local commit_summary=""
+    while IFS='|' read -r hash subject body; do
+        commit_summary="${commit_summary}
+- ${subject}"
+        if [ -n "$body" ]; then
+            # Include first line of body if it exists
+            local first_line=$(echo "$body" | head -1 | sed 's/^[[:space:]]*//')
+            if [ -n "$first_line" ]; then
+                commit_summary="${commit_summary}
+  ${first_line}"
+            fi
+        fi
+    done <<< "$commits"
+
+    # Create prompt for AI
+    local pr_prompt="Generate a comprehensive Pull Request description based on the commits and changes below.
+
+Branch: $current_branch
+Base branch: $base_branch
+Number of commits: $num_commits
+
+Commits:
+$commit_summary
+
+Diff stats:
+$diff_stats
+
+FILES CHANGED:
+$files_changed
+
+Generate a PR description with the following sections:
+
+## Summary
+A 2-3 sentence overview of what this PR accomplishes.
+
+## Changes
+- Detailed bullet points of key changes
+- Organized by category if applicable (features, fixes, refactoring, etc.)
+
+## Testing
+- How to test these changes
+- What scenarios to verify
+
+FORMAT:
+- Use markdown
+- Be concise but comprehensive
+- Focus on WHAT changed and WHY, not HOW
+- Highlight any breaking changes
+- Output ONLY the PR description, NO explanations"
+
+    # Show progress
+    echo "→ Analyzing $num_commits commits on branch: $current_branch" >&2
+    echo "→ Comparing against: $base_branch" >&2
+    echo "" >&2
+
+    # Call AI to generate PR description
+    local pr_description=""
+    case "$AI_PROVIDER" in
+        ollama)
+            pr_description=$(call_ollama "$pr_prompt")
+            ;;
+        anthropic)
+            pr_description=$(call_anthropic "$pr_prompt")
+            ;;
+        openai)
+            pr_description=$(call_openai "$pr_prompt")
+            ;;
+        *)
+            echo -e "${RED}Error: Unknown AI provider '$AI_PROVIDER'${NC}" >&2
+            exit 1
+            ;;
+    esac
+
+    # Strip any markdown fences
+    pr_description=$(echo "$pr_description" | awk '
+        /^```[a-zA-Z]*$/ { next }
+        /^```$/ { next }
+        /^\*\*explanation/ { exit }
+        /^\*\*why/ { exit }
+        /^\*\*note/ { exit }
+        { print }
+    ')
+
+    # Output result
+    if [ -n "$output_file" ]; then
+        echo "$pr_description" > "$output_file"
+        echo "✓ PR description saved to: $output_file" >&2
+    else
+        echo "$pr_description"
+    fi
+}
+
 # Parse command-line arguments
 DRY_RUN=false
 PREVIEW=false
@@ -636,6 +793,47 @@ elif [ "$1" = "uninstall-hook" ]; then
     fi
 
     exit 0
+elif [ "$1" = "pr-description" ]; then
+    PR_DESCRIPTION_MODE=true
+    shift
+
+    # Parse pr-description-specific flags
+    BASE_BRANCH=""
+    OUTPUT_FILE=""
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --base)
+                BASE_BRANCH="$2"
+                shift 2
+                ;;
+            --output|-o)
+                OUTPUT_FILE="$2"
+                shift 2
+                ;;
+            --help|-h)
+                echo "gh-commit-ai pr-description - Generate PR description from commits"
+                echo ""
+                echo "Usage: gh commit-ai pr-description [options]"
+                echo ""
+                echo "Options:"
+                echo "  --base <branch>     Base branch to compare against (default: auto-detect)"
+                echo "  --output, -o <file> Save to file instead of stdout"
+                echo "  --help, -h          Show this help message"
+                echo ""
+                echo "Examples:"
+                echo "  gh commit-ai pr-description"
+                echo "  gh commit-ai pr-description --base main"
+                echo "  gh commit-ai pr-description --output pr.md"
+                echo "  gh pr create --body \"\$(gh commit-ai pr-description)\""
+                exit 0
+                ;;
+            *)
+                echo -e "${RED}Error: Unknown pr-description option $1"
+                echo "Use 'gh commit-ai pr-description --help' for usage information"
+                exit 1
+                ;;
+        esac
+    done
 fi
 
 while [[ $# -gt 0 ]]; do
@@ -685,6 +883,7 @@ while [[ $# -gt 0 ]]; do
             echo "Commands:"
             echo "  (default)       Generate commit message for current changes"
             echo "  changelog       Generate changelog from commit history"
+            echo "  pr-description  Generate PR description from branch commits"
             echo "  install-hook    Install git hook for opt-in AI commits"
             echo "  uninstall-hook  Remove git hook"
             echo ""
@@ -902,6 +1101,12 @@ fi
 if [ "$CHANGELOG_MODE" = true ]; then
     echo "Generating changelog"
     generate_changelog "$CHANGELOG_SINCE" "$CHANGELOG_FORMAT"
+    exit 0
+fi
+
+# Handle PR description mode
+if [ "$PR_DESCRIPTION_MODE" = true ]; then
+    generate_pr_description "$BASE_BRANCH" "$OUTPUT_FILE"
     exit 0
 fi
 
