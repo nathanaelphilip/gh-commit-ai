@@ -1596,7 +1596,7 @@ fi
 # Prepare closing instruction
 CLOSING_INSTRUCTION="Think: What are all the changes? Then: What's the one-line summary that captures all of them?"
 if [ -n "$TICKET_NUMBER" ]; then
-    CLOSING_INSTRUCTION="$CLOSING_INSTRUCTION Include ticket $TICKET_NUMBER in the summary."
+    CLOSING_INSTRUCTION="$CLOSING_INSTRUCTION Include ticket as ($TICKET_NUMBER) after the type, like: feat: ($TICKET_NUMBER) summary text"
 fi
 if [ "$IS_BREAKING" = "true" ]; then
     CLOSING_INSTRUCTION="$CLOSING_INSTRUCTION This is a BREAKING CHANGE - add ! after type and include BREAKING CHANGE footer."
@@ -1639,7 +1639,9 @@ BREAKING CHANGES (RARE - only for incompatible changes):
 - Add a BREAKING CHANGE footer explaining what breaks"
     SCOPE_EXAMPLES="Examples (note: most commits should NOT have !):
 - ✨ feat(auth): add JWT token validation
+- ✨ feat(auth): (ABC-123) add JWT token validation
 - 🐛 fix(api): resolve timeout in user endpoint
+- 🐛 fix(api): (JIRA-456) resolve timeout in user endpoint
 - ✨ feat!(api): remove legacy login endpoint
 
 BREAKING CHANGE: Legacy /auth/login endpoint removed, use /auth/v2/login instead"
@@ -1660,7 +1662,9 @@ BREAKING CHANGES (RARE - only for incompatible changes):
 - Add a BREAKING CHANGE footer explaining what breaks"
     SCOPE_EXAMPLES="Examples (note: most commits should NOT have !):
 - feat(auth): add JWT token validation
+- feat(auth): (ABC-123) add JWT token validation
 - fix(api): resolve timeout in user endpoint
+- fix(api): (JIRA-456) resolve timeout in user endpoint
 - feat!(api): remove legacy login endpoint
 
 BREAKING CHANGE: Legacy /auth/login endpoint removed, use /auth/v2/login instead"
@@ -1677,7 +1681,9 @@ BREAKING CHANGES (RARE - only for incompatible changes):
 - Add a BREAKING CHANGE footer explaining what breaks"
     SCOPE_EXAMPLES="Examples (note: most commits should NOT have !):
 - ✨ feat: add user authentication
+- ✨ feat(auth): (ABC-123) add user login
 - 🐛 fix: resolve database connection issue
+- 🐛 fix(api): (JIRA-456) fix timeout error
 - ✨ feat!: remove legacy login endpoint
 
 BREAKING CHANGE: Legacy /auth/login endpoint removed, use /auth/v2/login instead"
@@ -1693,7 +1699,9 @@ BREAKING CHANGES (RARE - only for incompatible changes):
 - Add a BREAKING CHANGE footer explaining what breaks"
     SCOPE_EXAMPLES="Examples (note: most commits should NOT have !):
 - feat: add user authentication
+- feat: (ABC-123) add user login
 - fix: resolve database connection issue
+- fix: (JIRA-456) fix timeout error
 - feat!: remove legacy login endpoint
 
 BREAKING CHANGE: Legacy /auth/login endpoint removed, use /auth/v2/login instead"
@@ -1728,7 +1736,8 @@ $SCOPE_INSTRUCTION
 
 RULES:
 - Summary line: max 50 chars, describes the overall purpose
-- Use lowercase only (except API, HTTP, JSON, JWT, SQL, ABC-123 tickets)
+- Use lowercase for all text (except API, HTTP, JSON, JWT, SQL, and ticket codes like ABC-123)
+- Ticket codes must stay UPPERCASE: use (ABC-123) not (abc-123)
 - Use imperative mood (add/fix not added/fixed)
 - The summary should capture the essence of all bullets below it
 - Do NOT use ! unless instructions above say this breaks existing functionality
