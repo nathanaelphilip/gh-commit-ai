@@ -669,6 +669,11 @@ is_recent_message() {
     fi
 }
 
+# Clear message history (called after successful commit)
+clear_message_history() {
+    rm -f "$MESSAGE_HISTORY_DIR"/msg_*.txt 2>/dev/null || true
+}
+
 # Check for subcommands
 if [ "$1" = "changelog" ]; then
     CHANGELOG_MODE=true
@@ -2738,6 +2743,7 @@ $CLEAN_MSG
 EOF
 )"
             echo "✓ Amended commit successfully!"
+            clear_message_history
         else
             # Stage all changes if nothing is staged
             if git diff --cached --quiet; then
@@ -2751,6 +2757,7 @@ $CLEAN_MSG
 EOF
 )"
             echo "✓ Committed successfully!"
+            clear_message_history
         fi
         break
     elif [[ $REPLY =~ ^[Ee]$ ]]; then
@@ -2766,12 +2773,14 @@ $CLEAN_MSG
 EOF
 )"
             echo "✓ Amended commit with edited message!"
+            clear_message_history
         else
             git commit -e -m "$(cat <<EOF
 $CLEAN_MSG
 EOF
 )"
             echo "✓ Committed with edited message!"
+            clear_message_history
         fi
         break
     elif [[ $REPLY =~ ^[Rr]$ ]]; then

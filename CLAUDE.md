@@ -254,6 +254,7 @@ The extension automatically saves generated commit messages to a temporary histo
 - `save_message_history()` (lines ~632-642): Saves message to history with timestamp
 - `get_last_message()` (lines ~644-650): Retrieves last message from history
 - `is_recent_message()` (lines ~652-670): Checks if last message is within 5 minutes
+- `clear_message_history()` (lines ~672-675): Clears all saved messages (called after successful commit)
 
 ### Recovery Flow
 
@@ -393,6 +394,9 @@ Reuse this message? (y/n/r): y
 - Preview and dry-run modes skip recovery (expected to be read-only)
 - History is per-machine (stored in /tmp)
 - Messages survive terminal crashes but not system reboots
+- **History is cleared after successful commit** (prevents reusing committed messages)
+  - Cleared after: `y` (accept), `e` (edit), both normal and `--amend` modes
+  - Function: `clear_message_history()` (line ~673)
 
 ## Interactive Editing Mode
 
