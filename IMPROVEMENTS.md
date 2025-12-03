@@ -296,13 +296,24 @@ Add feature requests from users here as they come in.
 - [x] Smart diff sampling for large changes
 
 #### 23. Semantic Versioning Suggestions
-- [ ] Analyze commits since last tag
-- [ ] Suggest next version number based on changes:
+- [x] Analyze commits since last tag
+- [x] Suggest next version number based on changes:
   - Major: breaking changes detected
   - Minor: new features added
   - Patch: only bug fixes
-- [ ] Consider conventional commit types
-- [ ] Integration with version bump commands
+- [x] Consider conventional commit types
+- [x] Integration with version bump commands
+- [x] New command: `gh commit-ai version` (alias: `semver`)
+- [x] Automatic version parsing and validation
+- [x] Detailed analysis of commit types since last tag
+- [x] Breaking change detection (! suffix or BREAKING CHANGE)
+- [x] Feature, fix, and other commit counting
+- [x] Clear reasoning for suggested bump type
+- [x] `--create-tag` flag to create tag automatically
+- [x] `--prefix` flag for custom tag prefixes
+- [x] First version suggestion (0.1.0) when no tags exist
+- [x] Interactive tag creation with confirmation
+- [x] Tag message generation with commit summary
 
 #### 24. Auto-fix Formatting
 - [ ] Detect and fix common formatting issues before commit

@@ -1307,6 +1307,115 @@ code_review_openai_model: gpt-4o
 
 If no dedicated model is configured, the tool falls back to the regular model and shows a helpful tip if you're using a small model.
 
+## Semantic Versioning Suggestions
+
+The tool includes a `version` subcommand (alias: `semver`) that analyzes commits and suggests the next semantic version number.
+
+**Usage:**
+```bash
+gh commit-ai version [--create-tag] [--prefix <prefix>]
+gh commit-ai semver -t  # Short alias with tag creation
+```
+
+**Architecture:**
+
+The `suggest_next_version()` function (lines 471-645) provides intelligent version suggestions:
+
+**Features:**
+- Analyzes all commits since the last git tag
+- Suggests version bump based on conventional commits:
+  - **Major bump (X.0.0)**: Breaking changes detected (feat!, fix!, BREAKING CHANGE)
+  - **Minor bump (0.X.0)**: New features added (feat:)
+  - **Patch bump (0.0.X)**: Only bug fixes or other changes (fix:, docs:, chore:)
+- Counts and categorizes commit types
+- Provides clear reasoning for suggested bump
+- Interactive tag creation with confirmation
+- Generates tag message with commit summary
+- Handles first version (suggests 0.1.0 when no tags exist)
+
+**Implementation Details:**
+
+1. **Tag Detection** (lines 482-509):
+   - Gets last tag with `git describe --tags --abbrev=0`
+   - If no tags exist, suggests v0.1.0 as first version
+   - Interactive creation for first tag
+
+2. **Version Parsing** (lines 511-523):
+   - Extracts version from tag (removes prefix)
+   - Parses major.minor.patch components
+   - Validates format (X.Y.Z)
+   - Supports custom prefixes (default: "v")
+
+3. **Commit Analysis** (lines 528-558):
+   - Gets all commits since last tag
+   - Analyzes each commit message with regex:
+     - Breaking: `^[a-z]+(...)?!:` or `BREAKING CHANGE`
+     - Features: `^feat(...)?:`
+     - Fixes: `^fix(...)?:`
+     - Other: everything else
+   - Counts each category
+
+4. **Version Bump Logic** (lines 560-585):
+   - Priority: Breaking > Features > Fixes > Other
+   - Major bump resets minor and patch to 0
+   - Minor bump resets patch to 0
+   - Patch bump increments only patch
+
+5. **Output Display** (lines 589-644):
+   - Shows current version and suggested version
+   - Displays commit analysis with counts
+   - Explains reasoning for bump type
+   - Provides git commands for tagging
+
+6. **Tag Creation** (lines 614-640):
+   - Interactive confirmation (y/n)
+   - Generates tag message with commit stats
+   - Creates annotated tag with `git tag -a`
+   - Shows next steps (push commands)
+
+**Examples:**
+```bash
+# Check suggested version
+gh commit-ai version
+
+# Create tag automatically
+gh commit-ai version --create-tag
+
+# Use custom prefix
+gh commit-ai version --prefix "release-"
+
+# Short alias
+gh commit-ai semver -t
+```
+
+**Example Output:**
+```
+Current version: v0.1.0
+
+Suggested version: v0.2.0 (minor bump)
+
+Analysis of 14 commits since v0.1.0:
+  • 9 new feature(s)
+  • 4 bug fix(es)
+  • 1 other commit(s) (docs, chore, etc.)
+
+Reasoning:
+  • New features added (no breaking changes) → MINOR bump
+  • Bumping from 0.1.0 to 0.2.0
+
+To create this tag:
+  git tag -a v0.2.0 -m "Release v0.2.0"
+  git push origin v0.2.0
+```
+
+**Benefits:**
+- Automates version number selection
+- Follows semantic versioning strictly
+- Based on conventional commits
+- Reduces human error in versioning
+- Clear audit trail of reasoning
+- Integrates with existing git workflow
+
 ## Changelog Generation
 
 The tool includes a `changelog` subcommand that generates formatted changelogs from conventional commit history.

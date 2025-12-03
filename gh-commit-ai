@@ -103,6 +103,10 @@ CODE_REVIEW_MODEL="${CODE_REVIEW_MODEL:-${CONFIG_CODE_REVIEW_MODEL:-}}"  # Dedic
 CODE_REVIEW_ANTHROPIC_MODEL="${CODE_REVIEW_ANTHROPIC_MODEL:-${CONFIG_CODE_REVIEW_ANTHROPIC_MODEL:-}}"  # Anthropic model for reviews
 CODE_REVIEW_OPENAI_MODEL="${CODE_REVIEW_OPENAI_MODEL:-${CONFIG_CODE_REVIEW_OPENAI_MODEL:-}}"  # OpenAI model for reviews
 
+# Git diff exclusion patterns - exclude lock files and other generated files
+# These files are auto-generated and not useful for AI analysis
+GIT_EXCLUDE_PATTERN="':(exclude)package-lock.json' ':(exclude)yarn.lock' ':(exclude)pnpm-lock.yaml' ':(exclude)Gemfile.lock' ':(exclude)Cargo.lock' ':(exclude)poetry.lock' ':(exclude)composer.lock' ':(exclude)Pipfile.lock' ':(exclude)go.sum' ':(exclude)*.min.js' ':(exclude)*.min.css'"
+
 # Auto-detect available AI providers and models
 detect_available_providers() {
     local available=""
@@ -468,6 +472,182 @@ generate_changelog() {
     fi
 }
 
+# Suggest next semantic version based on commits
+suggest_next_version() {
+    local create_tag="$1"
+    local tag_prefix="$2"
+
+    # Check if we're in a git repository
+    if ! git rev-parse --git-dir > /dev/null 2>&1; then
+        echo -e "${RED}Error: Not a git repository${NC}" >&2
+        exit 1
+    fi
+
+    # Get the last tag
+    local last_tag=$(git describe --tags --abbrev=0 2>/dev/null)
+
+    if [ -z "$last_tag" ]; then
+        echo -e "${YELLOW}No tags found in repository${NC}"
+        echo ""
+        echo "Suggested first version: ${GREEN}${tag_prefix}0.1.0${NC}"
+        echo ""
+        echo "Reasoning:"
+        echo "  • No previous tags exist"
+        echo "  • Starting with 0.1.0 (pre-release version)"
+        echo "  • Use 1.0.0 when ready for first stable release"
+        echo ""
+
+        if [ "$create_tag" = true ]; then
+            echo -n "Create tag ${tag_prefix}0.1.0? (y/n): "
+            read -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                git tag -a "${tag_prefix}0.1.0" -m "Release ${tag_prefix}0.1.0"
+                echo -e "${GREEN}✓ Tag ${tag_prefix}0.1.0 created${NC}"
+                echo "Push with: git push origin ${tag_prefix}0.1.0"
+            else
+                echo "Tag creation cancelled"
+            fi
+        fi
+        return 0
+    fi
+
+    # Parse the current version
+    local current_version="${last_tag#$tag_prefix}"  # Remove prefix
+
+    # Extract major, minor, patch
+    if [[ ! "$current_version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
+        echo -e "${RED}Error: Cannot parse version from tag: $last_tag${NC}" >&2
+        echo "Expected format: ${tag_prefix}X.Y.Z (e.g., v1.2.3)" >&2
+        exit 1
+    fi
+
+    local major="${BASH_REMATCH[1]}"
+    local minor="${BASH_REMATCH[2]}"
+    local patch="${BASH_REMATCH[3]}"
+
+    echo -e "${BLUE}Current version: ${NC}${last_tag}"
+    echo ""
+
+    # Get commits since last tag
+    local commits=$(git log "$last_tag..HEAD" --pretty=format:"%s" 2>/dev/null)
+
+    if [ -z "$commits" ]; then
+        echo -e "${YELLOW}No new commits since ${last_tag}${NC}"
+        echo ""
+        echo "Next version would be: ${GREEN}${tag_prefix}${major}.${minor}.${patch}${NC} (no change)"
+        return 0
+    fi
+
+    # Count commit types
+    local breaking_count=0
+    local feat_count=0
+    local fix_count=0
+    local other_count=0
+
+    # Analyze each commit
+    while IFS= read -r commit_msg; do
+        # Check for breaking changes (! after type or BREAKING CHANGE in message)
+        if [[ "$commit_msg" =~ ^[a-z]+(\([a-z0-9_-]+\))?!: ]] || [[ "$commit_msg" =~ BREAKING[[:space:]]CHANGE ]]; then
+            ((breaking_count++))
+        # Check for features
+        elif [[ "$commit_msg" =~ ^feat(\([a-z0-9_-]+\))?: ]]; then
+            ((feat_count++))
+        # Check for fixes
+        elif [[ "$commit_msg" =~ ^fix(\([a-z0-9_-]+\))?: ]]; then
+            ((fix_count++))
+        else
+            ((other_count++))
+        fi
+    done <<< "$commits"
+
+    # Determine version bump
+    local bump_type=""
+    local new_major=$major
+    local new_minor=$minor
+    local new_patch=$patch
+
+    if [ $breaking_count -gt 0 ]; then
+        # Breaking changes → Major bump
+        bump_type="major"
+        ((new_major++))
+        new_minor=0
+        new_patch=0
+    elif [ $feat_count -gt 0 ]; then
+        # New features → Minor bump
+        bump_type="minor"
+        ((new_minor++))
+        new_patch=0
+    elif [ $fix_count -gt 0 ]; then
+        # Bug fixes → Patch bump
+        bump_type="patch"
+        ((new_patch++))
+    else
+        # Only other commits (docs, chore, etc.) → Patch bump
+        bump_type="patch"
+        ((new_patch++))
+    fi
+
+    local suggested_version="${tag_prefix}${new_major}.${new_minor}.${new_patch}"
+
+    # Display analysis
+    echo -e "${GREEN}Suggested version: ${suggested_version}${NC} (${bump_type} bump)"
+    echo ""
+    echo "Analysis of $(echo "$commits" | wc -l | tr -d ' ') commits since ${last_tag}:"
+    [ $breaking_count -gt 0 ] && echo "  • ${breaking_count} breaking change(s) → Major bump required"
+    [ $feat_count -gt 0 ] && echo "  • ${feat_count} new feature(s)"
+    [ $fix_count -gt 0 ] && echo "  • ${fix_count} bug fix(es)"
+    [ $other_count -gt 0 ] && echo "  • ${other_count} other commit(s) (docs, chore, etc.)"
+    echo ""
+
+    # Show reasoning
+    echo "Reasoning:"
+    if [ $breaking_count -gt 0 ]; then
+        echo "  • Breaking changes detected → MAJOR bump"
+        echo "  • Bumping from ${major}.${minor}.${patch} to ${new_major}.${new_minor}.${new_patch}"
+    elif [ $feat_count -gt 0 ]; then
+        echo "  • New features added (no breaking changes) → MINOR bump"
+        echo "  • Bumping from ${major}.${minor}.${patch} to ${new_major}.${new_minor}.${new_patch}"
+    else
+        echo "  • Only fixes and other changes → PATCH bump"
+        echo "  • Bumping from ${major}.${minor}.${patch} to ${new_major}.${new_minor}.${new_patch}"
+    fi
+    echo ""
+
+    # Create tag if requested
+    if [ "$create_tag" = true ]; then
+        echo -n "Create tag ${suggested_version}? (y/n): "
+        read -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            # Generate tag message from commit summary
+            local tag_message="Release ${suggested_version}"
+            if [ $breaking_count -gt 0 ]; then
+                tag_message="${tag_message}\n\nBreaking Changes: ${breaking_count}"
+            fi
+            if [ $feat_count -gt 0 ]; then
+                tag_message="${tag_message}\nNew Features: ${feat_count}"
+            fi
+            if [ $fix_count -gt 0 ]; then
+                tag_message="${tag_message}\nBug Fixes: ${fix_count}"
+            fi
+
+            git tag -a "${suggested_version}" -m "$(echo -e "$tag_message")"
+            echo -e "${GREEN}✓ Tag ${suggested_version} created${NC}"
+            echo ""
+            echo "Next steps:"
+            echo "  git push origin ${suggested_version}     # Push the tag"
+            echo "  git push                                 # Push commits"
+        else
+            echo "Tag creation cancelled"
+        fi
+    else
+        echo "To create this tag:"
+        echo "  git tag -a ${suggested_version} -m \"Release ${suggested_version}\""
+        echo "  git push origin ${suggested_version}"
+    fi
+}
+
 # Generate code review for changes
 generate_code_review() {
     local review_all="$1"  # true = all changes, false = staged only
@@ -481,11 +661,11 @@ generate_code_review() {
 
     echo -e "${BLUE}← Analyzing changes${NC}" >&2
 
-    # Get the diff to review
+    # Get the diff to review (exclude lock files)
     local diff_content
     if [ "$review_all" = false ]; then
         # Staged changes only
-        diff_content=$(git diff --cached)
+        diff_content=$(eval "git diff --cached $GIT_EXCLUDE_PATTERN")
         if [ -z "$diff_content" ]; then
             echo -e "${RED}Error: No staged changes to review${NC}" >&2
             echo "Tip: Stage your changes with 'git add' or use --all to review all changes" >&2
@@ -493,7 +673,7 @@ generate_code_review() {
         fi
     else
         # All changes (staged + unstaged)
-        diff_content=$(git diff HEAD)
+        diff_content=$(eval "git diff HEAD $GIT_EXCLUDE_PATTERN")
         if [ -z "$diff_content" ]; then
             echo -e "${RED}Error: No changes to review${NC}" >&2
             exit 1
@@ -503,12 +683,12 @@ generate_code_review() {
     # Apply smart sampling if diff is too large
     diff_content=$(smart_sample_diff "$diff_content" "$DIFF_MAX_LINES")
 
-    # Get file statistics
+    # Get file statistics (exclude lock files)
     local file_stats
     if [ "$review_all" = false ]; then
-        file_stats=$(git diff --cached --stat)
+        file_stats=$(eval "git diff --cached --stat $GIT_EXCLUDE_PATTERN")
     else
-        file_stats=$(git diff HEAD --stat)
+        file_stats=$(eval "git diff HEAD --stat $GIT_EXCLUDE_PATTERN")
     fi
 
     echo -e "${BLUE}✓ Changes analyzed${NC}" >&2
@@ -940,6 +1120,52 @@ if [ "$1" = "changelog" ]; then
                 ;;
         esac
     done
+elif [ "$1" = "version" ] || [ "$1" = "semver" ]; then
+    VERSION_MODE=true
+    shift
+
+    # Parse version-specific flags
+    CREATE_TAG=false
+    TAG_PREFIX="v"
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --create-tag|-t)
+                CREATE_TAG=true
+                shift
+                ;;
+            --prefix)
+                TAG_PREFIX="$2"
+                shift 2
+                ;;
+            --help|-h)
+                echo "gh-commit-ai version - Suggest next semantic version"
+                echo ""
+                echo "Usage: gh commit-ai version [options]"
+                echo "       gh commit-ai semver [options]"
+                echo ""
+                echo "Options:"
+                echo "  --create-tag, -t    Create git tag for suggested version"
+                echo "  --prefix <prefix>   Tag prefix (default: 'v')"
+                echo "  --help, -h          Show this help message"
+                echo ""
+                echo "Analyzes commits since last tag to suggest next version:"
+                echo "  • Breaking changes → Major bump (1.0.0 → 2.0.0)"
+                echo "  • New features → Minor bump (1.0.0 → 1.1.0)"
+                echo "  • Bug fixes only → Patch bump (1.0.0 → 1.0.1)"
+                echo ""
+                echo "Examples:"
+                echo "  gh commit-ai version              # Suggest next version"
+                echo "  gh commit-ai version --create-tag # Suggest and create tag"
+                echo "  gh commit-ai semver -t            # Short alias with tag creation"
+                exit 0
+                ;;
+            *)
+                echo -e "${RED}Error: Unknown version option $1"
+                echo "Use 'gh commit-ai version --help' for usage information"
+                exit 1
+                ;;
+        esac
+    done
 elif [ "$1" = "install-hook" ]; then
     # Install prepare-commit-msg hook
     HOOK_DIR=".git/hooks"
@@ -1184,6 +1410,7 @@ while [[ $# -gt 0 ]]; do
             echo "Commands:"
             echo "  (default)       Generate commit message for current changes"
             echo "  review          Review code changes for potential issues"
+            echo "  version         Suggest next semantic version number"
             echo "  changelog       Generate changelog from commit history"
             echo "  pr-description  Generate PR description from branch commits"
             echo "  install-hook    Install git hook for opt-in AI commits"
@@ -1418,7 +1645,7 @@ if [ "$AMEND" = true ]; then
     # Get the changes from the last commit with loading animation (optimized - minimal git calls)
     (
         # Get all needed data with just two git calls (show for diff, numstat for stats)
-        SHOW_OUTPUT=$(git show --numstat HEAD)
+        SHOW_OUTPUT=$(eval "git show --numstat HEAD $GIT_EXCLUDE_PATTERN")
 
         # Extract stats from numstat output (before the diff starts)
         GIT_STATS=$(echo "$SHOW_OUTPUT" | awk '/^[0-9]+\t[0-9]+\t/ {print $3}' | head -10 | awk '{print "M " $0}')
@@ -1454,18 +1681,18 @@ if [ "$AMEND" = true ]; then
 
     echo "✓ Commit analyzed"
 else
-    # Check if there are changes to commit
-    if git diff --cached --quiet && git diff --quiet; then
+    # Check if there are changes to commit (exclude lock files from check)
+    if eval "git diff --cached --quiet $GIT_EXCLUDE_PATTERN" && eval "git diff --quiet $GIT_EXCLUDE_PATTERN"; then
         echo "No changes to commit"
         exit 0
     fi
 
     # Get git status and diff with loading animation (optimized - fewer git calls)
     (
-        # Use a single git diff call with --numstat to get both diff and stats
-        DIFF_WITH_NUMSTAT=$(git diff --cached --numstat 2>/dev/null || echo "")
+        # Use a single git diff call with --numstat to get both diff and stats (exclude lock files)
+        DIFF_WITH_NUMSTAT=$(eval "git diff --cached --numstat $GIT_EXCLUDE_PATTERN" 2>/dev/null || echo "")
         if [ -z "$DIFF_WITH_NUMSTAT" ]; then
-            DIFF_WITH_NUMSTAT=$(git diff --numstat 2>/dev/null || echo "")
+            DIFF_WITH_NUMSTAT=$(eval "git diff --numstat $GIT_EXCLUDE_PATTERN" 2>/dev/null || echo "")
             IS_STAGED=false
         else
             IS_STAGED=true
@@ -1477,11 +1704,11 @@ else
         # Extract stats from numstat
         GIT_STATS=$(echo "$DIFF_WITH_NUMSTAT" | awk '/^[0-9]+\t[0-9]+\t/ {print $3}')
 
-        # Get full diff (now we know if it's staged or not)
+        # Get full diff (now we know if it's staged or not, exclude lock files)
         if [ "$IS_STAGED" = "true" ]; then
-            FULL_DIFF=$(git diff --cached 2>/dev/null)
+            FULL_DIFF=$(eval "git diff --cached $GIT_EXCLUDE_PATTERN" 2>/dev/null)
         else
-            FULL_DIFF=$(git diff 2>/dev/null)
+            FULL_DIFF=$(eval "git diff $GIT_EXCLUDE_PATTERN" 2>/dev/null)
         fi
         GIT_DIFF=$(smart_sample_diff "$FULL_DIFF" "$DIFF_MAX_LINES")
 
@@ -2930,6 +3157,12 @@ call_openai() {
 
     unescape_json "$raw_message"
 }
+
+# Handle version suggestion mode
+if [ "$VERSION_MODE" = true ]; then
+    suggest_next_version "$CREATE_TAG" "$TAG_PREFIX"
+    exit 0
+fi
 
 # Handle code review mode (needs AI functions defined above)
 if [ "$CODE_REVIEW_MODE" = true ]; then
