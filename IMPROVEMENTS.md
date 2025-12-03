@@ -196,6 +196,8 @@ This document tracks potential improvements and features for gh-commit-ai.
 - [x] **`--type <type>` flag** - Force a specific commit type: `gh commit-ai --type fix`
 - [x] **`--max-lines <n>` flag** - Override DIFF_MAX_LINES from command line
 - [x] **Message history** - Save last 5 generated messages to `/tmp` for recovery
+- [x] **Message recovery** - Automatically recover last message if user accidentally exits (within 5 minutes)
+- [x] **Regenerate option** - Press 'r' at confirmation to regenerate message with different wording
 - [x] **`--no-lowercase` flag** - Disable automatic lowercase enforcement
 - [x] **Better error messages** - More helpful error messages for common issues
 - [x] **Progress indicator** - Show spinner/progress while waiting for AI

@@ -237,6 +237,163 @@ gh commit-ai --amend
 gh commit-ai
 ```
 
+## Message Recovery
+
+The extension automatically saves generated commit messages to a temporary history and offers to recover recent messages if you accidentally exit. This prevents having to regenerate messages and saves API costs.
+
+### Overview
+
+**Recovery System Architecture:**
+1. All generated messages saved to `/tmp/gh-commit-ai-history/msg_<timestamp>.txt`
+2. Keeps last 5 messages in history
+3. On startup, checks for messages generated within last 5 minutes
+4. Offers to reuse recent message or regenerate
+5. Recovery skipped for `--preview` and `--dry-run` modes
+
+**Key Functions:**
+- `save_message_history()` (lines ~632-642): Saves message to history with timestamp
+- `get_last_message()` (lines ~644-650): Retrieves last message from history
+- `is_recent_message()` (lines ~652-670): Checks if last message is within 5 minutes
+
+### Recovery Flow
+
+**When Recovery Triggers:**
+- A message was generated within last 5 minutes
+- Not in preview or dry-run mode
+- User runs `gh commit-ai` again
+
+**Recovery Prompt:**
+```
+💡 Found recent commit message from history:
+
+feat: add user authentication
+
+- implement JWT token generation
+- create login endpoint
+
+Reuse this message? (y/n/r to regenerate):
+```
+
+**Options:**
+- `y`: Reuse the recovered message (skip AI generation, save costs)
+- `n`: Cancel and exit
+- `r`: Regenerate a new message (call AI again)
+
+### Integration Points
+
+**Location in Code:**
+- Recovery check: lines ~2517-2545 (before AI provider call)
+- Conditional AI generation: lines ~2547-2691 (skipped if message recovered)
+- Recovery display: lines ~2693-2698 (show recovered message)
+
+**Execution Flow:**
+```
+1. User runs gh commit-ai
+2. IF recent message exists:
+   a. Display last message
+   b. Ask: reuse (y) / cancel (n) / regenerate (r)
+   c. If reuse: skip AI generation, use recovered message
+   d. If regenerate: continue to AI generation
+   e. If cancel: exit
+3. ELSE: continue to AI generation
+4. Process message (lowercase, template, etc.)
+5. Display and ask for confirmation
+```
+
+### Regenerate Option
+
+Users can also regenerate from the confirmation prompt after seeing any message:
+
+```
+Use this commit message? (y/n/e to edit/r to regenerate):
+```
+
+**Regenerate Flow (lines ~2777-2845):**
+1. User presses `r` at confirmation
+2. Call AI provider again with same prompt
+3. Apply all post-processing (strip fences, lowercase, template)
+4. Save new message to history
+5. Display regenerated message
+6. Loop back to confirmation prompt
+
+**Benefits:**
+- Try different phrasings without manual editing
+- Generate multiple variations to pick the best
+- Costs one additional API call per regeneration
+
+### Use Cases
+
+**Scenario 1: Accidental Exit**
+```bash
+# Generate message
+$ gh commit-ai
+✓ Generated commit message: ...
+Use this commit message? (y/n/e/r):
+# User accidentally presses Ctrl+C or closes terminal
+
+# Run again within 5 minutes
+$ gh commit-ai
+💡 Found recent commit message from history: ...
+Reuse this message? (y/n/r): y
+✓ Recovered commit message: ...
+# Message recovered, no API call needed
+```
+
+**Scenario 2: Want Different Wording**
+```bash
+$ gh commit-ai
+✓ Generated commit message: feat: implement user auth
+Use this commit message? (y/n/e/r): r
+
+Regenerating commit message...
+✓ Regenerated commit message: feat: add authentication system
+Use this commit message? (y/n/e/r): y
+# New wording, same functionality
+```
+
+**Scenario 3: Recovery After System Crash**
+```bash
+# Terminal crashes during confirmation
+# Restart within 5 minutes
+$ gh commit-ai
+💡 Found recent commit message from history: ...
+Reuse this message? (y/n/r): y
+# Continue where you left off
+```
+
+### Configuration
+
+**Time Window:**
+- Default: 5 minutes (300 seconds)
+- Configurable in code: `is_recent_message()` function (line 664)
+- To change: modify `if [ "$age" -lt 300 ]; then`
+
+**History Location:**
+- Directory: `/tmp/gh-commit-ai-history/`
+- Automatically cleaned by system (in /tmp)
+- Keeps last 5 messages only
+
+**History Format:**
+- Filename: `msg_<unix_timestamp>.txt`
+- Content: Raw commit message (with lowercase and template applied)
+- Sorted by modification time
+
+### Benefits
+
+1. **Cost Savings**: Reuse messages without calling AI API again
+2. **Time Savings**: Instant recovery vs. waiting for generation
+3. **Consistency**: Preserve exact wording if you liked it
+4. **Flexibility**: Can regenerate if you want something different
+5. **Safety Net**: Protection against accidental exits
+
+### Notes
+
+- Recovery only offers messages from within last 5 minutes
+- Older messages are not offered (prevents stale messages)
+- Preview and dry-run modes skip recovery (expected to be read-only)
+- History is per-machine (stored in /tmp)
+- Messages survive terminal crashes but not system reboots
+
 ## Interactive Editing Mode
 
 The interactive editing feature (invoked with `i` during confirmation) allows fine-grained editing without opening a text editor.
