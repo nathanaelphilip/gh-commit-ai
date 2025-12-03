@@ -120,7 +120,7 @@ The extension supports YAML configuration files for persistent settings (impleme
 - `parse_yaml_config()` - Pure bash YAML parser (no `yq` dependency)
 - Supports simple `key: value` format with comments
 - Maps YAML keys to `CONFIG_*` variables
-- Supported keys: `ai_provider`, `ollama_model`, `ollama_host`, `anthropic_model`, `openai_model`, `use_scope`, `diff_max_lines`
+- Supported keys: `ai_provider`, `ollama_model`, `ollama_host`, `anthropic_model`, `openai_model`, `use_scope`, `diff_max_lines`, `code_review_model`, `code_review_anthropic_model`, `code_review_openai_model`
 
 **Configuration Loading** (lines 58-67):
 - Global config loaded first: `parse_yaml_config "$HOME/.gh-commit-ai.yml"`
@@ -188,6 +188,13 @@ Environment variables take precedence over config files (defined at lines 69-78)
 
 **Performance:**
 - `DIFF_MAX_LINES`: Maximum diff lines to send to AI (default: `200`) - Reduces token usage and speeds up generation
+
+**Code Review Models (Optional):**
+- `CODE_REVIEW_MODEL`: Dedicated Ollama model for code reviews (falls back to `OLLAMA_MODEL` if not set)
+- `CODE_REVIEW_ANTHROPIC_MODEL`: Dedicated Anthropic model for code reviews (falls back to `ANTHROPIC_MODEL` if not set)
+- `CODE_REVIEW_OPENAI_MODEL`: Dedicated OpenAI model for code reviews (falls back to `OPENAI_MODEL` if not set)
+- These allow using larger, more capable models for reviews while using faster models for commit messages
+- Recommended: `qwen2.5-coder:14b`, `deepseek-coder:6.7b`, `claude-3-5-sonnet`, `gpt-4o`
 
 ## Command-Line Options
 
@@ -1195,6 +1202,110 @@ Automatically analyzes the repository's commit history to detect and match exist
 - Maintains consistency across team
 - Works with existing codebases
 - Can be disabled for standardized workflows
+
+## Code Review Mode
+
+The tool includes a `review` subcommand that performs AI-powered code review on your changes before committing.
+
+**Usage:**
+```bash
+gh commit-ai review [--all]
+```
+
+**Architecture:**
+
+The `generate_code_review()` function (lines 457-604) provides comprehensive code review:
+
+**Features:**
+- Reviews staged changes by default
+- Optional `--all` flag to review all changes (staged + unstaged)
+- Analyzes changes across 6 categories:
+  1. Security vulnerabilities (SQL injection, XSS, CSRF, exposed secrets)
+  2. Performance concerns (inefficient algorithms, memory leaks)
+  3. Code quality (best practices, naming, duplication)
+  4. Error handling (missing try-catch, unhandled errors)
+  5. Potential bugs (logic errors, edge cases, race conditions)
+  6. Maintainability (TODO/FIXME, magic numbers, documentation)
+
+**Review Format:**
+- Severity markers: 🔴 Critical, 🟡 Warning, 🔵 Info
+- File and line number references for each issue
+- Clear explanation of the problem
+- Suggested fixes and improvements
+- Overall assessment and recommendations
+
+**Implementation Details:**
+
+1. **Change Detection** (lines 470-487):
+   - Gets `git diff --cached` for staged changes
+   - Gets `git diff HEAD` for all changes (with `--all` flag)
+   - Validates that changes exist to review
+
+2. **Smart Sampling** (line 490):
+   - Uses `smart_sample_diff()` to handle large diffs
+   - Respects `DIFF_MAX_LINES` configuration
+   - Maintains context while reducing size
+
+3. **Comprehensive Prompt** (lines 502-541):
+   - Structured review request with clear categories
+   - Requests specific format (summary, issues, recommendations)
+   - Includes file stats and code diff with proper formatting
+
+4. **AI Integration** (lines 545-561):
+   - Works with all providers (Ollama, Anthropic, OpenAI)
+   - Same provider routing as commit message generation
+   - Error handling for failed reviews
+
+5. **Results Display** (lines 568-603):
+   - Formatted output with colored headers
+   - Token usage and cost tracking for paid APIs
+   - Daily cumulative cost display
+
+**Examples:**
+```bash
+# Review staged changes
+git add src/auth.js
+gh commit-ai review
+
+# Review all changes (staged + unstaged)
+gh commit-ai review --all
+
+# Example workflow: review before committing
+git add .
+gh commit-ai review
+# Fix any issues identified
+gh commit-ai  # Generate commit message
+```
+
+**Benefits:**
+- Catches issues before they enter version control
+- Educational: learn from AI suggestions
+- Consistent review quality across team
+- Identifies security and performance issues early
+- Complements commit message generation
+
+**Dedicated Review Models:**
+
+Code review requires deeper analysis than commit message generation, so you can configure dedicated models for reviews:
+
+```bash
+# Environment variables
+export CODE_REVIEW_MODEL="qwen2.5-coder:14b"  # For Ollama
+export CODE_REVIEW_ANTHROPIC_MODEL="claude-3-opus-20240229"  # For Anthropic
+export CODE_REVIEW_OPENAI_MODEL="gpt-4o"  # For OpenAI
+
+# Or in .gh-commit-ai.yml
+code_review_model: qwen2.5-coder:14b
+code_review_anthropic_model: claude-3-opus-20240229
+code_review_openai_model: gpt-4o
+```
+
+**Recommended Models for Code Review:**
+- **Ollama**: `qwen2.5-coder:14b`, `deepseek-coder:6.7b`, `codellama:13b`
+- **Anthropic**: `claude-3-5-sonnet-20241022`, `claude-3-opus-20240229`
+- **OpenAI**: `gpt-4o`, `gpt-4-turbo`
+
+If no dedicated model is configured, the tool falls back to the regular model and shows a helpful tip if you're using a small model.
 
 ## Changelog Generation
 

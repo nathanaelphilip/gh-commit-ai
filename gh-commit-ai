@@ -60,6 +60,15 @@ parse_yaml_config() {
             use_gitmoji|USE_GITMOJI)
                 CONFIG_USE_GITMOJI="${CONFIG_USE_GITMOJI:-$value}"
                 ;;
+            code_review_model|CODE_REVIEW_MODEL)
+                CONFIG_CODE_REVIEW_MODEL="${CONFIG_CODE_REVIEW_MODEL:-$value}"
+                ;;
+            code_review_anthropic_model|CODE_REVIEW_ANTHROPIC_MODEL)
+                CONFIG_CODE_REVIEW_ANTHROPIC_MODEL="${CONFIG_CODE_REVIEW_ANTHROPIC_MODEL:-$value}"
+                ;;
+            code_review_openai_model|CODE_REVIEW_OPENAI_MODEL)
+                CONFIG_CODE_REVIEW_OPENAI_MODEL="${CONFIG_CODE_REVIEW_OPENAI_MODEL:-$value}"
+                ;;
         esac
     done < "$config_file"
 }
@@ -88,6 +97,11 @@ USE_SCOPE="${USE_SCOPE:-${CONFIG_USE_SCOPE:-false}}"  # Enable/disable conventio
 USE_GITMOJI="${USE_GITMOJI:-${CONFIG_USE_GITMOJI:-false}}"  # Enable/disable gitmoji prefixes
 LEARN_FROM_HISTORY="${LEARN_FROM_HISTORY:-${CONFIG_LEARN_FROM_HISTORY:-true}}"  # Enable/disable learning from commit history
 AUTO_SELECT_MODEL="${AUTO_SELECT_MODEL:-${CONFIG_AUTO_SELECT_MODEL:-false}}"  # Auto-select recommended model based on commit size
+
+# Code review specific models (optional - falls back to regular models if not set)
+CODE_REVIEW_MODEL="${CODE_REVIEW_MODEL:-${CONFIG_CODE_REVIEW_MODEL:-}}"  # Dedicated model for code reviews (Ollama)
+CODE_REVIEW_ANTHROPIC_MODEL="${CODE_REVIEW_ANTHROPIC_MODEL:-${CONFIG_CODE_REVIEW_ANTHROPIC_MODEL:-}}"  # Anthropic model for reviews
+CODE_REVIEW_OPENAI_MODEL="${CODE_REVIEW_OPENAI_MODEL:-${CONFIG_CODE_REVIEW_OPENAI_MODEL:-}}"  # OpenAI model for reviews
 
 # Auto-detect available AI providers and models
 detect_available_providers() {
@@ -451,6 +465,219 @@ generate_changelog() {
             echo "$entry"
         done
         echo ""
+    fi
+}
+
+# Generate code review for changes
+generate_code_review() {
+    local review_all="$1"  # true = all changes, false = staged only
+
+    # Check if we're in a git repository
+    GIT_DIR=$(git rev-parse --git-dir 2>/dev/null)
+    if [ -z "$GIT_DIR" ]; then
+        echo -e "${RED}Error: Not a git repository${NC}" >&2
+        exit 1
+    fi
+
+    echo -e "${BLUE}← Analyzing changes${NC}" >&2
+
+    # Get the diff to review
+    local diff_content
+    if [ "$review_all" = false ]; then
+        # Staged changes only
+        diff_content=$(git diff --cached)
+        if [ -z "$diff_content" ]; then
+            echo -e "${RED}Error: No staged changes to review${NC}" >&2
+            echo "Tip: Stage your changes with 'git add' or use --all to review all changes" >&2
+            exit 1
+        fi
+    else
+        # All changes (staged + unstaged)
+        diff_content=$(git diff HEAD)
+        if [ -z "$diff_content" ]; then
+            echo -e "${RED}Error: No changes to review${NC}" >&2
+            exit 1
+        fi
+    fi
+
+    # Apply smart sampling if diff is too large
+    diff_content=$(smart_sample_diff "$diff_content" "$DIFF_MAX_LINES")
+
+    # Get file statistics
+    local file_stats
+    if [ "$review_all" = false ]; then
+        file_stats=$(git diff --cached --stat)
+    else
+        file_stats=$(git diff HEAD --stat)
+    fi
+
+    echo -e "${BLUE}✓ Changes analyzed${NC}" >&2
+
+    # Build the review prompt
+    local review_prompt="You are an expert code reviewer. Analyze the following code changes and provide a comprehensive code review.
+
+Focus on identifying:
+1. **Security Issues**: SQL injection, XSS, CSRF, insecure dependencies, exposed secrets, etc.
+2. **Performance Concerns**: Inefficient algorithms, unnecessary loops, memory leaks, blocking operations
+3. **Code Quality**: Violations of best practices, poor naming, duplicated code, overly complex logic
+4. **Error Handling**: Missing try-catch blocks, unhandled errors, improper error propagation
+5. **Potential Bugs**: Logic errors, edge cases, null/undefined handling, race conditions
+6. **Maintainability**: TODO/FIXME comments, magic numbers, lack of documentation, tight coupling
+
+For each issue found:
+- Use a severity marker: 🔴 Critical, 🟡 Warning, 🔵 Info
+- Specify the file and line number
+- Explain the issue clearly
+- Suggest a fix or improvement
+
+If no significant issues are found, provide a brief positive review.
+
+Format your review as:
+## Code Review Summary
+[Brief overall assessment]
+
+## Issues Found
+[List each issue with severity, location, description, and suggestion]
+
+## Recommendations
+[General recommendations for improvement]
+
+File changes:
+\`\`\`
+$file_stats
+\`\`\`
+
+Code diff:
+\`\`\`diff
+$diff_content
+\`\`\`
+
+Provide your review:"
+
+    echo "" >&2
+
+    # Use dedicated code review models if configured, otherwise fall back to regular models
+    local original_ollama_model="$OLLAMA_MODEL"
+    local original_anthropic_model="$ANTHROPIC_MODEL"
+    local original_openai_model="$OPENAI_MODEL"
+    local using_dedicated_model=false
+
+    if [ "$AI_PROVIDER" = "ollama" ] && [ -n "$CODE_REVIEW_MODEL" ]; then
+        OLLAMA_MODEL="$CODE_REVIEW_MODEL"
+        using_dedicated_model=true
+        echo -e "${BLUE}Using dedicated review model: $OLLAMA_MODEL${NC}" >&2
+    elif [ "$AI_PROVIDER" = "anthropic" ] && [ -n "$CODE_REVIEW_ANTHROPIC_MODEL" ]; then
+        ANTHROPIC_MODEL="$CODE_REVIEW_ANTHROPIC_MODEL"
+        using_dedicated_model=true
+        echo -e "${BLUE}Using dedicated review model: $ANTHROPIC_MODEL${NC}" >&2
+    elif [ "$AI_PROVIDER" = "openai" ] && [ -n "$CODE_REVIEW_OPENAI_MODEL" ]; then
+        OPENAI_MODEL="$CODE_REVIEW_OPENAI_MODEL"
+        using_dedicated_model=true
+        echo -e "${BLUE}Using dedicated review model: $OPENAI_MODEL${NC}" >&2
+    else
+        # Using regular model - show which one and potentially recommend a better model
+        local current_model
+        case "$AI_PROVIDER" in
+            ollama)
+                current_model="$OLLAMA_MODEL"
+                echo -e "${BLUE}Using $AI_PROVIDER model: $current_model${NC}" >&2
+
+                # Recommend better models for code review if using a small/weak model
+                if [[ "$current_model" =~ (gemma2:2b|gemma3:4b|llama3.2:1b|llama3.2:3b|phi3:mini) ]]; then
+                    echo -e "${YELLOW}💡 Tip: For better code reviews, consider using a larger model:${NC}" >&2
+                    echo -e "${YELLOW}   CODE_REVIEW_MODEL=\"qwen2.5-coder:14b\" or \"deepseek-coder:6.7b\"${NC}" >&2
+                    echo -e "${YELLOW}   Or add to .gh-commit-ai.yml: code_review_model: qwen2.5-coder:14b${NC}" >&2
+                    echo "" >&2
+                fi
+                ;;
+            anthropic)
+                current_model="$ANTHROPIC_MODEL"
+                echo -e "${BLUE}Using $AI_PROVIDER model: $current_model${NC}" >&2
+
+                # Recommend Opus or Sonnet for code review if using Haiku
+                if [[ "$current_model" =~ haiku ]]; then
+                    echo -e "${YELLOW}💡 Tip: For more thorough code reviews, consider using Claude Sonnet or Opus${NC}" >&2
+                    echo -e "${YELLOW}   CODE_REVIEW_ANTHROPIC_MODEL=\"claude-3-5-sonnet-20241022\"${NC}" >&2
+                    echo "" >&2
+                fi
+                ;;
+            openai)
+                current_model="$OPENAI_MODEL"
+                echo -e "${BLUE}Using $AI_PROVIDER model: $current_model${NC}" >&2
+
+                # Recommend GPT-4o for code review if using mini
+                if [[ "$current_model" =~ mini ]]; then
+                    echo -e "${YELLOW}💡 Tip: For more thorough code reviews, consider using GPT-4o${NC}" >&2
+                    echo -e "${YELLOW}   CODE_REVIEW_OPENAI_MODEL=\"gpt-4o\"${NC}" >&2
+                    echo "" >&2
+                fi
+                ;;
+        esac
+    fi
+
+    # Call AI provider for review
+    local review_result
+    case "$AI_PROVIDER" in
+        ollama)
+            review_result=$(call_ollama "$review_prompt")
+            ;;
+        anthropic)
+            review_result=$(call_anthropic "$review_prompt")
+            ;;
+        openai)
+            review_result=$(call_openai "$review_prompt")
+            ;;
+        *)
+            echo -e "${RED}Error: Unknown AI provider: $AI_PROVIDER${NC}" >&2
+            exit 1
+            ;;
+    esac
+
+    # Restore original models
+    OLLAMA_MODEL="$original_ollama_model"
+    ANTHROPIC_MODEL="$original_anthropic_model"
+    OPENAI_MODEL="$original_openai_model"
+
+    if [ -z "$review_result" ]; then
+        echo -e "${RED}Error: Failed to generate code review${NC}" >&2
+        exit 1
+    fi
+
+    # Display the review
+    echo ""
+    echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${GREEN}✓ Code Review Complete${NC}"
+    echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo "$review_result"
+    echo ""
+
+    # Show cost information for paid APIs
+    if [ "$AI_PROVIDER" = "anthropic" ] || [ "$AI_PROVIDER" = "openai" ]; then
+        if [ -n "$INPUT_TOKENS" ] && [ -n "$OUTPUT_TOKENS" ]; then
+            local total_tokens=$((INPUT_TOKENS + OUTPUT_TOKENS))
+            echo -e "${BLUE}Token usage:${NC} $total_tokens tokens ($INPUT_TOKENS input + $OUTPUT_TOKENS output)"
+
+            # Calculate and display cost
+            local model
+            if [ "$AI_PROVIDER" = "anthropic" ]; then
+                model="$ANTHROPIC_MODEL"
+            else
+                model="$OPENAI_MODEL"
+            fi
+
+            local cost=$(calculate_cost "$AI_PROVIDER" "$model" "$INPUT_TOKENS" "$OUTPUT_TOKENS")
+            if [ -n "$cost" ]; then
+                echo -e "${BLUE}Estimated cost:${NC} \$$cost USD"
+
+                # Track cumulative cost
+                local total_cost=$(track_cumulative_cost "$cost")
+                if [ -n "$total_cost" ]; then
+                    echo -e "${BLUE}Today's total:${NC} \$$total_cost USD"
+                fi
+            fi
+            echo ""
+        fi
     fi
 }
 
@@ -867,6 +1094,47 @@ elif [ "$1" = "pr-description" ]; then
                 ;;
         esac
     done
+elif [ "$1" = "review" ]; then
+    CODE_REVIEW_MODE=true
+    shift
+
+    # Parse review-specific flags
+    REVIEW_STAGED_ONLY=true  # Default to staged changes
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --all)
+                REVIEW_STAGED_ONLY=false
+                shift
+                ;;
+            --help|-h)
+                echo "gh-commit-ai review - Code review assistant for your changes"
+                echo ""
+                echo "Usage: gh commit-ai review [options]"
+                echo ""
+                echo "Options:"
+                echo "  --all               Review all changes (staged + unstaged)"
+                echo "  --help, -h          Show this help message"
+                echo ""
+                echo "Reviews your changes for:"
+                echo "  • Security vulnerabilities"
+                echo "  • Performance concerns"
+                echo "  • Code style issues"
+                echo "  • Missing error handling"
+                echo "  • Potential bugs"
+                echo "  • TODO/FIXME comments"
+                echo ""
+                echo "Examples:"
+                echo "  gh commit-ai review              # Review staged changes"
+                echo "  gh commit-ai review --all        # Review all changes"
+                exit 0
+                ;;
+            *)
+                echo -e "${RED}Error: Unknown review option $1"
+                echo "Use 'gh commit-ai review --help' for usage information"
+                exit 1
+                ;;
+        esac
+    done
 fi
 
 while [[ $# -gt 0 ]]; do
@@ -915,6 +1183,7 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "Commands:"
             echo "  (default)       Generate commit message for current changes"
+            echo "  review          Review code changes for potential issues"
             echo "  changelog       Generate changelog from commit history"
             echo "  pr-description  Generate PR description from branch commits"
             echo "  install-hook    Install git hook for opt-in AI commits"
@@ -1124,8 +1393,9 @@ recommend_model() {
     esac
 }
 
-# Check if we're in a git repository
-if ! git rev-parse --git-dir > /dev/null 2>&1; then
+# Check if we're in a git repository (cache the result)
+GIT_DIR=$(git rev-parse --git-dir 2>/dev/null)
+if [ -z "$GIT_DIR" ]; then
     echo -e "${RED}Error: Not a git repository"
     exit 1
 fi
@@ -1145,17 +1415,24 @@ if [ "$AMEND" = true ]; then
         exit 1
     fi
 
-    # Get the changes from the last commit with loading animation
+    # Get the changes from the last commit with loading animation (optimized - minimal git calls)
     (
-        GIT_STATUS=$(git show --name-status --pretty=format:"" HEAD | grep -E '^[AMDRC]' | awk '{print $1 " " $2}')
-        GIT_STATS=$(git show --stat HEAD | tail -n +2)
+        # Get all needed data with just two git calls (show for diff, numstat for stats)
+        SHOW_OUTPUT=$(git show --numstat HEAD)
 
-        # Get full diff and intelligently sample it
-        FULL_DIFF=$(git show HEAD)
+        # Extract stats from numstat output (before the diff starts)
+        GIT_STATS=$(echo "$SHOW_OUTPUT" | awk '/^[0-9]+\t[0-9]+\t/ {print $3}' | head -10 | awk '{print "M " $0}')
+
+        # Extract full diff (after numstat section)
+        FULL_DIFF=$(echo "$SHOW_OUTPUT" | awk '/^diff --git/,0')
+
+        # Extract file list for status
+        GIT_STATUS=$(echo "$SHOW_OUTPUT" | awk '/^diff --git/ {print "M " $4}' | sed 's|^M b/|M |')
+
         GIT_DIFF=$(smart_sample_diff "$FULL_DIFF" "$DIFF_MAX_LINES")
 
-        # Calculate commit size (lines added + deleted)
-        COMMIT_SIZE=$(git show --numstat HEAD | awk '{added+=$1; deleted+=$2} END {print added+deleted}')
+        # Calculate commit size (lines added + deleted) from numstat
+        COMMIT_SIZE=$(echo "$SHOW_OUTPUT" | awk '/^[0-9]+\t[0-9]+\t/ {added+=$1; deleted+=$2} END {print added+deleted}')
 
         # Export to temp file for parent process
         echo "$GIT_STATUS" > /tmp/gh-commit-ai-status-$$
@@ -1183,28 +1460,33 @@ else
         exit 0
     fi
 
-    # Get git status and diff with loading animation
+    # Get git status and diff with loading animation (optimized - fewer git calls)
     (
-        GIT_STATUS=$(git status --short)
-
-        # Get diff stats for overview
-        GIT_STATS=$(git diff --cached --stat 2>/dev/null || echo "")
-        if [ -z "$GIT_STATS" ]; then
-            GIT_STATS=$(git diff --stat 2>/dev/null || echo "")
+        # Use a single git diff call with --numstat to get both diff and stats
+        DIFF_WITH_NUMSTAT=$(git diff --cached --numstat 2>/dev/null || echo "")
+        if [ -z "$DIFF_WITH_NUMSTAT" ]; then
+            DIFF_WITH_NUMSTAT=$(git diff --numstat 2>/dev/null || echo "")
+            IS_STAGED=false
+        else
+            IS_STAGED=true
         fi
 
-        # Get full diff and intelligently sample it
-        FULL_DIFF=$(git diff --cached 2>/dev/null || echo "")
-        if [ -z "$FULL_DIFF" ]; then
-            FULL_DIFF=$(git diff 2>/dev/null || echo "")
+        # Get status (still need separate call for this)
+        GIT_STATUS=$(git status --short)
+
+        # Extract stats from numstat
+        GIT_STATS=$(echo "$DIFF_WITH_NUMSTAT" | awk '/^[0-9]+\t[0-9]+\t/ {print $3}')
+
+        # Get full diff (now we know if it's staged or not)
+        if [ "$IS_STAGED" = "true" ]; then
+            FULL_DIFF=$(git diff --cached 2>/dev/null)
+        else
+            FULL_DIFF=$(git diff 2>/dev/null)
         fi
         GIT_DIFF=$(smart_sample_diff "$FULL_DIFF" "$DIFF_MAX_LINES")
 
-        # Calculate commit size (lines added + deleted)
-        COMMIT_SIZE=$(git diff --cached --numstat 2>/dev/null | awk '{added+=$1; deleted+=$2} END {print added+deleted}')
-        if [ -z "$COMMIT_SIZE" ] || [ "$COMMIT_SIZE" = "0" ]; then
-            COMMIT_SIZE=$(git diff --numstat 2>/dev/null | awk '{added+=$1; deleted+=$2} END {print added+deleted}')
-        fi
+        # Calculate commit size from numstat (already have it)
+        COMMIT_SIZE=$(echo "$DIFF_WITH_NUMSTAT" | awk '/^[0-9]+\t[0-9]+\t/ {added+=$1; deleted+=$2} END {print added+deleted}')
 
         # Export to temp file for parent process
         echo "$GIT_STATUS" > /tmp/gh-commit-ai-status-$$
@@ -2261,6 +2543,40 @@ select_option() {
     done
 }
 
+# Retry wrapper for API calls with exponential backoff
+# Usage: retry_api_call <max_attempts> <command>
+retry_api_call() {
+    local max_attempts="$1"
+    shift
+    local command="$@"
+    local attempt=1
+    local exit_code=0
+    local wait_time=2
+
+    while [ $attempt -le $max_attempts ]; do
+        # Execute the command
+        eval "$command"
+        exit_code=$?
+
+        # Success - return immediately
+        if [ $exit_code -eq 0 ]; then
+            return 0
+        fi
+
+        # Failed - check if we should retry
+        if [ $attempt -lt $max_attempts ]; then
+            echo "⚠️  Network error (attempt $attempt/$max_attempts), retrying in ${wait_time}s..." >&2
+            sleep $wait_time
+            # Exponential backoff: double wait time for next retry
+            wait_time=$((wait_time * 2))
+            attempt=$((attempt + 1))
+        else
+            echo "❌ Failed after $max_attempts attempts" >&2
+            return $exit_code
+        fi
+    done
+}
+
 # Call Ollama API
 call_ollama() {
     local prompt="$1"
@@ -2276,20 +2592,47 @@ call_ollama() {
         echo ""
     fi
 
-    # Run API call in background with spinner
+    # Run API call in background with spinner (with timeout)
     local temp_response="/tmp/gh-commit-ai-response-$$"
+    local temp_error="/tmp/gh-commit-ai-error-$$"
+    local exit_code=0
     (
         curl -s -X POST "$OLLAMA_HOST/api/generate" \
             -H "Content-Type: application/json" \
-            -d "$json_payload" > "$temp_response"
+            -d "$json_payload" \
+            --connect-timeout 10 \
+            --max-time 120 \
+            -o "$temp_response" 2>"$temp_error"
+        echo $? > "${temp_response}.exit"
     ) &
     local api_pid=$!
 
     show_spinner "$api_pid" "Thinking"
     wait "$api_pid"
 
-    local response=$(cat "$temp_response")
-    rm -f "$temp_response"
+    exit_code=$(cat "${temp_response}.exit" 2>/dev/null || echo "1")
+
+    # Read response from file
+    local response=$(cat "$temp_response" 2>/dev/null)
+
+    # Check for network/timeout errors
+    if [ "$exit_code" != "0" ] || [ -z "$response" ]; then
+        local error_detail=$(cat "$temp_error" 2>/dev/null || echo "Unknown error")
+        if [ "$exit_code" = "28" ]; then
+            echo -e "${RED}Error: Request timeout - Ollama took too long to respond" >&2
+            echo "Tip: Try a smaller model or increase the timeout" >&2
+        elif [ "$exit_code" = "7" ]; then
+            echo -e "${RED}Error: Cannot connect to Ollama at $OLLAMA_HOST" >&2
+            echo "Tip: Make sure Ollama is running (ollama serve)" >&2
+        else
+            echo -e "${RED}Error: Network error (exit code: $exit_code)" >&2
+            echo "Details: $error_detail" >&2
+        fi
+        rm -f "$temp_response" "$temp_error" "${temp_response}.exit"
+        return 1
+    fi
+
+    rm -f "$temp_error" "${temp_response}.exit"
 
     if [ "$VERBOSE" = "true" ]; then
         echo "[Verbose] Response:"
@@ -2354,22 +2697,51 @@ call_anthropic() {
         echo ""
     fi
 
-    # Run API call in background with spinner
+    # Run API call in background with spinner (with timeout)
     local temp_response="/tmp/gh-commit-ai-response-$$"
+    local temp_error="/tmp/gh-commit-ai-error-$$"
+    local exit_code=0
     (
         curl -s -X POST "https://api.anthropic.com/v1/messages" \
             -H "Content-Type: application/json" \
             -H "x-api-key: $ANTHROPIC_API_KEY" \
             -H "anthropic-version: 2023-06-01" \
-            -d "$json_payload" > "$temp_response"
+            -d "$json_payload" \
+            --connect-timeout 10 \
+            --max-time 120 \
+            -o "$temp_response" 2>"$temp_error"
+        echo $? > "${temp_response}.exit"
     ) &
     local api_pid=$!
 
     show_spinner "$api_pid" "Thinking"
     wait "$api_pid"
 
-    local response=$(cat "$temp_response")
-    rm -f "$temp_response"
+    # Read exit code
+    exit_code=$(cat "${temp_response}.exit" 2>/dev/null || echo "1")
+
+    # Read response from file
+    local response=$(cat "$temp_response" 2>/dev/null)
+
+    # Check for network/timeout errors
+    if [ "$exit_code" != "0" ] || [ -z "$response" ]; then
+        local error_detail=$(cat "$temp_error" 2>/dev/null || echo "Unknown error")
+        if [ "$exit_code" = "28" ]; then
+            echo -e "${RED}Error: Request timeout - Anthropic API took too long to respond" >&2
+            echo "Tip: Check your internet connection or try again later" >&2
+        elif [ "$exit_code" = "7" ]; then
+            echo -e "${RED}Error: Cannot connect to Anthropic API" >&2
+            echo "Tip: Check your internet connection" >&2
+        else
+            echo -e "${RED}Error: Network error (exit code: $exit_code)" >&2
+            echo "Details: $error_detail" >&2
+        fi
+        rm -f "$temp_response" "$temp_error" "${temp_response}.exit"
+        return 1
+    fi
+
+    # Cleanup temp files
+    rm -f "$temp_error" "${temp_response}.exit"
 
     if [ "$VERBOSE" = "true" ]; then
         echo "[Verbose] Response:"
@@ -2421,6 +2793,10 @@ call_anthropic() {
             exit
         }
     }')
+
+    # Cleanup temp files
+    rm -f "$temp_response"
+
     unescape_json "$raw_message"
 }
 
@@ -2446,21 +2822,50 @@ call_openai() {
         echo ""
     fi
 
-    # Run API call in background with spinner
+    # Run API call in background with spinner (with timeout)
     local temp_response="/tmp/gh-commit-ai-response-$$"
+    local temp_error="/tmp/gh-commit-ai-error-$$"
+    local exit_code=0
     (
         curl -s -X POST "https://api.openai.com/v1/chat/completions" \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer $OPENAI_API_KEY" \
-            -d "$json_payload" > "$temp_response"
+            -d "$json_payload" \
+            --connect-timeout 10 \
+            --max-time 120 \
+            -o "$temp_response" 2>"$temp_error"
+        echo $? > "${temp_response}.exit"
     ) &
     local api_pid=$!
 
     show_spinner "$api_pid" "Thinking"
     wait "$api_pid"
 
-    local response=$(cat "$temp_response")
-    rm -f "$temp_response"
+    # Read exit code
+    exit_code=$(cat "${temp_response}.exit" 2>/dev/null || echo "1")
+
+    # Read response from file
+    local response=$(cat "$temp_response" 2>/dev/null)
+
+    # Check for network/timeout errors
+    if [ "$exit_code" != "0" ] || [ -z "$response" ]; then
+        local error_detail=$(cat "$temp_error" 2>/dev/null || echo "Unknown error")
+        if [ "$exit_code" = "28" ]; then
+            echo -e "${RED}Error: Request timeout - OpenAI API took too long to respond" >&2
+            echo "Tip: Check your internet connection or try again later" >&2
+        elif [ "$exit_code" = "7" ]; then
+            echo -e "${RED}Error: Cannot connect to OpenAI API" >&2
+            echo "Tip: Check your internet connection" >&2
+        else
+            echo -e "${RED}Error: Network error (exit code: $exit_code)" >&2
+            echo "Details: $error_detail" >&2
+        fi
+        rm -f "$temp_response" "$temp_error" "${temp_response}.exit"
+        return 1
+    fi
+
+    # Cleanup temp files
+    rm -f "$temp_error" "${temp_response}.exit"
 
     if [ "$VERBOSE" = "true" ]; then
         echo "[Verbose] Response:"
@@ -2519,8 +2924,18 @@ call_openai() {
             exit
         }
     }')
+
+    # Cleanup temp files
+    rm -f "$temp_response"
+
     unescape_json "$raw_message"
 }
+
+# Handle code review mode (needs AI functions defined above)
+if [ "$CODE_REVIEW_MODE" = true ]; then
+    generate_code_review "$REVIEW_STAGED_ONLY"
+    exit 0
+fi
 
 # Handle PR description mode (needs AI functions defined above)
 if [ "$PR_DESCRIPTION_MODE" = true ]; then

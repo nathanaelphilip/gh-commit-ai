@@ -276,14 +276,24 @@ Add feature requests from users here as they come in.
 - [ ] Preserve git history properly
 
 #### 22. Code Review Mode
-- [ ] New command: `gh commit-ai review`
-- [ ] Analyze diff for potential issues:
+- [x] New command: `gh commit-ai review`
+- [x] Analyze diff for potential issues:
   - Security vulnerabilities
   - Performance concerns
   - Code style violations
   - Missing error handling
+  - Potential bugs
   - TODO/FIXME comments
-- [ ] Provide suggestions before committing
+- [x] Provide suggestions before committing
+- [x] Support `--all` flag to review all changes (staged + unstaged)
+- [x] Default to reviewing staged changes only
+- [x] Comprehensive prompt with 6 categories of issues
+- [x] Severity markers (🔴 Critical, 🟡 Warning, 🔵 Info)
+- [x] File and line number references
+- [x] Detailed explanations and fix suggestions
+- [x] Cost tracking for paid APIs
+- [x] Works with all providers (Ollama, Anthropic, OpenAI)
+- [x] Smart diff sampling for large changes
 
 #### 23. Semantic Versioning Suggestions
 - [ ] Analyze commits since last tag
