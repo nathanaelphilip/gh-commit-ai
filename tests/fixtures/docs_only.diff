@@ -1,0 +1,38 @@
+diff --git a/README.md b/README.md
+index abc123..def456 100644
+--- a/README.md
++++ b/README.md
+@@ -5,6 +5,12 @@ A GitHub CLI extension that generates AI-powered commit messages.
+ ## Installation
+
+ ```bash
++# Install via GitHub CLI
+ gh extension install username/gh-commit-ai
+ ```
+
++## Usage
++
++```bash
++gh commit-ai
++```
+diff --git a/docs/api.md b/docs/api.md
+new file mode 100644
+index 0000000..abc123
+--- /dev/null
++++ b/docs/api.md
+@@ -0,0 +1,15 @@
++# API Documentation
++
++## Environment Variables
++
++### AI_PROVIDER
++
++Choose which AI provider to use:
++- `ollama` (default, local)
++- `anthropic` (requires API key)
++- `openai` (requires API key)
++
++### OLLAMA_MODEL
++
++Model to use with Ollama (default: `gemma3:12b`)
++

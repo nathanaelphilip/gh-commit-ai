@@ -1,0 +1,52 @@
+diff --git a/src/utils/helpers.js b/src/utils/helpers.js
+index abc123..def456 100644
+--- a/src/utils/helpers.js
++++ b/src/utils/helpers.js
+@@ -1,20 +1,30 @@
+-function processData(data) {
+-  const result = [];
+-  for (let i = 0; i < data.length; i++) {
+-    if (data[i].valid) {
+-      result.push(data[i]);
+-    }
+-  }
+-  return result;
++function filterValidData(data) {
++  return data.filter(item => item.valid);
+ }
+
+-function formatOutput(items) {
+-  let output = '';
+-  for (let i = 0; i < items.length; i++) {
+-    output += items[i].name + '\n';
+-  }
+-  return output;
++function formatDataAsText(items) {
++  return items.map(item => item.name).join('\n');
+ }
+
++function transformData(data) {
++  const valid = filterValidData(data);
++  return formatDataAsText(valid);
++}
++
++module.exports = {
++  filterValidData,
++  formatDataAsText,
++  transformData
++};
+diff --git a/src/index.js b/src/index.js
+index xyz789..uvw012 100644
+--- a/src/index.js
++++ b/src/index.js
+@@ -1,4 +1,4 @@
+-const helpers = require('./utils/helpers');
++const { transformData } = require('./utils/helpers');
+
+ async function main() {
+   const data = await fetchData();
+-  const processed = helpers.processData(data);
+-  const output = helpers.formatOutput(processed);
++  const output = transformData(data);
+   console.log(output);
+ }

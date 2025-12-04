@@ -325,12 +325,21 @@ Add feature requests from users here as they come in.
 ### Quality & Polish
 
 #### Testing & Reliability
-- [ ] **Integration tests** - Test with actual API calls (Ollama, Anthropic, OpenAI)
-- [ ] **Unit tests** - Test individual bash functions
-- [ ] **Mock API responses** - Test without real API calls
-- [ ] **Test fixtures** - Sample diffs and expected outputs
-- [ ] **CI/CD pipeline** - Automated testing on push
-- [ ] **Cross-platform testing** - macOS, Linux, WSL
+- [x] **Integration tests** - Test with actual API calls (Ollama, Anthropic, OpenAI)
+- [x] **Unit tests** - Test individual bash functions
+- [x] **Mock API responses** - Test without real API calls
+- [x] **Test fixtures** - Sample diffs and expected outputs
+- [x] **CI/CD pipeline** - Automated testing on push
+- [x] **Cross-platform testing** - macOS, Linux via GitHub Actions
+  - [x] Ollama integration tests with real model
+  - [x] Anthropic API integration tests (with API key)
+  - [x] OpenAI API integration tests (with API key)
+  - [x] Mock response parsing tests
+  - [x] End-to-end workflow tests
+  - [x] GitHub Actions workflow with multiple jobs
+  - [x] Test coverage reporting
+  - [x] Shellcheck linting
+- [ ] **WSL testing** - Windows Subsystem for Linux (future enhancement)
 
 #### Performance
 - [ ] **Performance profiling** - Identify slow operations

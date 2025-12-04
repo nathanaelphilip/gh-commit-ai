@@ -1,0 +1,22 @@
+diff --git a/src/auth.js b/src/auth.js
+index abc123..def456 100644
+--- a/src/auth.js
++++ b/src/auth.js
+@@ -10,6 +10,14 @@ function login(username, password) {
+   return false;
+ }
+
++function logout(userId) {
++  const session = sessions.get(userId);
++  if (session) {
++    sessions.delete(userId);
++    return true;
++  }
++  return false;
++}
++
+ module.exports = {
+-  login
++  login,
++  logout
+ };

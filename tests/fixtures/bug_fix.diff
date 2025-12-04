@@ -1,0 +1,30 @@
+diff --git a/src/database.js b/src/database.js
+index abc123..def456 100644
+--- a/src/database.js
++++ b/src/database.js
+@@ -15,7 +15,7 @@ async function query(sql, params) {
+   try {
+     const result = await pool.query(sql, params);
+     return result.rows;
+-  } catch (error) {
++  } catch (err) {
+     console.error('Database query failed:', err);
+-    throw error;
++    throw err;
+   }
+ }
+diff --git a/src/api.js b/src/api.js
+index xyz789..uvw012 100644
+--- a/src/api.js
++++ b/src/api.js
+@@ -20,6 +20,10 @@ async function fetchUser(userId) {
+     return null;
+   }
+
++  if (!userId) {
++    throw new Error('userId is required');
++  }
++
+   const result = await db.query('SELECT * FROM users WHERE id = $1', [userId]);
+   return result[0];
+ }
