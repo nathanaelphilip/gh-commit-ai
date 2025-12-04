@@ -365,7 +365,13 @@ Add feature requests from users here as they come in.
 ### Developer Experience
 
 #### Documentation & Discoverability
-- [ ] **Bash completion** - Tab completion for commands and flags
+- [x] **Bash completion** - Tab completion for commands and flags
+  - [x] Bash completion script with full command/flag support
+  - [x] Zsh completion script with descriptions
+  - [x] install-completion command for easy setup
+  - [x] uninstall-completion command
+  - [x] Intelligent value completion (types, branches, tags)
+  - [x] Comprehensive completion documentation
 - [ ] **Man page** - Traditional Unix man page (`man gh-commit-ai`)
 - [ ] **Demo video** - Screencast showing features
 - [ ] **Animated GIFs** - Visual examples in README

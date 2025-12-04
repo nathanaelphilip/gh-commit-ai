@@ -1,0 +1,101 @@
+#compdef gh-commit-ai
+# Zsh completion for gh-commit-ai
+# Install: gh commit-ai install-completion
+
+_gh-commit-ai() {
+    local curcontext="$curcontext" state line
+    typeset -A opt_args
+
+    local -a main_args
+    main_args=(
+        '(- *)'{-h,--help}'[Show help message]'
+        '--preview[Generate and display message without committing]'
+        '--dry-run[Generate message and optionally save to file]'
+        '--amend[Regenerate message for last commit]'
+        '--options[Generate multiple message variations]'
+        '--type[Force specific commit type]:type:(feat fix docs style refactor test chore perf build ci)'
+        '--max-lines[Override DIFF_MAX_LINES]:lines:'
+        '--no-lowercase[Disable automatic lowercase enforcement]'
+        '(-v --verbose)'{-v,--verbose}'[Show API request/response for debugging]'
+        '1: :_gh_commit_ai_commands'
+        '*:: :->command_args'
+    )
+
+    _arguments -C $main_args
+
+    case $state in
+        command_args)
+            case ${words[1]} in
+                version|semver)
+                    _arguments \
+                        '(- *)'{-h,--help}'[Show help for version command]' \
+                        '(-t --create-tag)'{-t,--create-tag}'[Create git tag automatically]' \
+                        '--prefix[Custom tag prefix]:prefix:(v ver version release-)'
+                    ;;
+
+                changelog)
+                    _arguments \
+                        '(- *)'{-h,--help}'[Show help for changelog command]' \
+                        '--since[Analyze commits since ref]:ref:_git_tags_or_refs' \
+                        '--format[Output format]:format:(keepachangelog markdown)'
+                    ;;
+
+                review)
+                    _arguments \
+                        '(- *)'{-h,--help}'[Show help for review command]' \
+                        '--all[Review all changes (staged + unstaged)]'
+                    ;;
+
+                pr-description)
+                    _arguments \
+                        '(- *)'{-h,--help}'[Show help for pr-description command]' \
+                        '--base[Base branch for comparison]:branch:_git_branches' \
+                        '--output[Save to file]:file:_files'
+                    ;;
+
+                install-hook|uninstall-hook|install-completion|uninstall-completion)
+                    _arguments \
+                        '(- *)'{-h,--help}'[Show help]'
+                    ;;
+            esac
+            ;;
+    esac
+}
+
+_gh_commit_ai_commands() {
+    local -a commands
+    commands=(
+        'changelog:Generate changelog from commit history'
+        'review:Analyze diff for potential issues'
+        'pr-description:Generate PR description from commits'
+        'version:Suggest next semantic version'
+        'semver:Suggest next semantic version (alias)'
+        'install-hook:Install prepare-commit-msg hook'
+        'uninstall-hook:Remove prepare-commit-msg hook'
+        'install-completion:Install shell completion'
+        'uninstall-completion:Remove shell completion'
+    )
+    _describe -t commands 'gh-commit-ai commands' commands
+}
+
+_git_tags_or_refs() {
+    local -a tags refs
+    tags=( ${(f)"$(git tag 2>/dev/null)"} )
+    refs=( HEAD~1 HEAD~5 HEAD~10 )
+    _describe -t tags 'git tags' tags
+    _describe -t refs 'git refs' refs
+}
+
+_git_branches() {
+    local -a branches
+    branches=( ${(f)"$(git branch -a 2>/dev/null | sed 's/^\s*\*\?\s*//' | sed 's/^remotes\/origin\///')"} )
+    _describe -t branches 'git branches' branches
+    # Also offer common defaults
+    _values 'common branches' main master develop
+}
+
+# Register completion
+_gh-commit-ai "$@"
+
+# Also support when called as a gh extension
+compdef _gh-commit-ai 'gh commit-ai'

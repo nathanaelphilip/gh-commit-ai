@@ -1279,6 +1279,164 @@ elif [ "$1" = "uninstall-hook" ]; then
     fi
 
     exit 0
+elif [ "$1" = "install-completion" ]; then
+    # Install shell completion
+    echo "Installing shell completion for gh-commit-ai..."
+    echo ""
+
+    # Detect shell
+    CURRENT_SHELL=$(basename "$SHELL")
+
+    # Determine script directory (where completions/ folder is)
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+    if [ "$CURRENT_SHELL" = "bash" ]; then
+        # Bash completion
+        COMPLETION_SOURCE="$SCRIPT_DIR/completions/gh-commit-ai.bash"
+
+        if [ ! -f "$COMPLETION_SOURCE" ]; then
+            echo -e "${RED}Error: Completion file not found: $COMPLETION_SOURCE${NC}"
+            exit 1
+        fi
+
+        # Try standard locations
+        if [ -d "/usr/local/etc/bash_completion.d" ]; then
+            # macOS (Homebrew)
+            sudo cp "$COMPLETION_SOURCE" "/usr/local/etc/bash_completion.d/gh-commit-ai"
+            echo "✓ Installed to /usr/local/etc/bash_completion.d/gh-commit-ai"
+        elif [ -d "/etc/bash_completion.d" ]; then
+            # Linux
+            sudo cp "$COMPLETION_SOURCE" "/etc/bash_completion.d/gh-commit-ai"
+            echo "✓ Installed to /etc/bash_completion.d/gh-commit-ai"
+        else
+            # User-local installation
+            mkdir -p "$HOME/.bash_completion.d"
+            cp "$COMPLETION_SOURCE" "$HOME/.bash_completion.d/gh-commit-ai"
+            echo "✓ Installed to $HOME/.bash_completion.d/gh-commit-ai"
+            echo ""
+            echo "Add this to your ~/.bashrc to enable:"
+            echo "  source $HOME/.bash_completion.d/gh-commit-ai"
+        fi
+
+        echo ""
+        echo "Restart your shell or run: source ~/.bashrc"
+
+    elif [ "$CURRENT_SHELL" = "zsh" ]; then
+        # Zsh completion
+        COMPLETION_SOURCE="$SCRIPT_DIR/completions/_gh-commit-ai"
+
+        if [ ! -f "$COMPLETION_SOURCE" ]; then
+            echo -e "${RED}Error: Completion file not found: $COMPLETION_SOURCE${NC}"
+            exit 1
+        fi
+
+        # Try standard locations
+        if [ -d "/usr/local/share/zsh/site-functions" ]; then
+            # macOS (Homebrew)
+            sudo cp "$COMPLETION_SOURCE" "/usr/local/share/zsh/site-functions/_gh-commit-ai"
+            echo "✓ Installed to /usr/local/share/zsh/site-functions/_gh-commit-ai"
+        elif [ -d "/usr/share/zsh/site-functions" ]; then
+            # Linux
+            sudo cp "$COMPLETION_SOURCE" "/usr/share/zsh/site-functions/_gh-commit-ai"
+            echo "✓ Installed to /usr/share/zsh/site-functions/_gh-commit-ai"
+        else
+            # User-local installation
+            mkdir -p "$HOME/.zsh/completion"
+            cp "$COMPLETION_SOURCE" "$HOME/.zsh/completion/_gh-commit-ai"
+            echo "✓ Installed to $HOME/.zsh/completion/_gh-commit-ai"
+            echo ""
+            echo "Add this to your ~/.zshrc to enable:"
+            echo "  fpath=(\$HOME/.zsh/completion \$fpath)"
+            echo "  autoload -Uz compinit && compinit"
+        fi
+
+        echo ""
+        echo "Restart your shell or run: exec zsh"
+
+    else
+        echo -e "${YELLOW}Warning: Unknown shell: $CURRENT_SHELL${NC}"
+        echo "Supported shells: bash, zsh"
+        echo ""
+        echo "Manual installation:"
+        echo "  Bash: Copy completions/gh-commit-ai.bash to your bash completion directory"
+        echo "  Zsh:  Copy completions/_gh-commit-ai to your zsh completion directory"
+        exit 1
+    fi
+
+    exit 0
+elif [ "$1" = "uninstall-completion" ]; then
+    # Uninstall shell completion
+    echo "Uninstalling shell completion for gh-commit-ai..."
+    echo ""
+
+    # Detect shell
+    CURRENT_SHELL=$(basename "$SHELL")
+
+    if [ "$CURRENT_SHELL" = "bash" ]; then
+        # Try standard locations
+        REMOVED=false
+
+        if [ -f "/usr/local/etc/bash_completion.d/gh-commit-ai" ]; then
+            sudo rm "/usr/local/etc/bash_completion.d/gh-commit-ai"
+            echo "✓ Removed from /usr/local/etc/bash_completion.d/"
+            REMOVED=true
+        fi
+
+        if [ -f "/etc/bash_completion.d/gh-commit-ai" ]; then
+            sudo rm "/etc/bash_completion.d/gh-commit-ai"
+            echo "✓ Removed from /etc/bash_completion.d/"
+            REMOVED=true
+        fi
+
+        if [ -f "$HOME/.bash_completion.d/gh-commit-ai" ]; then
+            rm "$HOME/.bash_completion.d/gh-commit-ai"
+            echo "✓ Removed from $HOME/.bash_completion.d/"
+            REMOVED=true
+        fi
+
+        if [ "$REMOVED" = false ]; then
+            echo "No completion file found to remove"
+        else
+            echo ""
+            echo "Restart your shell for changes to take effect"
+        fi
+
+    elif [ "$CURRENT_SHELL" = "zsh" ]; then
+        # Try standard locations
+        REMOVED=false
+
+        if [ -f "/usr/local/share/zsh/site-functions/_gh-commit-ai" ]; then
+            sudo rm "/usr/local/share/zsh/site-functions/_gh-commit-ai"
+            echo "✓ Removed from /usr/local/share/zsh/site-functions/"
+            REMOVED=true
+        fi
+
+        if [ -f "/usr/share/zsh/site-functions/_gh-commit-ai" ]; then
+            sudo rm "/usr/share/zsh/site-functions/_gh-commit-ai"
+            echo "✓ Removed from /usr/share/zsh/site-functions/"
+            REMOVED=true
+        fi
+
+        if [ -f "$HOME/.zsh/completion/_gh-commit-ai" ]; then
+            rm "$HOME/.zsh/completion/_gh-commit-ai"
+            echo "✓ Removed from $HOME/.zsh/completion/"
+            REMOVED=true
+        fi
+
+        if [ "$REMOVED" = false ]; then
+            echo "No completion file found to remove"
+        else
+            echo ""
+            echo "Run: rm -f ~/.zcompdump && exec zsh"
+        fi
+
+    else
+        echo -e "${YELLOW}Warning: Unknown shell: $CURRENT_SHELL${NC}"
+        echo "Supported shells: bash, zsh"
+        exit 1
+    fi
+
+    exit 0
 elif [ "$1" = "pr-description" ]; then
     PR_DESCRIPTION_MODE=true
     shift
@@ -1408,13 +1566,15 @@ while [[ $# -gt 0 ]]; do
             echo "       gh commit-ai <command> [options]"
             echo ""
             echo "Commands:"
-            echo "  (default)       Generate commit message for current changes"
-            echo "  review          Review code changes for potential issues"
-            echo "  version         Suggest next semantic version number"
-            echo "  changelog       Generate changelog from commit history"
-            echo "  pr-description  Generate PR description from branch commits"
-            echo "  install-hook    Install git hook for opt-in AI commits"
-            echo "  uninstall-hook  Remove git hook"
+            echo "  (default)            Generate commit message for current changes"
+            echo "  review               Review code changes for potential issues"
+            echo "  version              Suggest next semantic version number"
+            echo "  changelog            Generate changelog from commit history"
+            echo "  pr-description       Generate PR description from branch commits"
+            echo "  install-hook         Install git hook for opt-in AI commits"
+            echo "  uninstall-hook       Remove git hook"
+            echo "  install-completion   Install shell completion (bash/zsh)"
+            echo "  uninstall-completion Remove shell completion"
             echo ""
             echo "Options:"
             echo "  --dry-run           Generate commit message without committing"
@@ -1454,6 +1614,7 @@ while [[ $# -gt 0 ]]; do
             echo "  gh commit-ai changelog"
             echo "  gh commit-ai changelog --since v1.0.0"
             echo "  gh commit-ai install-hook"
+            echo "  gh commit-ai install-completion"
             echo "  GH_COMMIT_AI=1 git commit    # With hook installed"
             echo "  USE_SCOPE=false gh commit-ai"
             echo "  USE_GITMOJI=true gh commit-ai"
