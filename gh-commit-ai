@@ -69,6 +69,9 @@ parse_yaml_config() {
             code_review_openai_model|CODE_REVIEW_OPENAI_MODEL)
                 CONFIG_CODE_REVIEW_OPENAI_MODEL="${CONFIG_CODE_REVIEW_OPENAI_MODEL:-$value}"
                 ;;
+            commit_language|COMMIT_LANGUAGE)
+                CONFIG_COMMIT_LANGUAGE="${CONFIG_COMMIT_LANGUAGE:-$value}"
+                ;;
         esac
     done < "$config_file"
 }
@@ -102,6 +105,65 @@ AUTO_SELECT_MODEL="${AUTO_SELECT_MODEL:-${CONFIG_AUTO_SELECT_MODEL:-false}}"  # 
 CODE_REVIEW_MODEL="${CODE_REVIEW_MODEL:-${CONFIG_CODE_REVIEW_MODEL:-}}"  # Dedicated model for code reviews (Ollama)
 CODE_REVIEW_ANTHROPIC_MODEL="${CODE_REVIEW_ANTHROPIC_MODEL:-${CONFIG_CODE_REVIEW_ANTHROPIC_MODEL:-}}"  # Anthropic model for reviews
 CODE_REVIEW_OPENAI_MODEL="${CODE_REVIEW_OPENAI_MODEL:-${CONFIG_CODE_REVIEW_OPENAI_MODEL:-}}"  # OpenAI model for reviews
+
+# Language configuration for commit messages
+COMMIT_LANGUAGE="${COMMIT_LANGUAGE:-${CONFIG_COMMIT_LANGUAGE:-}}"  # Language for commit messages (en, es, fr, de, ja, zh, etc.)
+
+# Detect language from git config or system locale if not explicitly set
+detect_language() {
+    # If already set, use it
+    if [ -n "$COMMIT_LANGUAGE" ]; then
+        echo "$COMMIT_LANGUAGE"
+        return
+    fi
+
+    # Try to get from git config
+    local git_language=$(git config --get commit.language 2>/dev/null || echo "")
+    if [ -n "$git_language" ]; then
+        echo "$git_language"
+        return
+    fi
+
+    # Try to detect from system locale
+    local lang_var="${LANG:-${LC_ALL:-}}"
+    if [ -n "$lang_var" ]; then
+        # Extract language code (e.g., en_US.UTF-8 -> en, es_ES.UTF-8 -> es)
+        local lang_code=$(echo "$lang_var" | cut -d'_' -f1 | cut -d'.' -f1)
+        if [ -n "$lang_code" ] && [ "$lang_code" != "C" ] && [ "$lang_code" != "POSIX" ]; then
+            echo "$lang_code"
+            return
+        fi
+    fi
+
+    # Default to English
+    echo "en"
+}
+
+# Detect and set the language
+DETECTED_LANGUAGE=$(detect_language)
+COMMIT_LANGUAGE="${COMMIT_LANGUAGE:-$DETECTED_LANGUAGE}"
+
+# Map language codes to full names for display
+get_language_name() {
+    case "$1" in
+        en) echo "English" ;;
+        es) echo "Spanish" ;;
+        fr) echo "French" ;;
+        de) echo "German" ;;
+        ja) echo "Japanese" ;;
+        zh) echo "Chinese" ;;
+        pt) echo "Portuguese" ;;
+        ru) echo "Russian" ;;
+        it) echo "Italian" ;;
+        ko) echo "Korean" ;;
+        nl) echo "Dutch" ;;
+        pl) echo "Polish" ;;
+        tr) echo "Turkish" ;;
+        ar) echo "Arabic" ;;
+        hi) echo "Hindi" ;;
+        *) echo "English" ;;
+    esac
+}
 
 # Git diff exclusion patterns - exclude lock files and other generated files
 # These files are auto-generated and not useful for AI analysis
@@ -1596,6 +1658,8 @@ while [[ $# -gt 0 ]]; do
             echo "Environment Variables:"
             echo "  AI_PROVIDER         AI provider (auto, ollama, anthropic, openai)"
             echo "                      Default: auto (detects what's available)"
+            echo "  COMMIT_LANGUAGE     Language for commit messages (en, es, fr, de, ja, zh, etc.)"
+            echo "                      Default: auto-detect from system locale"
             echo "  USE_SCOPE           Enable/disable scopes (true/false)"
             echo "  USE_GITMOJI         Enable/disable gitmoji prefixes (true/false)"
             echo "  DIFF_MAX_LINES      Maximum diff lines to send to AI"
@@ -1618,6 +1682,8 @@ while [[ $# -gt 0 ]]; do
             echo "  GH_COMMIT_AI=1 git commit    # With hook installed"
             echo "  USE_SCOPE=false gh commit-ai"
             echo "  USE_GITMOJI=true gh commit-ai"
+            echo "  COMMIT_LANGUAGE=es gh commit-ai    # Spanish messages"
+            echo "  COMMIT_LANGUAGE=ja gh commit-ai    # Japanese messages"
             exit 0
             ;;
         *)
@@ -2390,6 +2456,22 @@ IMPORTANT: Generate 3 different variations of the commit message:
 Separate each variation with the marker: ---OPTION---"
 fi
 
+# Prepare language instruction
+LANGUAGE_INSTRUCTION=""
+if [ "$COMMIT_LANGUAGE" != "en" ]; then
+    LANGUAGE_NAME=$(get_language_name "$COMMIT_LANGUAGE")
+    LANGUAGE_INSTRUCTION="
+
+IMPORTANT - LANGUAGE:
+- Write ALL commit message text in $LANGUAGE_NAME
+- Keep the commit type prefix in English (feat:, fix:, docs:, etc.)
+- Write the summary and bullets in $LANGUAGE_NAME
+- Maintain technical terms (API, HTTP, function names, etc.) in English
+- Example format: feat: [summary in $LANGUAGE_NAME]
+  - [bullet 1 in $LANGUAGE_NAME]
+  - [bullet 2 in $LANGUAGE_NAME]"
+fi
+
 PROMPT="Analyze these git changes and create a commit message.
 
 PROCESS:
@@ -2411,7 +2493,7 @@ RULES:
 - Use imperative mood (add/fix not added/fixed)
 - The summary should capture the essence of all bullets below it
 - Do NOT use ! unless instructions above say this breaks existing functionality
-- Output ONLY the commit message, NO explanations, NO markdown, NO code fences
+- Output ONLY the commit message, NO explanations, NO markdown, NO code fences$LANGUAGE_INSTRUCTION
 
 $SCOPE_EXAMPLES
 

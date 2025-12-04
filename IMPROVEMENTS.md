@@ -253,10 +253,14 @@ Add feature requests from users here as they come in.
 - [x] Integration with all existing features (scopes, gitmoji, breaking changes, etc.)
 
 #### 19. Multi-language Support
-- [ ] Generate commit messages in different languages
-- [ ] Configuration: `COMMIT_LANGUAGE` (en, es, fr, de, ja, zh, etc.)
-- [ ] Auto-detect from git config or system locale
-- [ ] Maintain conventional commit format across languages
+- [x] Generate commit messages in different languages
+- [x] Configuration: `COMMIT_LANGUAGE` (en, es, fr, de, ja, zh, etc.)
+- [x] Auto-detect from git config or system locale
+- [x] Maintain conventional commit format across languages
+- [x] Support 15+ languages: English, Spanish, French, German, Japanese, Chinese, Portuguese, Russian, Italian, Korean, Dutch, Polish, Turkish, Arabic, Hindi
+- [x] Intelligent language detection (env var > git config > system locale > default)
+- [x] Keep technical terms and type prefixes in English
+- [x] YAML configuration support for persistent language setting
 
 #### 20. PR Description Generator
 - [x] New command: `gh commit-ai pr-description`

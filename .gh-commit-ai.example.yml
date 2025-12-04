@@ -36,6 +36,15 @@ anthropic_model: claude-3-5-sonnet-20241022
 # Options: gpt-4o-mini, gpt-4o, gpt-4-turbo, etc.
 openai_model: gpt-4o-mini
 
+# Language Configuration
+# Generate commit messages in your preferred language
+# Default: auto-detect from system locale
+# Supported languages:
+#   en (English), es (Spanish), fr (French), de (German), ja (Japanese),
+#   zh (Chinese), pt (Portuguese), ru (Russian), it (Italian), ko (Korean),
+#   nl (Dutch), pl (Polish), tr (Turkish), ar (Arabic), hi (Hindi)
+# commit_language: en
+
 # Commit Format Configuration
 # Enable/disable conventional commit scopes
 # Default: false
