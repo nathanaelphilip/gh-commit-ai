@@ -1,0 +1,560 @@
+.TH GH-COMMIT-AI 1 "December 2024" "gh-commit-ai 1.0.0" "User Commands"
+.SH NAME
+gh-commit-ai \- AI-powered git commit message generator
+.SH SYNOPSIS
+.B gh commit-ai
+[\fIOPTIONS\fR]
+.br
+.B gh commit-ai
+\fICOMMAND\fR [\fIOPTIONS\fR]
+.SH DESCRIPTION
+.B gh-commit-ai
+is a GitHub CLI extension that uses AI to generate high-quality git commit messages following the Conventional Commits format. It analyzes your staged changes and generates descriptive commit messages with proper type prefixes, concise summaries, and detailed bullet points.
+.PP
+The tool supports multiple AI providers including Ollama (local), Groq (ultra-fast), Anthropic Claude, and OpenAI GPT models. It intelligently samples large diffs, detects breaking changes, learns from your repository's commit history, and provides interactive editing options.
+.SH OPTIONS
+.TP
+.B \-\-dry-run
+Generate commit message without committing. Optionally saves the message to a file in .git/ for later use.
+.TP
+.B \-\-preview
+Generate and display the commit message, then exit immediately without any interaction.
+.TP
+.B \-\-amend
+Regenerate the commit message for the last commit and amend it using
+.BR "git commit \-\-amend" .
+.TP
+.B \-\-options
+Generate 3 different message variations (concise, detailed, alternative) and let you choose which one to use.
+.TP
+.B \-\-verbose, \-v
+Show detailed API request/response information for debugging.
+.TP
+.B \-\-type \fITYPE\fR
+Force a specific commit type. Valid types: feat, fix, docs, style, refactor, test, chore, perf, ci, build, revert.
+.TP
+.B \-\-max-lines \fIN\fR
+Override DIFF_MAX_LINES for this run. Limits the number of diff lines sent to the AI (default: 200).
+.TP
+.B \-\-no-lowercase
+Disable automatic lowercase enforcement of commit messages.
+.TP
+.B \-\-help, \-h
+Show help message and exit.
+.TP
+.B \-\-version
+Show version number and exit.
+.SH COMMANDS
+.TP
+.B review [\-\-all]
+Analyze code changes for potential issues including security vulnerabilities, performance concerns, code style violations, and missing error handling. Use
+.B \-\-all
+to review both staged and unstaged changes.
+.TP
+.B version, semver [\-\-create-tag] [\-\-prefix \fIPREFIX\fR]
+Suggest the next semantic version number based on commit types since the last tag. Detects breaking changes for major bumps, features for minor bumps, and fixes for patch bumps. Use
+.B \-\-create-tag
+to automatically create a git tag.
+.TP
+.B changelog [\-\-since \fIREF\fR] [\-\-format \fIFORMAT\fR]
+Generate a changelog from commit history. Categorizes commits by type (features, fixes, docs, etc.) and includes breaking changes section. Use
+.B \-\-since
+to specify a starting reference (tag, branch, or commit).
+.TP
+.B pr-description [\-\-base \fIBRANCH\fR] [\-\-output \fIFILE\fR]
+Generate a comprehensive pull request description by analyzing all commits since the branch diverged from the base branch. Includes summary, changes, and testing notes. Use
+.B \-\-base
+to specify the base branch (default: main/master).
+.TP
+.B split [\-\-threshold \fIN\fR] [\-\-dry-run]
+Suggest how to split large commits into smaller, logical commits. Analyzes staged changes and provides AI-powered recommendations for grouping related files. Use
+.B \-\-threshold
+to set the line count threshold (default: 1000).
+.TP
+.B install-hook
+Install a git prepare-commit-msg hook for opt-in AI commit generation. The hook only runs when GH_COMMIT_AI=1 is set.
+.TP
+.B uninstall-hook
+Remove the git prepare-commit-msg hook.
+.TP
+.B install-completion [\fISHELL\fR]
+Install shell completion for bash or zsh. Auto-detects shell if not specified.
+.TP
+.B uninstall-completion [\fISHELL\fR]
+Remove shell completion for bash or zsh.
+.SH CONFIGURATION
+.SS Configuration Files
+.B gh-commit-ai
+supports YAML configuration files for persistent settings:
+.TP
+.I ~/.gh-commit-ai.yml
+Global configuration file (applies to all repositories)
+.TP
+.I .gh-commit-ai.yml
+Local configuration file in repository root (overrides global settings)
+.PP
+Configuration precedence (highest to lowest):
+.RS
+1. Environment variables
+.br
+2. Local config file (.gh-commit-ai.yml)
+.br
+3. Global config file (~/.gh-commit-ai.yml)
+.br
+4. Built-in defaults
+.RE
+.PP
+Example configuration:
+.PP
+.RS
+.nf
+# AI Provider
+ai_provider: ollama
+
+# Ollama Configuration
+ollama_model: gemma3:12b
+ollama_host: http://localhost:11434
+
+# Commit Format
+use_scope: false
+use_gitmoji: false
+
+# Performance
+diff_max_lines: 200
+
+# History Learning
+learn_from_history: true
+.fi
+.RE
+.PP
+.B Note:
+API keys cannot be stored in config files for security. Use environment variables instead.
+.SS Environment Variables
+.TP
+.B AI_PROVIDER
+Choose AI provider: auto (default), ollama, groq, anthropic, openai
+.TP
+.B OLLAMA_MODEL
+Ollama model to use (default: gemma3:12b)
+.TP
+.B OLLAMA_HOST
+Ollama API host (default: http://localhost:11434)
+.TP
+.B ANTHROPIC_API_KEY
+Your Anthropic API key (required for anthropic provider)
+.TP
+.B ANTHROPIC_MODEL
+Claude model to use (default: claude-3-5-sonnet-20241022)
+.TP
+.B OPENAI_API_KEY
+Your OpenAI API key (required for openai provider)
+.TP
+.B OPENAI_MODEL
+GPT model to use (default: gpt-4o-mini)
+.TP
+.B GROQ_API_KEY
+Your Groq API key (required for groq provider)
+.TP
+.B GROQ_MODEL
+Groq model to use (default: llama-3.3-70b-versatile)
+.TP
+.B USE_SCOPE
+Enable conventional commit scopes (default: false)
+.TP
+.B USE_GITMOJI
+Enable gitmoji prefixes (default: false)
+.TP
+.B DIFF_MAX_LINES
+Maximum diff lines to send to AI (default: 200)
+.TP
+.B LEARN_FROM_HISTORY
+Learn from repository's commit history (default: true)
+.TP
+.B COMMIT_LANGUAGE
+Language for commit messages: en, es, fr, de, ja, zh, etc. (default: auto-detect)
+.TP
+.B AUTO_FIX_FORMATTING
+Automatically fix formatting issues before commit (default: false)
+.TP
+.B MAX_RETRIES
+Maximum API retry attempts (default: 3)
+.TP
+.B RETRY_DELAY
+Initial retry delay in seconds (default: 2)
+.TP
+.B CONNECT_TIMEOUT
+Connection timeout in seconds (default: 10)
+.TP
+.B MAX_TIME
+Maximum request time in seconds (default: 120)
+.SH EXAMPLES
+.SS Basic Usage
+Generate a commit message for staged changes:
+.PP
+.RS
+.nf
+$ gh commit-ai
+.fi
+.RE
+.SS Preview Mode
+Generate and display message without committing:
+.PP
+.RS
+.nf
+$ gh commit-ai \-\-preview
+.fi
+.RE
+.SS Dry Run
+Generate message and optionally save to file:
+.PP
+.RS
+.nf
+$ gh commit-ai \-\-dry-run
+.fi
+.RE
+.SS Amend Last Commit
+Regenerate message for the last commit:
+.PP
+.RS
+.nf
+$ gh commit-ai \-\-amend
+.fi
+.RE
+.SS Multiple Options
+Generate 3 variations and choose:
+.PP
+.RS
+.nf
+$ gh commit-ai \-\-options
+.fi
+.RE
+.SS Force Commit Type
+Override automatic type detection:
+.PP
+.RS
+.nf
+$ gh commit-ai \-\-type fix
+.fi
+.RE
+.SS Code Review
+Review staged changes for issues:
+.PP
+.RS
+.nf
+$ gh commit-ai review
+$ gh commit-ai review \-\-all
+.fi
+.RE
+.SS Semantic Versioning
+Suggest next version number:
+.PP
+.RS
+.nf
+$ gh commit-ai version
+$ gh commit-ai version \-\-create-tag
+.fi
+.RE
+.SS Changelog Generation
+Generate changelog from history:
+.PP
+.RS
+.nf
+$ gh commit-ai changelog
+$ gh commit-ai changelog \-\-since v1.0.0
+.fi
+.RE
+.SS PR Description
+Generate pull request description:
+.PP
+.RS
+.nf
+$ gh commit-ai pr-description
+$ gh commit-ai pr-description \-\-base develop
+.fi
+.RE
+.SS Commit Splitting
+Suggest how to split large commits:
+.PP
+.RS
+.nf
+$ gh commit-ai split
+$ gh commit-ai split \-\-threshold 500
+.fi
+.RE
+.SS Git Hook (Opt-in)
+Install hook and use with git alias:
+.PP
+.RS
+.nf
+$ gh commit-ai install-hook
+$ git config alias.ai-commit '!GH_COMMIT_AI=1 git commit'
+$ git ai-commit
+.fi
+.RE
+.SS Using Different AI Providers
+.PP
+Ollama (local, free):
+.RS
+.nf
+$ gh commit-ai
+$ OLLAMA_MODEL="codellama" gh commit-ai
+.fi
+.RE
+.PP
+Groq (ultra-fast, generous free tier):
+.RS
+.nf
+$ export GROQ_API_KEY="gsk_..."
+$ export AI_PROVIDER="groq"
+$ gh commit-ai
+.fi
+.RE
+.PP
+Anthropic Claude:
+.RS
+.nf
+$ export ANTHROPIC_API_KEY="sk-ant-..."
+$ export AI_PROVIDER="anthropic"
+$ gh commit-ai
+.fi
+.RE
+.PP
+OpenAI GPT:
+.RS
+.nf
+$ export OPENAI_API_KEY="sk-proj-..."
+$ export AI_PROVIDER="openai"
+$ gh commit-ai
+.fi
+.RE
+.SH FILES
+.TP
+.I ~/.gh-commit-ai.yml
+Global configuration file
+.TP
+.I .gh-commit-ai.yml
+Repository-specific configuration file
+.TP
+.I .gh-commit-ai-template
+Custom commit message template (optional)
+.TP
+.I .git/hooks/prepare-commit-msg
+Git hook for opt-in AI commits (after running
+.BR "gh commit-ai install-hook" )
+.TP
+.I /tmp/gh-commit-ai-history-*
+Message history cache (per repository)
+.TP
+.I ~/.bash_completion.d/gh-commit-ai
+Bash completion script
+.TP
+.I ~/.zsh/completion/_gh-commit-ai
+Zsh completion script
+.SH SECURITY
+.SS Input Validation
+All command-line inputs are validated before use to prevent injection attacks. Numeric parameters must be positive integers, and string parameters are restricted to allowed values.
+.SS Secure Temporary Files
+Temporary files are created with cryptographically secure random names using
+.BR mktemp (1)
+and restrictive permissions (600) to protect sensitive data like git diffs and API responses.
+.SS API Key Protection
+API keys must be stored as environment variables and are never logged or exposed in output. They are only transmitted via HTTPS to AI providers.
+.PP
+For detailed security information, see the SECURITY.md file in the project repository.
+.SH CONVENTIONAL COMMITS
+.B gh-commit-ai
+generates commit messages following the Conventional Commits specification. The format is:
+.PP
+.RS
+.nf
+<type>[optional scope]: <description>
+
+[optional body with bullet points]
+
+[optional footer(s)]
+.fi
+.RE
+.SS Commit Types
+.TP
+.B feat
+A new feature
+.TP
+.B fix
+A bug fix
+.TP
+.B docs
+Documentation only changes
+.TP
+.B style
+Changes that don't affect code meaning (formatting, etc.)
+.TP
+.B refactor
+Code change that neither fixes a bug nor adds a feature
+.TP
+.B test
+Adding missing tests or correcting existing tests
+.TP
+.B chore
+Changes to build process or auxiliary tools
+.TP
+.B perf
+Performance improvements
+.TP
+.B ci
+Changes to CI configuration files and scripts
+.TP
+.B build
+Changes that affect the build system or dependencies
+.TP
+.B revert
+Reverts a previous commit
+.SS Breaking Changes
+Breaking changes are indicated with an exclamation mark after the type/scope and a BREAKING CHANGE footer:
+.PP
+.RS
+.nf
+feat!: redesign authentication API
+
+- remove legacy login endpoint
+- change token format to JWT
+
+BREAKING CHANGE: Legacy /auth/login endpoint removed
+.fi
+.RE
+.SH FEATURES
+.SS Intelligent Diff Sampling
+For large commits, the tool intelligently samples diffs to stay within token limits:
+.RS
+- Prioritizes function/class definitions and signatures
+.br
+- Keeps added lines over deleted lines
+.br
+- Samples evenly throughout the diff
+.br
+- Maintains diff structure while reducing size
+.RE
+.SS Branch Intelligence
+Automatically extracts context from branch names:
+.RS
+- Detects ticket numbers (e.g., ABC-123, JIRA-456)
+.br
+- Suggests commit type from branch prefix (feat/*, fix/*, etc.)
+.br
+- Includes extracted information in commit message
+.RE
+.SS Smart Type Detection
+Analyzes changes to automatically suggest commit type:
+.RS
+- Documentation-only changes → docs
+.br
+- Test-only changes → test
+.br
+- Version bumps → chore
+.br
+- Bug keywords in diff → fix
+.RE
+.SS Breaking Change Detection
+Automatically detects breaking changes:
+.RS
+- Explicit keywords (BREAKING CHANGE, breaking:)
+.br
+- Removal of public APIs/exports
+.br
+- Major version bumps (1.x.x → 2.0.0)
+.br
+- Function signature changes (parameter reduction)
+.RE
+.SS Commit History Learning
+Analyzes repository's commit history to match style:
+.RS
+- Emoji usage patterns
+.br
+- Scope usage frequency
+.br
+- Common commit types
+.br
+- Capitalization preferences
+.RE
+.SS Auto-Fix Formatting
+Detects and optionally fixes formatting issues:
+.RS
+- Trailing whitespace removal
+.br
+- Consistent line endings (LF vs CRLF)
+.br
+- Missing final newline at end of file
+.RE
+.SH TROUBLESHOOTING
+.SS "Error: ANTHROPIC_API_KEY is not set"
+Set your API key as an environment variable:
+.PP
+.RS
+.nf
+$ export ANTHROPIC_API_KEY="sk-ant-..."
+.fi
+.RE
+.SS "Error: Could not connect to Ollama"
+Ensure Ollama is running:
+.PP
+.RS
+.nf
+$ ollama serve
+.fi
+.RE
+.PP
+Or install Ollama from https://ollama.ai/
+.SS "No changes to commit"
+Stage your changes first:
+.PP
+.RS
+.nf
+$ git add .
+$ gh commit-ai
+.fi
+.RE
+.SS API Rate Limit Errors
+The tool automatically retries with exponential backoff. If rate limits persist:
+.RS
+- Wait a few minutes before retrying
+.br
+- Use a different AI provider
+.br
+- Use Ollama (local, no rate limits)
+.RE
+.SS Large Commits Taking Too Long
+Reduce the diff size sent to the AI:
+.PP
+.RS
+.nf
+$ gh commit-ai \-\-max-lines 100
+.fi
+.RE
+.PP
+Or set DIFF_MAX_LINES in your config file.
+.SH SEE ALSO
+.BR git (1),
+.BR gh (1),
+.BR git-commit (1),
+.BR ollama (1)
+.PP
+Project homepage: https://github.com/nathanaelphilip/gh-commit-ai
+.br
+Conventional Commits: https://www.conventionalcommits.org/
+.PP
+.B AI Provider Documentation:
+.br
+Ollama: https://ollama.ai/
+.br
+Groq: https://groq.com/
+.br
+Anthropic: https://www.anthropic.com/
+.br
+OpenAI: https://openai.com/
+.SH BUGS
+Report bugs at: https://github.com/nathanaelphilip/gh-commit-ai/issues
+.PP
+For security vulnerabilities, see SECURITY.md in the project repository.
+.SH AUTHOR
+Nathanael Philip
+.PP
+This is free and open source software. See LICENSE file for details.

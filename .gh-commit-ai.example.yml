@@ -8,10 +8,11 @@
 # 4. Built-in defaults
 
 # AI Provider Selection
-# Options: auto, ollama, anthropic, openai
+# Options: auto, ollama, anthropic, openai, groq
 # Default: auto (automatically detects what's available)
-# - "auto" will prefer Ollama (free, local) if running, otherwise tries API providers
+# - "auto" will prefer Ollama (free, local) if running, then Groq (fast, free tier), then paid APIs
 # - Ollama: Free, runs locally, requires ollama to be installed and running
+# - Groq: Ultra-fast inference, generous free tier (100 req/min), requires API key
 # - Anthropic/OpenAI: Requires API key, paid but high quality
 ai_provider: auto
 
@@ -35,6 +36,13 @@ anthropic_model: claude-3-5-sonnet-20241022
 # Default: gpt-4o-mini
 # Options: gpt-4o-mini, gpt-4o, gpt-4-turbo, etc.
 openai_model: gpt-4o-mini
+
+# Groq Configuration
+# Model to use when ai_provider is groq
+# Default: llama-3.3-70b-versatile
+# Options: llama-3.3-70b-versatile, llama-3.1-8b-instant, mixtral-8x7b-32768, gemma2-9b-it
+# Note: Groq offers ultra-fast inference with generous free tier
+groq_model: llama-3.3-70b-versatile
 
 # Language Configuration
 # Generate commit messages in your preferred language
@@ -97,7 +105,38 @@ learn_from_history: true
 # When disabled, shows recommendations as tips
 auto_select_model: false
 
-# Note: API keys (ANTHROPIC_API_KEY, OPENAI_API_KEY) cannot be stored in config files
+# Auto-Fix Formatting
+# Automatically detect and fix common formatting issues before commit
+# Default: false (prompts user to confirm fixes)
+# When enabled, automatically fixes:
+# - Trailing whitespace
+# - Inconsistent line endings
+# - Missing final newline
+auto_fix_formatting: false
+
+# Auto-Fix Trailing Whitespace
+# Remove trailing whitespace from files (when auto_fix_formatting is enabled)
+# Default: true
+auto_fix_trailing_whitespace: true
+
+# Auto-Fix Line Endings
+# Convert line endings to consistent style (when auto_fix_formatting is enabled)
+# Default: true
+auto_fix_line_endings: true
+
+# Auto-Fix Final Newline
+# Add missing newline at end of files (when auto_fix_formatting is enabled)
+# Default: true
+auto_fix_final_newline: true
+
+# Line Ending Style
+# Preferred line ending style
+# Options: lf (Unix/Linux/macOS), crlf (Windows)
+# Default: lf
+line_ending_style: lf
+
+# Note: API keys (ANTHROPIC_API_KEY, OPENAI_API_KEY, GROQ_API_KEY) cannot be stored in config files
 # Set them as environment variables instead:
 #   export ANTHROPIC_API_KEY="sk-ant-..."
 #   export OPENAI_API_KEY="sk-proj-..."
+#   export GROQ_API_KEY="gsk-..."

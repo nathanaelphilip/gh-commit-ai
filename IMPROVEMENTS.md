@@ -215,7 +215,14 @@ Add feature requests from users here as they come in.
 - [ ] **Google Gemini** - Integrate Google AI Studio API
 - [ ] **Azure OpenAI** - Support Azure-hosted OpenAI models
 - [ ] **LM Studio** - Support local models via LM Studio
-- [ ] **Groq** - Ultra-fast inference with Groq API
+- [x] **Groq** - Ultra-fast inference with Groq API
+  - [x] Groq API integration (call_groq function)
+  - [x] Configuration support (GROQ_MODEL, GROQ_API_KEY)
+  - [x] Auto-detection and provider priority
+  - [x] Code review model support
+  - [x] Documentation and examples
+  - [x] Default model: llama-3.3-70b-versatile
+  - [x] Free tier: 100 requests/minute
 - [ ] **Cohere** - Add Cohere Command models
 - [ ] **Mistral AI** - Support Mistral API
 
@@ -273,11 +280,30 @@ Add feature requests from users here as they come in.
 - [x] Comprehensive help with examples
 
 #### 21. Commit Splitting Suggestions
-- [ ] Detect when commit is too large (>1000 lines)
-- [ ] AI suggests logical ways to split the commit
-- [ ] Group related changes together
-- [ ] Interactive mode to review and apply splits
-- [ ] Preserve git history properly
+- [x] Detect when commit is too large (>1000 lines) ✅
+- [x] AI suggests logical ways to split the commit
+  - [x] New command: `gh commit-ai split`
+  - [x] Configurable threshold (default: 1000 lines, via `--threshold` flag)
+  - [x] Analyzes staged changes with numstat
+  - [x] Exits early if below threshold
+- [x] Group related changes together
+  - [x] AI-powered analysis using smart_sample_diff
+  - [x] Provides file-level summary with line counts
+  - [x] Suggests 2-4 logical groupings
+  - [x] Explains rationale for each group
+- [x] Interactive mode to review and apply splits
+  - [x] Displays formatted split suggestions
+  - [x] Provides step-by-step instructions for applying
+  - [x] Works with gh commit-ai for message generation
+- [x] Preserve git history properly
+  - [x] Guides user through manual staging process
+  - [x] Ensures clean commit history
+  - [x] Maintains file relationships and dependencies
+- [x] Additional features:
+  - [x] Dry-run mode (`--dry-run` flag)
+  - [x] Works with all AI providers (Ollama, Anthropic, OpenAI, Groq)
+  - [x] Comprehensive help text (`--help`)
+  - [x] Comprehensive test suite (tests/test_commit_split.sh)
 
 #### 22. Code Review Mode
 - [x] New command: `gh commit-ai review`
@@ -320,11 +346,30 @@ Add feature requests from users here as they come in.
 - [x] Tag message generation with commit summary
 
 #### 24. Auto-fix Formatting
-- [ ] Detect and fix common formatting issues before commit
-- [ ] Trailing whitespace removal
-- [ ] Consistent line endings
-- [ ] Missing newline at end of file
-- [ ] Configurable rules per project
+- [x] Detect and fix common formatting issues before commit ✅
+- [x] Trailing whitespace removal
+  - [x] Detection function for staged files
+  - [x] Fix function with BSD/GNU sed compatibility
+- [x] Consistent line endings
+  - [x] Detection with file command
+  - [x] Conversion between LF and CRLF
+  - [x] dos2unix/unix2dos support with sed fallback
+  - [x] Configurable preferred style (LINE_ENDING_STYLE)
+- [x] Missing newline at end of file
+  - [x] Detection with tail command
+  - [x] Automatic addition of final newline
+- [x] Configurable rules per project
+  - [x] AUTO_FIX_FORMATTING (enable/disable, default: false)
+  - [x] AUTO_FIX_TRAILING_WHITESPACE (default: true when enabled)
+  - [x] AUTO_FIX_LINE_ENDINGS (default: true when enabled)
+  - [x] AUTO_FIX_FINAL_NEWLINE (default: true when enabled)
+  - [x] LINE_ENDING_STYLE (lf or crlf, default: lf)
+  - [x] YAML configuration support
+- [x] User interaction (prompt before fixing when AUTO_FIX_FORMATTING=false)
+- [x] Automatic re-staging of fixed files
+- [x] Integration into main workflow (runs before commit message generation)
+- [x] Pure bash implementation (no external dependencies)
+- [x] Comprehensive test suite (tests/test_auto_fix.sh)
 
 ### Quality & Polish
 
@@ -353,18 +398,62 @@ Add feature requests from users here as they come in.
 - [ ] **Benchmark suite** - Track performance over time
 
 #### Security
-- [ ] **Security audit** - Review for vulnerabilities
-- [ ] **Input validation** - Sanitize all user inputs
-- [ ] **API key handling** - Secure storage recommendations
+- [x] **Security audit** - Review for vulnerabilities ✅
+  - [x] Comprehensive security audit conducted
+  - [x] Identified and fixed insecure temporary file creation
+  - [x] Identified and implemented input validation gaps
+  - [x] Verified API key handling is secure
+  - [x] Documented security audit in SECURITY.md
+- [x] **Input validation** - Sanitize all user inputs ✅
+  - [x] Implemented `validate_positive_integer()` function
+  - [x] Implemented `validate_allowed_values()` function
+  - [x] Implemented `sanitize_string()` function
+  - [x] Added validation for `--threshold` parameter
+  - [x] Added validation for `--max-lines` parameter
+  - [x] Added validation for `--type` parameter
+  - [x] Prevents command injection and invalid inputs
+- [x] **API key handling** - Secure storage recommendations ✅
+  - [x] Comprehensive SECURITY.md documentation
+  - [x] Security section in README.md with best practices
+  - [x] Verified API keys never logged or exposed
+  - [x] Documented secure environment variable usage
+  - [x] Added guidance for shell history protection
+- [x] **Secure temporary files** - Implemented secure temp file creation ✅
+  - [x] Created `create_secure_temp_file()` function
+  - [x] Uses `mktemp` for cryptographically secure random names
+  - [x] Sets restrictive permissions (600 - owner read/write only)
+  - [x] Replaced all insecure temp file usage
+  - [x] Automatic cleanup on exit or error
 - [ ] **Dependency scanning** - Check for vulnerable dependencies (none currently)
 - [ ] **Code signing** - Sign releases for verification
 
 #### Error Handling
-- [ ] **Network failure recovery** - Retry with exponential backoff
-- [ ] **Timeout handling** - Configurable timeouts for API calls
-- [ ] **Offline mode** - Better messaging when APIs unreachable
-- [ ] **Partial failure recovery** - Handle incomplete responses
-- [ ] **Better error messages** - More context and suggestions
+- [x] **Network failure recovery** - Retry with exponential backoff ✅
+  - [x] Implemented `retry_api_call()` wrapper function
+  - [x] Exponential backoff: 2s → 4s → 8s
+  - [x] Comprehensive curl error code handling (6, 7, 28, 35, 52, 56)
+  - [x] User-friendly retry progress messages
+  - [x] Applied to all 4 AI providers
+  - [x] Configurable via `MAX_RETRIES`, `RETRY_DELAY`, `CONNECT_TIMEOUT`, `MAX_TIME`
+- [x] **Timeout handling** - Configurable timeouts for API calls ✅
+  - [x] `CONNECT_TIMEOUT` for connection phase (default: 10s)
+  - [x] `MAX_TIME` for entire request (default: 120s)
+- [x] **Offline mode** - Better messaging when APIs unreachable ✅
+  - [x] Network connectivity detection before API calls
+  - [x] Host reachability verification for each provider
+  - [x] Early detection with helpful guidance
+  - [x] Ollama fallback suggestions (no internet needed)
+- [x] **Partial failure recovery** - Handle incomplete responses ✅
+  - [x] Response validation for all providers
+  - [x] Detects corrupted or unexpected responses
+  - [x] Detailed troubleshooting after retry exhaustion
+- [x] **Better error messages** - More context and suggestions ✅
+  - [x] Enhanced API key error messages with setup instructions
+  - [x] Contextual error messages with multiple possible causes
+  - [x] Step-by-step troubleshooting instructions
+  - [x] Alternative provider suggestions
+  - [x] Service status check URLs
+  - [x] Applied to all AI providers (Ollama, Anthropic, OpenAI, Groq)
 
 ### Developer Experience
 
@@ -376,7 +465,16 @@ Add feature requests from users here as they come in.
   - [x] uninstall-completion command
   - [x] Intelligent value completion (types, branches, tags)
   - [x] Comprehensive completion documentation
-- [ ] **Man page** - Traditional Unix man page (`man gh-commit-ai`)
+- [x] **Man page** - Traditional Unix man page (`man gh-commit-ai`) ✅
+  - [x] Created comprehensive man page (man/gh-commit-ai.1)
+  - [x] Follows standard groff/troff format
+  - [x] Covers all commands, options, and configuration
+  - [x] Includes usage examples and troubleshooting
+  - [x] Implemented `install-man` and `uninstall-man` commands
+  - [x] Auto-detects installation location
+  - [x] Updates man database (mandb)
+  - [x] Checks accessibility and provides MANPATH guidance
+  - [x] Updated README with man page section
 - [ ] **Demo video** - Screencast showing features
 - [ ] **Animated GIFs** - Visual examples in README
 - [ ] **Tutorial** - Step-by-step getting started guide
@@ -391,11 +489,32 @@ Add feature requests from users here as they come in.
 - [ ] **Code style guide** - Bash style conventions
 
 #### Release Management
-- [ ] **Automated releases** - GitHub Actions for releases
-- [ ] **Semantic versioning** - Follow semver strictly
-- [ ] **Release notes** - Auto-generate from commits
+- [x] **Automated releases** - GitHub Actions for releases ✅
+  - [x] GitHub Actions workflow (`.github/workflows/release.yml`)
+  - [x] Triggered on version tag push (`v*`)
+  - [x] Runs test suite before release
+  - [x] Generates release notes from commits and CHANGELOG.md
+  - [x] Creates GitHub releases with artifacts
+  - [x] Calculates SHA256 for Homebrew formula
+  - [x] Automatically updates Homebrew formula
+  - [x] Creates pull request with formula updates
+  - [x] Zero-touch releases: just push a tag!
+  - [x] Release notes generation script (`scripts/generate-release-notes.sh`)
+  - [x] Formula update automation (`scripts/update-formula-sha.sh`)
+  - [x] Comprehensive deployment documentation (DEPLOYMENT.md)
+- [ ] **Semantic versioning** - Follow semver strictly (already supported via version command)
+- [x] **Release notes** - Auto-generate from commits ✅
 - [ ] **Binary distribution** - Pre-packaged downloads
-- [ ] **Homebrew formula** - Easy install on macOS
+- [x] **Homebrew formula** - Easy install on macOS
+  - [x] Formula file created (Formula/gh-commit-ai.rb)
+  - [x] Tap repository structure documented
+  - [x] Installation and testing scripts
+  - [x] Comprehensive deployment guide (DEPLOYMENT.md)
+  - [x] Homebrew-specific documentation (HOMEBREW.md)
+  - [x] SHA256 update automation script
+  - [x] Formula validation and testing
+  - [x] Shell completion integration
+  - [x] Updated main README with Homebrew instructions
 - [ ] **Package managers** - apt, yum, pacman support
 
 ### Analytics & Insights

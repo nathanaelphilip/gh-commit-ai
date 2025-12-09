@@ -1,0 +1,136 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate bash syntax
+        run: bash -n gh-commit-ai
+
+      - name: Run test suite
+        run: |
+          chmod +x tests/*.sh
+          bash tests/test_core_functions.sh
+          bash tests/test_retry_logic.sh
+          bash tests/test_message_history_isolation.sh
+          bash tests/test_auto_fix.sh
+          bash tests/test_commit_split.sh
+
+  release:
+    name: Create Release
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for changelog
+
+      - name: Get version from tag
+        id: get_version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          chmod +x scripts/generate-release-notes.sh
+          NOTES=$(scripts/generate-release-notes.sh "${{ steps.get_version.outputs.tag }}")
+          echo "$NOTES" > release_notes.md
+          echo "Release notes generated"
+
+      - name: Create tarball
+        run: |
+          tar -czf gh-commit-ai-${{ steps.get_version.outputs.version }}.tar.gz \
+            gh-commit-ai \
+            completions/ \
+            .gh-commit-ai.example.yml \
+            README.md \
+            LICENSE \
+            CHANGELOG.md
+
+      - name: Calculate SHA256
+        id: sha256
+        run: |
+          SHA256=$(shasum -a 256 gh-commit-ai-${{ steps.get_version.outputs.version }}.tar.gz | awk '{print $1}')
+          echo "sha256=$SHA256" >> $GITHUB_OUTPUT
+          echo "SHA256: $SHA256"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          body_path: release_notes.md
+          files: |
+            gh-commit-ai-${{ steps.get_version.outputs.version }}.tar.gz
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update Homebrew Formula
+        run: |
+          chmod +x scripts/update-formula-sha.sh
+          scripts/update-formula-sha.sh ${{ steps.get_version.outputs.version }} ${{ steps.sha256.outputs.sha256 }}
+
+      - name: Create PR to update Homebrew formula
+        if: github.repository == 'nathanaelphilip/gh-commit-ai'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          BRANCH_NAME="release/v${{ steps.get_version.outputs.version }}"
+          git checkout -b "$BRANCH_NAME"
+
+          git add Formula/gh-commit-ai.rb
+          git commit -m "chore: update Homebrew formula for v${{ steps.get_version.outputs.version }}
+
+- Update version to ${{ steps.get_version.outputs.version }}
+- Update SHA256 to ${{ steps.sha256.outputs.sha256 }}
+
+🤖 Generated with automated release workflow"
+
+          git push origin "$BRANCH_NAME"
+
+          # Create PR using GitHub CLI
+          gh pr create \
+            --title "Release v${{ steps.get_version.outputs.version }}" \
+            --body "Automated release for v${{ steps.get_version.outputs.version }}
+
+## Changes
+See [release notes](https://github.com/${{ github.repository }}/releases/tag/v${{ steps.get_version.outputs.version }})
+
+## Updates
+- Version: ${{ steps.get_version.outputs.version }}
+- SHA256: ${{ steps.sha256.outputs.sha256 }}
+
+This PR was automatically created by the release workflow." \
+            --base main \
+            --head "$BRANCH_NAME"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Output release info
+        run: |
+          echo "✅ Release v${{ steps.get_version.outputs.version }} created successfully!"
+          echo ""
+          echo "Release URL: https://github.com/${{ github.repository }}/releases/tag/v${{ steps.get_version.outputs.version }}"
+          echo "SHA256: ${{ steps.sha256.outputs.sha256 }}"
+          echo ""
+          echo "Next steps:"
+          echo "1. Merge the PR to update the Homebrew formula"
+          echo "2. Users can install with: brew upgrade gh-commit-ai"

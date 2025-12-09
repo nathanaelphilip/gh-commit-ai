@@ -77,33 +77,64 @@ This is a GitHub CLI extension that generates AI-powered git commit messages usi
    - `call_ollama()`: Integrates with local Ollama API
    - `call_anthropic()`: Integrates with Anthropic Claude API (requires API key)
    - `call_openai()`: Integrates with OpenAI GPT API (requires API key)
-7. **Provider Routing**: Case statement that routes to the appropriate provider based on `AI_PROVIDER`
-8. **JSON Parsing**: Each provider function extracts responses using grep/sed to avoid `jq` dependency
-9. **Message Post-Processing**: Applies lowercase enforcement to ensure consistent formatting
-10. **Newline Conversion** (~line 1479-1484): `convert_newlines()` function that converts literal `\n` sequences to actual newlines
+   - `call_groq()`: Integrates with Groq API (requires API key, ultra-fast inference)
+7. **Network Retry Logic** (lines ~187-265): Automatic retry with exponential backoff for API calls
+   - `retry_api_call()`: Wrapper function that handles network failures gracefully
+   - Configuration variables (lines ~182-185):
+     - `MAX_RETRIES`: Number of retry attempts (default: 3)
+     - `RETRY_DELAY`: Initial delay between retries in seconds (default: 2)
+     - `CONNECT_TIMEOUT`: Connection timeout in seconds (default: 10)
+     - `MAX_TIME`: Maximum time for entire request in seconds (default: 120)
+   - **Exponential Backoff**: Doubles delay after each attempt (2s → 4s → 8s)
+   - **Error Detection**: Handles comprehensive curl error codes:
+     - Code 6: Could not resolve host
+     - Code 7: Failed to connect
+     - Code 28: Timeout
+     - Code 35: SSL connection error
+     - Code 52: Empty response from server
+     - Code 56: Network error (receive failure)
+   - **User Feedback**: Shows retry progress with user-friendly messages
+   - **Provider Integration**: All four providers use retry_api_call wrapper (lines ~3219-3577)
+8. **Provider Routing**: Case statement that routes to the appropriate provider based on `AI_PROVIDER`
+9. **JSON Parsing**: Each provider function extracts responses using grep/sed to avoid `jq` dependency
+10. **Message Post-Processing**: Applies lowercase enforcement to ensure consistent formatting
+11. **Newline Conversion** (~line 1479-1484): `convert_newlines()` function that converts literal `\n` sequences to actual newlines
    - AI responses contain literal `\n` characters (from JSON encoding)
    - Uses `printf "%b"` to interpret backslash escapes
    - Applied before committing to ensure proper multi-line display in GitHub
    - Also applied when displaying messages to users and saving to files
-11. **Dry-Run and Preview Modes** (lines ~577-587):
+12. **Dry-Run and Preview Modes** (lines ~577-587):
     - `--preview`: Shows message and exits immediately
     - `--dry-run`: Shows message and optionally saves to `.git/COMMIT_MSG_<timestamp>` file
-12. **Interactive Editing** (lines ~325-471): Fine-grained message editing without opening a text editor
+13. **Interactive Editing** (lines ~325-471): Fine-grained message editing without opening a text editor
     - `parse_commit_message()`: Parses message into SUMMARY_LINE and BULLETS arrays
     - `rebuild_commit_message()`: Rebuilds message from components
     - `interactive_edit_message()`: Provides menu-driven editing interface
     - Features: Edit summary, add/remove/reorder bullets
-13. **Cost Tracking** (lines ~483-600): Token usage and cost calculation for paid APIs
+14. **Cost Tracking** (lines ~483-600): Token usage and cost calculation for paid APIs
     - `calculate_cost()`: Calculates costs based on provider and model pricing
     - Supports Anthropic (Claude models) and OpenAI (GPT models) pricing
     - Uses bc or awk for floating-point calculations
     - `track_cumulative_cost()`: Tracks daily cumulative costs in /tmp
     - Extracts token usage from API responses (INPUT_TOKENS, OUTPUT_TOKENS)
-14. **Interactive Workflow** (lines ~737-787): User confirmation with loop support for interactive editing
+15. **Interactive Workflow** (lines ~737-787): User confirmation with loop support for interactive editing
     - `y`: Accept and commit
     - `n`: Cancel
     - `e`: Edit in default editor
     - `i`: Interactive editing mode
+16. **Message History & Recovery** (lines ~1140-1188): Repository-specific message caching
+    - `save_message_history()`: Saves generated messages to temporary storage
+    - `get_last_message()`: Retrieves the most recent message
+    - `is_recent_message()`: Checks if message is less than 5 minutes old
+    - `clear_message_history()`: Removes cached messages after successful commit
+    - **Repository Scoping** (lines ~1900-1918): Messages are scoped per repository
+      - Uses MD5 hash of repository path to create unique cache directory
+      - Format: `/tmp/gh-commit-ai-history-<repo-hash>/`
+      - Prevents message leakage between different repositories
+      - Each repository maintains its own separate message history
+      - Keeps last 5 messages per repository
+    - Automatic recovery if user accidentally exits within 5 minutes
+    - Asks user if they want to reuse the recovered message
 
 ## Configuration
 
@@ -148,10 +179,10 @@ Example: `AI_PROVIDER="${AI_PROVIDER:-${CONFIG_AI_PROVIDER:-ollama}}"`
 Environment variables take precedence over config files (defined at lines 69-78):
 
 **Provider Selection:**
-- `AI_PROVIDER`: Choose provider (default: `auto`) - Options: `auto`, `ollama`, `anthropic`, `openai`
-  - `auto`: Automatically detects available providers (prefers Ollama if running, then API providers)
+- `AI_PROVIDER`: Choose provider (default: `auto`) - Options: `auto`, `ollama`, `anthropic`, `openai`, `groq`
+  - `auto`: Automatically detects available providers (prefers Ollama → Groq → Anthropic → OpenAI)
   - Detects Ollama availability by checking if it's running and has models installed
-  - Detects Anthropic/OpenAI by checking for API keys
+  - Detects Anthropic/OpenAI/Groq by checking for API keys
   - Shows helpful error if no providers are available
 
 **Ollama (default, local, free):**
@@ -165,6 +196,12 @@ Environment variables take precedence over config files (defined at lines 69-78)
 **OpenAI (API key required):**
 - `OPENAI_API_KEY`: Your OpenAI API key
 - `OPENAI_MODEL`: Model to use (default: `gpt-4o-mini`)
+
+**Groq (API key required, ultra-fast, generous free tier):**
+- `GROQ_API_KEY`: Your Groq API key
+- `GROQ_MODEL`: Model to use (default: `llama-3.3-70b-versatile`)
+- Features: Ultra-fast inference (10-20x faster), 100 requests/minute free tier
+- Get API key at: https://console.groq.com/keys
 
 **Commit Format:**
 - `USE_SCOPE`: Enable/disable conventional commit scopes (default: `false`)

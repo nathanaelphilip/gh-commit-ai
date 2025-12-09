@@ -45,6 +45,9 @@ parse_yaml_config() {
             openai_model|OPENAI_MODEL)
                 CONFIG_OPENAI_MODEL="${CONFIG_OPENAI_MODEL:-$value}"
                 ;;
+            groq_model|GROQ_MODEL)
+                CONFIG_GROQ_MODEL="${CONFIG_GROQ_MODEL:-$value}"
+                ;;
             use_scope|USE_SCOPE)
                 CONFIG_USE_SCOPE="${CONFIG_USE_SCOPE:-$value}"
                 ;;
@@ -69,8 +72,26 @@ parse_yaml_config() {
             code_review_openai_model|CODE_REVIEW_OPENAI_MODEL)
                 CONFIG_CODE_REVIEW_OPENAI_MODEL="${CONFIG_CODE_REVIEW_OPENAI_MODEL:-$value}"
                 ;;
+            code_review_groq_model|CODE_REVIEW_GROQ_MODEL)
+                CONFIG_CODE_REVIEW_GROQ_MODEL="${CONFIG_CODE_REVIEW_GROQ_MODEL:-$value}"
+                ;;
             commit_language|COMMIT_LANGUAGE)
                 CONFIG_COMMIT_LANGUAGE="${CONFIG_COMMIT_LANGUAGE:-$value}"
+                ;;
+            auto_fix_formatting|AUTO_FIX_FORMATTING)
+                CONFIG_AUTO_FIX_FORMATTING="${CONFIG_AUTO_FIX_FORMATTING:-$value}"
+                ;;
+            auto_fix_trailing_whitespace|AUTO_FIX_TRAILING_WHITESPACE)
+                CONFIG_AUTO_FIX_TRAILING_WHITESPACE="${CONFIG_AUTO_FIX_TRAILING_WHITESPACE:-$value}"
+                ;;
+            auto_fix_line_endings|AUTO_FIX_LINE_ENDINGS)
+                CONFIG_AUTO_FIX_LINE_ENDINGS="${CONFIG_AUTO_FIX_LINE_ENDINGS:-$value}"
+                ;;
+            auto_fix_final_newline|AUTO_FIX_FINAL_NEWLINE)
+                CONFIG_AUTO_FIX_FINAL_NEWLINE="${CONFIG_AUTO_FIX_FINAL_NEWLINE:-$value}"
+                ;;
+            line_ending_style|LINE_ENDING_STYLE)
+                CONFIG_LINE_ENDING_STYLE="${CONFIG_LINE_ENDING_STYLE:-$value}"
                 ;;
         esac
     done < "$config_file"
@@ -88,13 +109,15 @@ if [ -f ".gh-commit-ai.yml" ]; then
 fi
 
 # Configuration (priority: env vars > local config > global config > defaults)
-AI_PROVIDER="${AI_PROVIDER:-${CONFIG_AI_PROVIDER:-auto}}"  # Options: auto, ollama, anthropic, openai
+AI_PROVIDER="${AI_PROVIDER:-${CONFIG_AI_PROVIDER:-auto}}"  # Options: auto, ollama, anthropic, openai, groq
 OLLAMA_MODEL="${OLLAMA_MODEL:-${CONFIG_OLLAMA_MODEL:-gemma3:12b}}"
 OLLAMA_HOST="${OLLAMA_HOST:-${CONFIG_OLLAMA_HOST:-http://localhost:11434}}"
 ANTHROPIC_MODEL="${ANTHROPIC_MODEL:-${CONFIG_ANTHROPIC_MODEL:-claude-3-5-sonnet-20241022}}"
 ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"
 OPENAI_MODEL="${OPENAI_MODEL:-${CONFIG_OPENAI_MODEL:-gpt-4o-mini}}"
 OPENAI_API_KEY="${OPENAI_API_KEY:-}"
+GROQ_MODEL="${GROQ_MODEL:-${CONFIG_GROQ_MODEL:-llama-3.3-70b-versatile}}"
+GROQ_API_KEY="${GROQ_API_KEY:-}"
 DIFF_MAX_LINES="${DIFF_MAX_LINES:-${CONFIG_DIFF_MAX_LINES:-200}}"  # Limit diff lines for faster processing
 USE_SCOPE="${USE_SCOPE:-${CONFIG_USE_SCOPE:-false}}"  # Enable/disable conventional commit scopes
 USE_GITMOJI="${USE_GITMOJI:-${CONFIG_USE_GITMOJI:-false}}"  # Enable/disable gitmoji prefixes
@@ -105,9 +128,17 @@ AUTO_SELECT_MODEL="${AUTO_SELECT_MODEL:-${CONFIG_AUTO_SELECT_MODEL:-false}}"  # 
 CODE_REVIEW_MODEL="${CODE_REVIEW_MODEL:-${CONFIG_CODE_REVIEW_MODEL:-}}"  # Dedicated model for code reviews (Ollama)
 CODE_REVIEW_ANTHROPIC_MODEL="${CODE_REVIEW_ANTHROPIC_MODEL:-${CONFIG_CODE_REVIEW_ANTHROPIC_MODEL:-}}"  # Anthropic model for reviews
 CODE_REVIEW_OPENAI_MODEL="${CODE_REVIEW_OPENAI_MODEL:-${CONFIG_CODE_REVIEW_OPENAI_MODEL:-}}"  # OpenAI model for reviews
+CODE_REVIEW_GROQ_MODEL="${CODE_REVIEW_GROQ_MODEL:-${CONFIG_CODE_REVIEW_GROQ_MODEL:-}}"  # Groq model for reviews
 
 # Language configuration for commit messages
 COMMIT_LANGUAGE="${COMMIT_LANGUAGE:-${CONFIG_COMMIT_LANGUAGE:-}}"  # Language for commit messages (en, es, fr, de, ja, zh, etc.)
+
+# Auto-fix formatting configuration
+AUTO_FIX_FORMATTING="${AUTO_FIX_FORMATTING:-${CONFIG_AUTO_FIX_FORMATTING:-false}}"  # Enable/disable auto-fixing formatting issues
+AUTO_FIX_TRAILING_WHITESPACE="${AUTO_FIX_TRAILING_WHITESPACE:-${CONFIG_AUTO_FIX_TRAILING_WHITESPACE:-false}}"  # Fix trailing whitespace (when auto-fix enabled)
+AUTO_FIX_LINE_ENDINGS="${AUTO_FIX_LINE_ENDINGS:-${CONFIG_AUTO_FIX_LINE_ENDINGS:-true}}"  # Fix inconsistent line endings (when auto-fix enabled)
+AUTO_FIX_FINAL_NEWLINE="${AUTO_FIX_FINAL_NEWLINE:-${CONFIG_AUTO_FIX_FINAL_NEWLINE:-true}}"  # Fix missing final newline (when auto-fix enabled)
+LINE_ENDING_STYLE="${LINE_ENDING_STYLE:-${CONFIG_LINE_ENDING_STYLE:-lf}}"  # Preferred line ending: "lf" (Unix) or "crlf" (Windows)
 
 # Detect language from git config or system locale if not explicitly set
 detect_language() {
@@ -169,6 +200,562 @@ get_language_name() {
 # These files are auto-generated and not useful for AI analysis
 GIT_EXCLUDE_PATTERN="':(exclude)package-lock.json' ':(exclude)yarn.lock' ':(exclude)pnpm-lock.yaml' ':(exclude)Gemfile.lock' ':(exclude)Cargo.lock' ':(exclude)poetry.lock' ':(exclude)composer.lock' ':(exclude)Pipfile.lock' ':(exclude)go.sum' ':(exclude)*.min.js' ':(exclude)*.min.css'"
 
+# Network retry configuration
+MAX_RETRIES="${MAX_RETRIES:-3}"  # Maximum number of retry attempts
+RETRY_DELAY="${RETRY_DELAY:-2}"  # Initial retry delay in seconds (doubles each retry)
+CONNECT_TIMEOUT="${CONNECT_TIMEOUT:-10}"  # Connection timeout in seconds
+MAX_TIME="${MAX_TIME:-120}"  # Maximum time for entire request in seconds
+
+# ============================================================================
+# Security Functions
+# ============================================================================
+
+# Create a secure temporary file with restricted permissions (600)
+# Returns the path to the created file
+create_secure_temp_file() {
+    local prefix="${1:-gh-commit-ai}"
+    local temp_file
+
+    # Use mktemp for secure temp file creation
+    temp_file=$(mktemp "/tmp/${prefix}.XXXXXXXXXX") || {
+        echo -e "${RED}Error: Failed to create secure temporary file${NC}" >&2
+        return 1
+    }
+
+    # Ensure restrictive permissions (owner read/write only)
+    chmod 600 "$temp_file" 2>/dev/null || {
+        echo -e "${RED}Error: Failed to set secure permissions on temporary file${NC}" >&2
+        rm -f "$temp_file"
+        return 1
+    }
+
+    echo "$temp_file"
+}
+
+# Validate that a parameter is a positive integer
+# Usage: validate_positive_integer <value> <param_name>
+# Returns: 0 if valid, 1 if invalid
+validate_positive_integer() {
+    local value="$1"
+    local param_name="$2"
+
+    # Check if value is empty
+    if [ -z "$value" ]; then
+        echo -e "${RED}Error: ${param_name} cannot be empty${NC}" >&2
+        return 1
+    fi
+
+    # Check if value is a positive integer
+    if ! [[ "$value" =~ ^[0-9]+$ ]]; then
+        echo -e "${RED}Error: ${param_name} must be a positive integer, got: $value${NC}" >&2
+        return 1
+    fi
+
+    # Check if value is zero
+    if [ "$value" -eq 0 ]; then
+        echo -e "${RED}Error: ${param_name} must be greater than zero${NC}" >&2
+        return 1
+    fi
+
+    return 0
+}
+
+# Validate that a parameter is within a set of allowed values
+# Usage: validate_allowed_values <value> <param_name> <allowed1> <allowed2> ...
+# Returns: 0 if valid, 1 if invalid
+validate_allowed_values() {
+    local value="$1"
+    local param_name="$2"
+    shift 2
+    local allowed_values=("$@")
+
+    # Check if value is empty
+    if [ -z "$value" ]; then
+        echo -e "${RED}Error: ${param_name} cannot be empty${NC}" >&2
+        return 1
+    fi
+
+    # Check if value is in allowed list
+    for allowed in "${allowed_values[@]}"; do
+        if [ "$value" = "$allowed" ]; then
+            return 0
+        fi
+    done
+
+    # Value not found in allowed list
+    echo -e "${RED}Error: ${param_name} must be one of: ${allowed_values[*]}, got: $value${NC}" >&2
+    return 1
+}
+
+# Sanitize a string to prevent command injection
+# Removes or escapes potentially dangerous characters
+# Usage: sanitize_string <string>
+sanitize_string() {
+    local input="$1"
+
+    # Remove null bytes, control characters, and backticks
+    # Keep only printable ASCII + common unicode
+    echo "$input" | tr -d '\000-\010\013-\037\177`$(){}[]<>|;&'
+}
+
+# ============================================================================
+# Network and Error Handling
+# ============================================================================
+
+# Check if we have basic network connectivity
+# Returns 0 if online, 1 if offline
+check_network_connectivity() {
+    # Try to resolve common DNS names
+    if command -v host >/dev/null 2>&1; then
+        host google.com >/dev/null 2>&1 && return 0
+    elif command -v nslookup >/dev/null 2>&1; then
+        nslookup google.com >/dev/null 2>&1 && return 0
+    elif command -v ping >/dev/null 2>&1; then
+        # Try ping with timeout (works on both macOS and Linux)
+        ping -c 1 -W 2 8.8.8.8 >/dev/null 2>&1 && return 0
+    fi
+
+    return 1
+}
+
+# Check if a specific host is reachable
+# Usage: check_host_reachability <hostname>
+check_host_reachability() {
+    local host="$1"
+
+    if command -v host >/dev/null 2>&1; then
+        host "$host" >/dev/null 2>&1 && return 0
+    elif command -v nslookup >/dev/null 2>&1; then
+        nslookup "$host" >/dev/null 2>&1 && return 0
+    fi
+
+    return 1
+}
+
+# Display offline mode error with helpful suggestions
+show_offline_error() {
+    local provider="$1"
+
+    echo -e "${RED}Error: No internet connection detected${NC}" >&2
+    echo "" >&2
+    echo "Unable to reach $provider API. Possible causes:" >&2
+    echo "  • No internet connection" >&2
+    echo "  • Firewall blocking access" >&2
+    echo "  • VPN or proxy issues" >&2
+    echo "  • DNS resolution problems" >&2
+    echo "" >&2
+    echo "Suggestions:" >&2
+    echo "  • Check your internet connection" >&2
+    echo "  • Try: ping 8.8.8.8" >&2
+
+    if [ "$provider" = "Ollama" ]; then
+        echo "  • Ollama runs locally - check if it's running: ollama ps" >&2
+    else
+        echo "  • Use Ollama (local, no internet required):" >&2
+        echo "    export AI_PROVIDER=ollama" >&2
+        echo "    Install from: https://ollama.ai" >&2
+    fi
+}
+
+# Validate that an API response contains expected content
+# Usage: validate_api_response <response>
+# Returns 0 if valid, 1 if invalid/incomplete
+validate_api_response() {
+    local response="$1"
+
+    # Check if response is empty
+    if [ -z "$response" ]; then
+        return 1
+    fi
+
+    # Check if response is valid JSON (rough check)
+    if ! echo "$response" | grep -q '{.*}'; then
+        return 1
+    fi
+
+    return 0
+}
+
+# Enhanced error message for API key issues
+show_api_key_error() {
+    local provider="$1"
+    local key_var="$2"
+
+    echo -e "${RED}Error: $key_var is not set${NC}" >&2
+    echo "" >&2
+    echo "To use $provider, you need to set your API key:" >&2
+    echo "  export $key_var=\"your-key-here\"" >&2
+    echo "" >&2
+
+    case "$provider" in
+        "Anthropic")
+            echo "Get your API key from: https://console.anthropic.com/settings/keys" >&2
+            echo "Example: export ANTHROPIC_API_KEY=\"sk-ant-...\"" >&2
+            ;;
+        "OpenAI")
+            echo "Get your API key from: https://platform.openai.com/api-keys" >&2
+            echo "Example: export OPENAI_API_KEY=\"sk-proj-...\"" >&2
+            ;;
+        "Groq")
+            echo "Get your API key from: https://console.groq.com/keys" >&2
+            echo "Example: export GROQ_API_KEY=\"gsk_...\"" >&2
+            ;;
+    esac
+
+    echo "" >&2
+    echo "Alternative: Use Ollama (local, no API key needed):" >&2
+    echo "  brew install ollama  # or download from https://ollama.ai" >&2
+    echo "  ollama run gemma2:2b" >&2
+    echo "  export AI_PROVIDER=ollama" >&2
+}
+
+# ============================================================================
+# Retry Logic
+# ============================================================================
+
+# Retry wrapper with exponential backoff
+# Usage: retry_with_backoff <attempt_num> <max_attempts> "<command>"
+# Returns: 0 on success, 1 on failure after all retries
+retry_api_call() {
+    local url="$1"
+    local data="$2"
+    local output_file="$3"
+    local error_file="$4"
+    local provider_name="$5"
+    shift 5
+    # Remaining arguments are header options for curl (e.g., -H "Content-Type: application/json")
+    local header_args=("$@")
+
+    local attempt=1
+    local delay="$RETRY_DELAY"
+
+    while [ $attempt -le "$MAX_RETRIES" ]; do
+        # Make the API call
+        local exit_code=0
+        curl -s -X POST "$url" \
+            "${header_args[@]}" \
+            -d "$data" \
+            --connect-timeout "$CONNECT_TIMEOUT" \
+            --max-time "$MAX_TIME" \
+            -o "$output_file" 2>"$error_file" || exit_code=$?
+
+        # Check if successful
+        if [ $exit_code -eq 0 ] && [ -s "$output_file" ]; then
+            # Check if response contains an error
+            if ! grep -q '"error"' "$output_file" 2>/dev/null; then
+                return 0  # Success!
+            fi
+        fi
+
+        # If this was the last attempt, fail
+        if [ $attempt -eq "$MAX_RETRIES" ]; then
+            return 1
+        fi
+
+        # Determine error type for better messaging
+        local error_msg=""
+        case $exit_code in
+            0)
+                error_msg="API error (rate limit or invalid response)"
+                ;;
+            6)
+                error_msg="Could not resolve host"
+                ;;
+            7)
+                error_msg="Failed to connect"
+                ;;
+            28)
+                error_msg="Timeout"
+                ;;
+            35)
+                error_msg="SSL connection error"
+                ;;
+            52)
+                error_msg="Empty response from server"
+                ;;
+            56)
+                error_msg="Network error (receive failure)"
+                ;;
+            *)
+                error_msg="Network error (code: $exit_code)"
+                ;;
+        esac
+
+        # Show retry message
+        echo -e "${YELLOW}⚠ $error_msg - Retrying in ${delay}s (attempt $attempt/$MAX_RETRIES)${NC}" >&2
+
+        # Wait with exponential backoff
+        sleep $delay
+
+        # Double the delay for next time (exponential backoff)
+        delay=$((delay * 2))
+        attempt=$((attempt + 1))
+    done
+
+    return 1  # All retries failed
+}
+
+# ============================================================================
+# Auto-Fix Formatting Functions
+# ============================================================================
+
+# Detect files with trailing whitespace
+detect_trailing_whitespace() {
+    local files=()
+
+    # Get list of staged files (text files only)
+    while IFS= read -r file; do
+        # Skip binary files
+        if file "$file" 2>/dev/null | grep -q "text"; then
+            # Check for trailing whitespace
+            if grep -q '[[:space:]]$' "$file" 2>/dev/null; then
+                files+=("$file")
+            fi
+        fi
+    done < <(git diff --cached --name-only --diff-filter=ACM)
+
+    # Return count and files
+    if [ ${#files[@]} -gt 0 ]; then
+        echo "${#files[@]}"
+        printf '%s\n' "${files[@]}"
+    else
+        echo "0"
+    fi
+}
+
+# Detect files with inconsistent line endings
+detect_line_endings() {
+    local files=()
+
+    # Get list of staged files (text files only)
+    while IFS= read -r file; do
+        # Skip binary files
+        if file "$file" 2>/dev/null | grep -q "text"; then
+            # Check for CRLF line endings
+            if file "$file" | grep -q "CRLF"; then
+                local has_crlf=true
+            else
+                local has_crlf=false
+            fi
+
+            # Check for mixed line endings or wrong type
+            if [ "$LINE_ENDING_STYLE" = "lf" ] && [ "$has_crlf" = "true" ]; then
+                files+=("$file:crlf")
+            elif [ "$LINE_ENDING_STYLE" = "crlf" ] && [ "$has_crlf" = "false" ]; then
+                files+=("$file:lf")
+            fi
+        fi
+    done < <(git diff --cached --name-only --diff-filter=ACM)
+
+    # Return count and files
+    if [ ${#files[@]} -gt 0 ]; then
+        echo "${#files[@]}"
+        printf '%s\n' "${files[@]}"
+    else
+        echo "0"
+    fi
+}
+
+# Detect files missing final newline
+detect_missing_final_newline() {
+    local files=()
+
+    # Get list of staged files (text files only)
+    while IFS= read -r file; do
+        # Skip binary files and empty files
+        if [ -s "$file" ] && file "$file" 2>/dev/null | grep -q "text"; then
+            # Check if file ends with newline
+            if [ -n "$(tail -c 1 "$file" 2>/dev/null)" ]; then
+                files+=("$file")
+            fi
+        fi
+    done < <(git diff --cached --name-only --diff-filter=ACM)
+
+    # Return count and files
+    if [ ${#files[@]} -gt 0 ]; then
+        echo "${#files[@]}"
+        printf '%s\n' "${files[@]}"
+    else
+        echo "0"
+    fi
+}
+
+# Fix trailing whitespace in file
+fix_trailing_whitespace() {
+    local file="$1"
+
+    # Remove trailing whitespace using sed (compatible with both GNU and BSD sed)
+    if sed --version 2>/dev/null | grep -q "GNU"; then
+        # GNU sed
+        sed -i 's/[[:space:]]*$//' "$file"
+    else
+        # BSD sed (macOS)
+        sed -i '' 's/[[:space:]]*$//' "$file"
+    fi
+}
+
+# Fix line endings in file
+fix_line_endings() {
+    local file="$1"
+    local target_style="$2"  # "lf" or "crlf"
+
+    if [ "$target_style" = "lf" ]; then
+        # Convert CRLF to LF
+        if command -v dos2unix &> /dev/null; then
+            dos2unix "$file" 2>/dev/null
+        else
+            # Fallback: use sed or tr
+            if sed --version 2>/dev/null | grep -q "GNU"; then
+                sed -i 's/\r$//' "$file"
+            else
+                sed -i '' 's/\r$//' "$file"
+            fi
+        fi
+    else
+        # Convert LF to CRLF
+        if command -v unix2dos &> /dev/null; then
+            unix2dos "$file" 2>/dev/null
+        else
+            # Fallback: use sed
+            if sed --version 2>/dev/null | grep -q "GNU"; then
+                sed -i 's/$/\r/' "$file"
+            else
+                sed -i '' 's/$/\r/' "$file"
+            fi
+        fi
+    fi
+}
+
+# Fix missing final newline in file
+fix_missing_final_newline() {
+    local file="$1"
+
+    # Add newline at end if missing
+    if [ -n "$(tail -c 1 "$file" 2>/dev/null)" ]; then
+        echo "" >> "$file"
+    fi
+}
+
+# Main auto-fix function - detect and optionally fix formatting issues
+check_and_fix_formatting() {
+    # Skip if not in a git repository
+    if ! git rev-parse --is-inside-work-tree &>/dev/null; then
+        return 0
+    fi
+
+    # Skip if no staged files
+    if [ -z "$(git diff --cached --name-only)" ]; then
+        return 0
+    fi
+
+    # Arrays to store detected issues
+    local trailing_ws_files=()
+    local line_ending_files=()
+    local missing_newline_files=()
+    local total_issues=0
+
+    # Detect trailing whitespace
+    if [ "$AUTO_FIX_TRAILING_WHITESPACE" = "true" ]; then
+        local ws_result=$(detect_trailing_whitespace)
+        local ws_count=$(echo "$ws_result" | head -1)
+        if [ "$ws_count" != "0" ]; then
+            total_issues=$((total_issues + ws_count))
+            # Use while read loop for bash 3.2 compatibility (instead of mapfile)
+            trailing_ws_files=()
+            while IFS= read -r line; do
+                trailing_ws_files+=("$line")
+            done < <(echo "$ws_result" | tail -n +2)
+        fi
+    fi
+
+    # Detect line ending issues
+    if [ "$AUTO_FIX_LINE_ENDINGS" = "true" ]; then
+        local le_result=$(detect_line_endings)
+        local le_count=$(echo "$le_result" | head -1)
+        if [ "$le_count" != "0" ]; then
+            total_issues=$((total_issues + le_count))
+            # Use while read loop for bash 3.2 compatibility (instead of mapfile)
+            line_ending_files=()
+            while IFS= read -r line; do
+                line_ending_files+=("$line")
+            done < <(echo "$le_result" | tail -n +2)
+        fi
+    fi
+
+    # Detect missing final newlines
+    if [ "$AUTO_FIX_FINAL_NEWLINE" = "true" ]; then
+        local nl_result=$(detect_missing_final_newline)
+        local nl_count=$(echo "$nl_result" | head -1)
+        if [ "$nl_count" != "0" ]; then
+            total_issues=$((total_issues + nl_count))
+            # Use while read loop for bash 3.2 compatibility (instead of mapfile)
+            missing_newline_files=()
+            while IFS= read -r line; do
+                missing_newline_files+=("$line")
+            done < <(echo "$nl_result" | tail -n +2)
+        fi
+    fi
+
+    # If no issues found, return early
+    if [ $total_issues -eq 0 ]; then
+        return 0
+    fi
+
+    # Display detected issues
+    echo -e "${YELLOW}⚠ Formatting issues detected:${NC}"
+    [ ${#trailing_ws_files[@]} -gt 0 ] && echo "  • ${#trailing_ws_files[@]} file(s) with trailing whitespace"
+    [ ${#line_ending_files[@]} -gt 0 ] && echo "  • ${#line_ending_files[@]} file(s) with incorrect line endings"
+    [ ${#missing_newline_files[@]} -gt 0 ] && echo "  • ${#missing_newline_files[@]} file(s) missing final newline"
+    echo ""
+
+    # Auto-fix if enabled, otherwise ask user
+    local should_fix=false
+    if [ "$AUTO_FIX_FORMATTING" = "true" ]; then
+        should_fix=true
+        echo -e "${BLUE}Auto-fixing formatting issues...${NC}"
+    else
+        echo -n "Would you like to fix these issues automatically? (y/n): "
+        read -r response
+        if [[ "$response" =~ ^[Yy]$ ]]; then
+            should_fix=true
+        fi
+    fi
+
+    if [ "$should_fix" = "true" ]; then
+        local fixed_count=0
+
+        # Fix trailing whitespace
+        for file in "${trailing_ws_files[@]}"; do
+            fix_trailing_whitespace "$file"
+            git add "$file"  # Re-stage the fixed file
+            fixed_count=$((fixed_count + 1))
+        done
+
+        # Fix line endings
+        for file_info in "${line_ending_files[@]}"; do
+            local file="${file_info%:*}"
+            fix_line_endings "$file" "$LINE_ENDING_STYLE"
+            git add "$file"  # Re-stage the fixed file
+            fixed_count=$((fixed_count + 1))
+        done
+
+        # Fix missing newlines
+        for file in "${missing_newline_files[@]}"; do
+            fix_missing_final_newline "$file"
+            git add "$file"  # Re-stage the fixed file
+            fixed_count=$((fixed_count + 1))
+        done
+
+        echo -e "${GREEN}✓ Fixed $fixed_count formatting issue(s)${NC}"
+        echo ""
+    else
+        echo -e "${YELLOW}Continuing without fixes...${NC}"
+        echo ""
+    fi
+
+    return 0
+}
+
 # Auto-detect available AI providers and models
 detect_available_providers() {
     local available=""
@@ -181,6 +768,11 @@ detect_available_providers() {
     # Check OpenAI (API key set)
     if [ -n "$OPENAI_API_KEY" ]; then
         available="${available}openai "
+    fi
+
+    # Check Groq (API key set)
+    if [ -n "$GROQ_API_KEY" ]; then
+        available="${available}groq "
     fi
 
     # Check Ollama (running and has models)
@@ -277,15 +869,19 @@ if [ "$AI_PROVIDER" = "auto" ]; then
         echo "  1. Install Ollama (free, local): https://ollama.ai"
         echo "     Then run: ollama pull qwen2.5-coder:7b"
         echo ""
-        echo "  2. Set up Anthropic API:"
+        echo "  2. Set up Groq API (ultra-fast, generous free tier):"
+        echo "     export GROQ_API_KEY=\"gsk-...\""
+        echo "     Get your key from: https://console.groq.com/keys"
+        echo ""
+        echo "  3. Set up Anthropic API:"
         echo "     export ANTHROPIC_API_KEY=\"sk-ant-...\""
         echo ""
-        echo "  3. Set up OpenAI API:"
+        echo "  4. Set up OpenAI API:"
         echo "     export OPENAI_API_KEY=\"sk-proj-...\""
         exit 1
     fi
 
-    # Pick the best available provider (prefer local/free first, then API providers)
+    # Pick the best available provider (prefer local/free first, then fast/free APIs, then paid APIs)
     if echo "$available_providers" | grep -q "ollama"; then
         AI_PROVIDER="ollama"
         # Auto-select best Ollama model
@@ -294,6 +890,9 @@ if [ "$AI_PROVIDER" = "auto" ]; then
             OLLAMA_MODEL="$detected_model"
             AUTO_DETECTED=true
         fi
+    elif echo "$available_providers" | grep -q "groq"; then
+        AI_PROVIDER="groq"
+        AUTO_DETECTED=true
     elif echo "$available_providers" | grep -q "anthropic"; then
         AI_PROVIDER="anthropic"
         AUTO_DETECTED=true
@@ -710,6 +1309,165 @@ suggest_next_version() {
     fi
 }
 
+# Suggest commit splits for large changes
+suggest_commit_splits() {
+    local threshold="$1"
+    local dry_run="$2"
+
+    # Check if we're in a git repository
+    GIT_DIR=$(git rev-parse --git-dir 2>/dev/null)
+    if [ -z "$GIT_DIR" ]; then
+        echo -e "${RED}Error: Not a git repository${NC}" >&2
+        exit 1
+    fi
+
+    echo -e "${BLUE}← Analyzing staged changes${NC}" >&2
+
+    # Get staged changes
+    local diff_content
+    diff_content=$(git diff --cached)
+
+    if [ -z "$diff_content" ]; then
+        echo -e "${RED}Error: No staged changes to analyze${NC}" >&2
+        echo "Tip: Stage your changes with 'git add' first" >&2
+        exit 1
+    fi
+
+    # Count total lines changed
+    local stats
+    stats=$(git diff --cached --numstat)
+    local total_lines=0
+    while IFS=$'\t' read -r added removed file; do
+        if [[ "$added" =~ ^[0-9]+$ ]] && [[ "$removed" =~ ^[0-9]+$ ]]; then
+            total_lines=$((total_lines + added + removed))
+        fi
+    done <<< "$stats"
+
+    echo -e "✓ Analyzed $total_lines lines across $(echo "$stats" | wc -l | tr -d ' ') files"
+
+    # Check if changes exceed threshold
+    if [ $total_lines -lt $threshold ]; then
+        echo -e "${GREEN}✓ Changes are below threshold ($total_lines < $threshold lines)${NC}"
+        echo "Your commit is a reasonable size. No split needed!"
+        exit 0
+    fi
+
+    echo -e "${YELLOW}⚠ Large commit detected: $total_lines lines (threshold: $threshold)${NC}"
+    echo ""
+
+    # Get file list with stats for AI analysis
+    local file_summary=""
+    while IFS=$'\t' read -r added removed file; do
+        if [[ "$added" =~ ^[0-9]+$ ]] && [[ "$removed" =~ ^[0-9]+$ ]]; then
+            file_summary="${file_summary}${file}: +${added} -${removed}\n"
+        fi
+    done <<< "$stats"
+
+    # Sample the diff intelligently (use existing smart_sample_diff function)
+    local sampled_diff
+    sampled_diff=$(smart_sample_diff "$diff_content" 500)
+
+    # Create prompt for AI
+    local prompt="Analyze this large git commit and suggest how to split it into logical, smaller commits.
+
+COMMIT SIZE: $total_lines lines changed
+
+FILES CHANGED:
+$file_summary
+
+DIFF SAMPLE (first 500 lines):
+$sampled_diff
+
+Please suggest 2-4 logical ways to split this commit. For each suggested commit, provide:
+1. A brief description of what it contains
+2. The list of files that should be included
+3. Why these changes belong together
+
+Format your response as:
+
+## Split Suggestion 1: [Description]
+**Files:**
+- file1.ext
+- file2.ext
+
+**Rationale:** [Why these changes belong together]
+
+## Split Suggestion 2: [Description]
+...
+
+Focus on:
+- Grouping related functionality together
+- Separating different concerns (e.g., tests from implementation, docs from code)
+- Creating commits that are independently reviewable
+- Maintaining logical dependencies (e.g., don't split a function from its tests)
+
+Be specific and practical."
+
+    # Call AI to get split suggestions
+    echo -e "${BLUE}← Thinking (analyzing commit structure)${NC}" >&2
+
+    local suggestions
+    suggestions=$(call_ai_for_split "$prompt")
+
+    if [ -z "$suggestions" ]; then
+        echo -e "${RED}Error: Failed to generate split suggestions${NC}" >&2
+        exit 1
+    fi
+
+    # Display suggestions
+    echo ""
+    echo -e "${GREEN}═══ Split Suggestions ═══${NC}"
+    echo ""
+    echo "$suggestions"
+    echo ""
+    echo -e "${GREEN}═══════════════════════${NC}"
+    echo ""
+
+    # Interactive mode (if not dry-run)
+    if [ "$dry_run" = "false" ]; then
+        echo -e "${YELLOW}Note: Applying splits will require manual file staging.${NC}"
+        echo "The suggestions above show logical groupings."
+        echo ""
+        echo "To apply these splits:"
+        echo "  1. Reset staged changes: git reset"
+        echo "  2. Stage files for first commit: git add file1 file2..."
+        echo "  3. Commit: git commit -m \"message\""
+        echo "  4. Repeat for each split"
+        echo ""
+        echo "Or use: gh commit-ai (to generate commit messages)"
+    fi
+}
+
+# Helper function to call AI for split suggestions
+call_ai_for_split() {
+    local prompt="$1"
+
+    # Detect and use available AI provider
+    if [ "$AI_PROVIDER" = "auto" ]; then
+        detect_available_providers > /dev/null
+    fi
+
+    # Route to appropriate provider
+    case "$AI_PROVIDER" in
+        ollama)
+            call_ollama "$prompt"
+            ;;
+        anthropic)
+            call_anthropic "$prompt"
+            ;;
+        openai)
+            call_openai "$prompt"
+            ;;
+        groq)
+            call_groq "$prompt"
+            ;;
+        *)
+            echo -e "${RED}Error: Unknown AI provider: $AI_PROVIDER${NC}" >&2
+            exit 1
+            ;;
+    esac
+}
+
 # Generate code review for changes
 generate_code_review() {
     local review_all="$1"  # true = all changes, false = staged only
@@ -802,6 +1560,7 @@ Provide your review:"
     local original_ollama_model="$OLLAMA_MODEL"
     local original_anthropic_model="$ANTHROPIC_MODEL"
     local original_openai_model="$OPENAI_MODEL"
+    local original_groq_model="$GROQ_MODEL"
     local using_dedicated_model=false
 
     if [ "$AI_PROVIDER" = "ollama" ] && [ -n "$CODE_REVIEW_MODEL" ]; then
@@ -816,6 +1575,10 @@ Provide your review:"
         OPENAI_MODEL="$CODE_REVIEW_OPENAI_MODEL"
         using_dedicated_model=true
         echo -e "${BLUE}Using dedicated review model: $OPENAI_MODEL${NC}" >&2
+    elif [ "$AI_PROVIDER" = "groq" ] && [ -n "$CODE_REVIEW_GROQ_MODEL" ]; then
+        GROQ_MODEL="$CODE_REVIEW_GROQ_MODEL"
+        using_dedicated_model=true
+        echo -e "${BLUE}Using dedicated review model: $GROQ_MODEL${NC}" >&2
     else
         # Using regular model - show which one and potentially recommend a better model
         local current_model
@@ -854,6 +1617,17 @@ Provide your review:"
                     echo "" >&2
                 fi
                 ;;
+            groq)
+                current_model="$GROQ_MODEL"
+                echo -e "${BLUE}Using $AI_PROVIDER model: $current_model${NC}" >&2
+
+                # Recommend larger models for code review if using smaller models
+                if [[ "$current_model" =~ (llama-3.1-8b|gemma2-9b|mixtral-8x7b) ]]; then
+                    echo -e "${YELLOW}💡 Tip: For more thorough code reviews, consider using llama-3.3-70b-versatile${NC}" >&2
+                    echo -e "${YELLOW}   CODE_REVIEW_GROQ_MODEL=\"llama-3.3-70b-versatile\"${NC}" >&2
+                    echo "" >&2
+                fi
+                ;;
         esac
     fi
 
@@ -869,6 +1643,9 @@ Provide your review:"
         openai)
             review_result=$(call_openai "$review_prompt")
             ;;
+        groq)
+            review_result=$(call_groq "$review_prompt")
+            ;;
         *)
             echo -e "${RED}Error: Unknown AI provider: $AI_PROVIDER${NC}" >&2
             exit 1
@@ -879,6 +1656,7 @@ Provide your review:"
     OLLAMA_MODEL="$original_ollama_model"
     ANTHROPIC_MODEL="$original_anthropic_model"
     OPENAI_MODEL="$original_openai_model"
+    GROQ_MODEL="$original_groq_model"
 
     if [ -z "$review_result" ]; then
         echo -e "${RED}Error: Failed to generate code review${NC}" >&2
@@ -1055,6 +1833,9 @@ FORMAT:
         openai)
             pr_description=$(call_openai "$pr_prompt")
             ;;
+        groq)
+            pr_description=$(call_groq "$pr_prompt")
+            ;;
         *)
             echo -e "${RED}Error: Unknown AI provider '$AI_PROVIDER'${NC}" >&2
             exit 1
@@ -1093,9 +1874,8 @@ FORCED_TYPE=""
 CUSTOM_MAX_LINES=""
 NO_LOWERCASE=false
 
-### Message history directory
-MESSAGE_HISTORY_DIR="/tmp/gh-commit-ai-history"
-mkdir -p "$MESSAGE_HISTORY_DIR"
+### Message history directory (will be set per-repository)
+MESSAGE_HISTORY_DIR=""
 
 # Save message to history (keeps last 5)
 save_message_history() {
@@ -1178,6 +1958,59 @@ if [ "$1" = "changelog" ]; then
             *)
                 echo -e "${RED}Error: Unknown changelog option $1"
                 echo "Use 'gh commit-ai changelog --help' for usage information"
+                exit 1
+                ;;
+        esac
+    done
+elif [ "$1" = "split" ]; then
+    SPLIT_MODE=true
+    shift
+
+    # Parse split-specific flags
+    SPLIT_DRY_RUN=false
+    SPLIT_THRESHOLD=1000
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --dry-run|-n)
+                SPLIT_DRY_RUN=true
+                shift
+                ;;
+            --threshold|-t)
+                SPLIT_THRESHOLD="$2"
+                # Validate threshold is a positive integer
+                if ! validate_positive_integer "$SPLIT_THRESHOLD" "--threshold"; then
+                    exit 1
+                fi
+                shift 2
+                ;;
+            --help|-h)
+                echo "gh-commit-ai split - Suggest how to split large commits"
+                echo ""
+                echo "Usage: gh commit-ai split [options]"
+                echo ""
+                echo "Analyzes staged changes and suggests logical ways to split them"
+                echo "into multiple smaller commits for better git history."
+                echo ""
+                echo "Options:"
+                echo "  --dry-run, -n         Show suggestions without creating commits"
+                echo "  --threshold, -t <n>   Line count threshold for large commits (default: 1000)"
+                echo "  --help, -h            Show this help message"
+                echo ""
+                echo "Examples:"
+                echo "  gh commit-ai split"
+                echo "  gh commit-ai split --dry-run"
+                echo "  gh commit-ai split --threshold 500"
+                echo ""
+                echo "The tool will:"
+                echo "  1. Analyze your staged changes"
+                echo "  2. Group related files together"
+                echo "  3. Suggest logical commit splits"
+                echo "  4. Let you interactively apply the splits"
+                exit 0
+                ;;
+            *)
+                echo -e "${RED}Error: Unknown split option $1${NC}"
+                echo "Use 'gh commit-ai split --help' for usage information"
                 exit 1
                 ;;
         esac
@@ -1338,6 +2171,98 @@ elif [ "$1" = "uninstall-hook" ]; then
         echo ""
         echo "Note: Git alias 'ai-commit' still exists. To remove it:"
         echo "  git config --unset alias.ai-commit"
+    fi
+
+    exit 0
+elif [ "$1" = "install-man" ]; then
+    # Install man page
+    echo "Installing man page for gh-commit-ai..."
+    echo ""
+
+    # Determine script directory (where man/ folder is)
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    MAN_SOURCE="$SCRIPT_DIR/man/gh-commit-ai.1"
+
+    if [ ! -f "$MAN_SOURCE" ]; then
+        echo "Error: Man page not found at $MAN_SOURCE"
+        exit 1
+    fi
+
+    # Determine where to install man page
+    # Try standard locations in order of preference
+    if [ -d "/usr/local/share/man/man1" ] && [ -w "/usr/local/share/man/man1" ]; then
+        MAN_DIR="/usr/local/share/man/man1"
+    elif [ -d "$HOME/.local/share/man/man1" ]; then
+        MAN_DIR="$HOME/.local/share/man/man1"
+    elif [ -d "$HOME/.local/share/man" ]; then
+        mkdir -p "$HOME/.local/share/man/man1"
+        MAN_DIR="$HOME/.local/share/man/man1"
+    else
+        # Create user man directory
+        mkdir -p "$HOME/.local/share/man/man1"
+        MAN_DIR="$HOME/.local/share/man/man1"
+    fi
+
+    # Copy man page
+    cp "$MAN_SOURCE" "$MAN_DIR/gh-commit-ai.1"
+
+    if [ $? -eq 0 ]; then
+        echo "✓ Man page installed to $MAN_DIR/gh-commit-ai.1"
+        echo ""
+        echo "You can now view the manual with:"
+        echo "  man gh-commit-ai"
+        echo ""
+
+        # Update man database if possible
+        if command -v mandb >/dev/null 2>&1; then
+            echo "Updating man database..."
+            mandb -q 2>/dev/null || true
+        fi
+
+        # Check if man can find it
+        if man -w gh-commit-ai >/dev/null 2>&1; then
+            echo "✓ Man page is accessible"
+        else
+            echo "Note: You may need to add $HOME/.local/share/man to your MANPATH:"
+            echo "  export MANPATH=\"\$HOME/.local/share/man:\$MANPATH\""
+        fi
+    else
+        echo "Error: Failed to install man page"
+        exit 1
+    fi
+
+    exit 0
+elif [ "$1" = "uninstall-man" ]; then
+    # Uninstall man page
+    echo "Uninstalling man page for gh-commit-ai..."
+    echo ""
+
+    # Check standard locations
+    MAN_LOCATIONS=(
+        "/usr/local/share/man/man1/gh-commit-ai.1"
+        "$HOME/.local/share/man/man1/gh-commit-ai.1"
+    )
+
+    FOUND=false
+    for man_file in "${MAN_LOCATIONS[@]}"; do
+        if [ -f "$man_file" ]; then
+            rm -f "$man_file"
+            echo "✓ Removed $man_file"
+            FOUND=true
+        fi
+    done
+
+    if [ "$FOUND" = false ]; then
+        echo "No man page found to remove"
+    else
+        echo ""
+        echo "Man page uninstalled successfully"
+
+        # Update man database if possible
+        if command -v mandb >/dev/null 2>&1; then
+            echo "Updating man database..."
+            mandb -q 2>/dev/null || true
+        fi
     fi
 
     exit 0
@@ -1611,10 +2536,18 @@ while [[ $# -gt 0 ]]; do
             ;;
         --type)
             FORCED_TYPE="$2"
+            # Validate type is one of the allowed conventional commit types
+            if ! validate_allowed_values "$FORCED_TYPE" "--type" "feat" "fix" "docs" "style" "refactor" "test" "chore" "perf" "ci" "build" "revert"; then
+                exit 1
+            fi
             shift 2
             ;;
         --max-lines)
             CUSTOM_MAX_LINES="$2"
+            # Validate max-lines is a positive integer
+            if ! validate_positive_integer "$CUSTOM_MAX_LINES" "--max-lines"; then
+                exit 1
+            fi
             shift 2
             ;;
         --no-lowercase)
@@ -1635,6 +2568,8 @@ while [[ $# -gt 0 ]]; do
             echo "  pr-description       Generate PR description from branch commits"
             echo "  install-hook         Install git hook for opt-in AI commits"
             echo "  uninstall-hook       Remove git hook"
+            echo "  install-man          Install man page"
+            echo "  uninstall-man        Remove man page"
             echo "  install-completion   Install shell completion (bash/zsh)"
             echo "  uninstall-completion Remove shell completion"
             echo ""
@@ -1656,7 +2591,7 @@ while [[ $# -gt 0 ]]; do
             echo "  e - Edit in your default editor"
             echo ""
             echo "Environment Variables:"
-            echo "  AI_PROVIDER         AI provider (auto, ollama, anthropic, openai)"
+            echo "  AI_PROVIDER         AI provider (auto, ollama, anthropic, openai, groq)"
             echo "                      Default: auto (detects what's available)"
             echo "  COMMIT_LANGUAGE     Language for commit messages (en, es, fr, de, ja, zh, etc.)"
             echo "                      Default: auto-detect from system locale"
@@ -1731,11 +2666,16 @@ smart_sample_diff() {
     fi
 
     # Otherwise, intelligently sample
-    local temp_file="/tmp/gh-commit-ai-smart-sample-$$"
+    local temp_file
+    temp_file=$(create_secure_temp_file "gh-commit-ai-smart-sample") || return 1
     echo "$full_diff" > "$temp_file"
 
     # Extract high-priority lines
-    local priority_file="/tmp/gh-commit-ai-priority-$$"
+    local priority_file
+    priority_file=$(create_secure_temp_file "gh-commit-ai-priority") || {
+        rm -f "$temp_file"
+        return 1
+    }
     > "$priority_file"
 
     # Priority 1: File headers and chunk headers (MUST keep)
@@ -1854,10 +2794,36 @@ if [ -z "$GIT_DIR" ]; then
     exit 1
 fi
 
+# Get repository-specific identifier for message history
+# This ensures cached messages don't leak between different repositories
+REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
+if [ -n "$REPO_ROOT" ]; then
+    # Create a hash of the repository path to use as a unique identifier
+    if command -v md5sum &> /dev/null; then
+        REPO_HASH=$(echo -n "$REPO_ROOT" | md5sum | awk '{print $1}')
+    elif command -v md5 &> /dev/null; then
+        REPO_HASH=$(echo -n "$REPO_ROOT" | md5 | awk '{print $1}')
+    else
+        # Fallback: use basename of repo (less robust but better than nothing)
+        REPO_HASH=$(basename "$REPO_ROOT")
+    fi
+    MESSAGE_HISTORY_DIR="/tmp/gh-commit-ai-history-${REPO_HASH}"
+else
+    # Fallback to non-scoped directory (shouldn't happen in valid git repos)
+    MESSAGE_HISTORY_DIR="/tmp/gh-commit-ai-history"
+fi
+mkdir -p "$MESSAGE_HISTORY_DIR"
+
 # Handle changelog mode
 if [ "$CHANGELOG_MODE" = true ]; then
     echo "Generating changelog"
     generate_changelog "$CHANGELOG_SINCE" "$CHANGELOG_FORMAT"
+    exit 0
+fi
+
+# Handle split mode
+if [ "$SPLIT_MODE" = true ]; then
+    suggest_commit_splits "$SPLIT_THRESHOLD" "$SPLIT_DRY_RUN"
     exit 0
 fi
 
@@ -1868,6 +2834,12 @@ if [ "$AMEND" = true ]; then
         echo -e "${RED}Error: No commits to amend"
         exit 1
     fi
+
+    # Create secure temp files for inter-process communication
+    status_file=$(create_secure_temp_file "gh-commit-ai-status") || exit 1
+    stats_file=$(create_secure_temp_file "gh-commit-ai-stats") || { rm -f "$status_file"; exit 1; }
+    diff_file=$(create_secure_temp_file "gh-commit-ai-diff") || { rm -f "$status_file" "$stats_file"; exit 1; }
+    size_file=$(create_secure_temp_file "gh-commit-ai-size") || { rm -f "$status_file" "$stats_file" "$diff_file"; exit 1; }
 
     # Get the changes from the last commit with loading animation (optimized - minimal git calls)
     (
@@ -1889,10 +2861,10 @@ if [ "$AMEND" = true ]; then
         COMMIT_SIZE=$(echo "$SHOW_OUTPUT" | awk '/^[0-9]+\t[0-9]+\t/ {added+=$1; deleted+=$2} END {print added+deleted}')
 
         # Export to temp file for parent process
-        echo "$GIT_STATUS" > /tmp/gh-commit-ai-status-$$
-        echo "$GIT_STATS" > /tmp/gh-commit-ai-stats-$$
-        echo "$GIT_DIFF" > /tmp/gh-commit-ai-diff-$$
-        echo "$COMMIT_SIZE" > /tmp/gh-commit-ai-size-$$
+        echo "$GIT_STATUS" > "$status_file"
+        echo "$GIT_STATS" > "$stats_file"
+        echo "$GIT_DIFF" > "$diff_file"
+        echo "$COMMIT_SIZE" > "$size_file"
     ) &
     ANALYZE_PID=$!
 
@@ -1900,11 +2872,11 @@ if [ "$AMEND" = true ]; then
     wait "$ANALYZE_PID"
 
     # Read results from temp files
-    GIT_STATUS=$(cat /tmp/gh-commit-ai-status-$$ 2>/dev/null || echo "")
-    GIT_STATS=$(cat /tmp/gh-commit-ai-stats-$$ 2>/dev/null || echo "")
-    GIT_DIFF=$(cat /tmp/gh-commit-ai-diff-$$ 2>/dev/null || echo "")
-    COMMIT_SIZE=$(cat /tmp/gh-commit-ai-size-$$ 2>/dev/null || echo "0")
-    rm -f /tmp/gh-commit-ai-status-$$ /tmp/gh-commit-ai-stats-$$ /tmp/gh-commit-ai-diff-$$ /tmp/gh-commit-ai-size-$$
+    GIT_STATUS=$(cat "$status_file" 2>/dev/null || echo "")
+    GIT_STATS=$(cat "$stats_file" 2>/dev/null || echo "")
+    GIT_DIFF=$(cat "$diff_file" 2>/dev/null || echo "")
+    COMMIT_SIZE=$(cat "$size_file" 2>/dev/null || echo "0")
+    rm -f "$status_file" "$stats_file" "$diff_file" "$size_file"
 
     echo "✓ Commit analyzed"
 else
@@ -1913,6 +2885,15 @@ else
         echo "No changes to commit"
         exit 0
     fi
+
+    # Check and optionally fix formatting issues
+    check_and_fix_formatting
+
+    # Create secure temp files for inter-process communication
+    status_file=$(create_secure_temp_file "gh-commit-ai-status") || exit 1
+    stats_file=$(create_secure_temp_file "gh-commit-ai-stats") || { rm -f "$status_file"; exit 1; }
+    diff_file=$(create_secure_temp_file "gh-commit-ai-diff") || { rm -f "$status_file" "$stats_file"; exit 1; }
+    size_file=$(create_secure_temp_file "gh-commit-ai-size") || { rm -f "$status_file" "$stats_file" "$diff_file"; exit 1; }
 
     # Get git status and diff with loading animation (optimized - fewer git calls)
     (
@@ -1943,10 +2924,10 @@ else
         COMMIT_SIZE=$(echo "$DIFF_WITH_NUMSTAT" | awk '/^[0-9]+\t[0-9]+\t/ {added+=$1; deleted+=$2} END {print added+deleted}')
 
         # Export to temp file for parent process
-        echo "$GIT_STATUS" > /tmp/gh-commit-ai-status-$$
-        echo "$GIT_STATS" > /tmp/gh-commit-ai-stats-$$
-        echo "$GIT_DIFF" > /tmp/gh-commit-ai-diff-$$
-        echo "$COMMIT_SIZE" > /tmp/gh-commit-ai-size-$$
+        echo "$GIT_STATUS" > "$status_file"
+        echo "$GIT_STATS" > "$stats_file"
+        echo "$GIT_DIFF" > "$diff_file"
+        echo "$COMMIT_SIZE" > "$size_file"
     ) &
     ANALYZE_PID=$!
 
@@ -1954,11 +2935,11 @@ else
     wait "$ANALYZE_PID"
 
     # Read results from temp files
-    GIT_STATUS=$(cat /tmp/gh-commit-ai-status-$$ 2>/dev/null || echo "")
-    GIT_STATS=$(cat /tmp/gh-commit-ai-stats-$$ 2>/dev/null || echo "")
-    GIT_DIFF=$(cat /tmp/gh-commit-ai-diff-$$ 2>/dev/null || echo "")
-    COMMIT_SIZE=$(cat /tmp/gh-commit-ai-size-$$ 2>/dev/null || echo "0")
-    rm -f /tmp/gh-commit-ai-status-$$ /tmp/gh-commit-ai-stats-$$ /tmp/gh-commit-ai-diff-$$ /tmp/gh-commit-ai-size-$$
+    GIT_STATUS=$(cat "$status_file" 2>/dev/null || echo "")
+    GIT_STATS=$(cat "$stats_file" 2>/dev/null || echo "")
+    GIT_DIFF=$(cat "$diff_file" 2>/dev/null || echo "")
+    COMMIT_SIZE=$(cat "$size_file" 2>/dev/null || echo "0")
+    rm -f "$status_file" "$stats_file" "$diff_file" "$size_file"
 
     echo "✓ Changes analyzed"
 
@@ -2160,24 +3141,40 @@ detect_breaking_changes() {
     fi
 
     # Check for signature changes (parameter removal/change)
-    if echo "$diff" | grep -qE '^-.*\(.*\).*\{' && echo "$diff" | grep -qE '^\+.*\(.*\).*\{'; then
-        # Function signatures changed - might be breaking
-        # This is a heuristic, not 100% accurate
-        local removed_params=$(echo "$diff" | grep -E '^-.*\(.*\)' | grep -oE '\([^)]*\)' | head -1)
-        local added_params=$(echo "$diff" | grep -E '^\+.*\(.*\)' | grep -oE '\([^)]*\)' | head -1)
+    # Only flag if we can identify the SAME function being modified
+    # Look for function name patterns to ensure we're comparing the same function
+    local removed_functions=$(echo "$diff" | grep -E '^-.*\b(function |def |const |let |var |export (function|const|let|var)) [a-zA-Z_][a-zA-Z0-9_]*\s*\(' | sed 's/^-.*\b\(function\|def\|const\|let\|var\|export\) \+\([a-zA-Z_][a-zA-Z0-9_]*\).*/\2/' | sort)
+    local added_functions=$(echo "$diff" | grep -E '^\+.*\b(function |def |const |let |var |export (function|const|let|var)) [a-zA-Z_][a-zA-Z0-9_]*\s*\(' | sed 's/^\+.*\b\(function\|def\|const\|let\|var\|export\) \+\([a-zA-Z_][a-zA-Z0-9_]*\).*/\2/' | sort)
 
-        if [ -n "$removed_params" ] && [ -n "$added_params" ] && [ "$removed_params" != "$added_params" ]; then
-            # Count commas to estimate parameter count
-            local old_count=$(echo "$removed_params" | tr -cd ',' | wc -c)
-            local new_count=$(echo "$added_params" | tr -cd ',' | wc -c)
+    # Find functions that appear in both removed and added (same name = modified function)
+    local modified_functions=$(comm -12 <(echo "$removed_functions") <(echo "$added_functions") 2>/dev/null)
 
-            if [ "$new_count" -lt "$old_count" ]; then
-                breaking_detected=true
-                breaking_reason="function signature changed (parameters reduced)"
-                echo "true|$breaking_reason"
-                return
+    if [ -n "$modified_functions" ]; then
+        # Found functions with same name being modified - check if parameters reduced
+        while IFS= read -r func_name; do
+            [ -z "$func_name" ] && continue
+
+            local removed_sig=$(echo "$diff" | grep -E "^-.*\b(function |def |const |let |var |export .*) ${func_name}\s*\(" | head -1)
+            local added_sig=$(echo "$diff" | grep -E "^\+.*\b(function |def |const |let |var |export .*) ${func_name}\s*\(" | head -1)
+
+            if [ -n "$removed_sig" ] && [ -n "$added_sig" ]; then
+                # Extract parameter lists
+                local removed_params=$(echo "$removed_sig" | grep -oE '\([^)]*\)' | head -1)
+                local added_params=$(echo "$added_sig" | grep -oE '\([^)]*\)' | head -1)
+
+                # Count parameters (rough heuristic using commas)
+                local old_count=$(echo "$removed_params" | tr -cd ',' | wc -c)
+                local new_count=$(echo "$added_params" | tr -cd ',' | wc -c)
+
+                # Only flag if parameters were removed (breaking change)
+                if [ "$new_count" -lt "$old_count" ]; then
+                    breaking_detected=true
+                    breaking_reason="function '${func_name}' signature changed (parameters reduced)"
+                    echo "true|$breaking_reason"
+                    return
+                fi
             fi
-        fi
+        done <<< "$modified_functions"
     fi
 
     echo "false|"
@@ -3013,43 +4010,28 @@ select_option() {
     done
 }
 
-# Retry wrapper for API calls with exponential backoff
-# Usage: retry_api_call <max_attempts> <command>
-retry_api_call() {
-    local max_attempts="$1"
-    shift
-    local command="$@"
-    local attempt=1
-    local exit_code=0
-    local wait_time=2
-
-    while [ $attempt -le $max_attempts ]; do
-        # Execute the command
-        eval "$command"
-        exit_code=$?
-
-        # Success - return immediately
-        if [ $exit_code -eq 0 ]; then
-            return 0
-        fi
-
-        # Failed - check if we should retry
-        if [ $attempt -lt $max_attempts ]; then
-            echo "⚠️  Network error (attempt $attempt/$max_attempts), retrying in ${wait_time}s..." >&2
-            sleep $wait_time
-            # Exponential backoff: double wait time for next retry
-            wait_time=$((wait_time * 2))
-            attempt=$((attempt + 1))
-        else
-            echo "❌ Failed after $max_attempts attempts" >&2
-            return $exit_code
-        fi
-    done
-}
-
 # Call Ollama API
 call_ollama() {
     local prompt="$1"
+
+    # Quick pre-flight check: verify Ollama is reachable
+    if ! curl -s --connect-timeout 2 --max-time 5 "$OLLAMA_HOST/api/tags" >/dev/null 2>&1; then
+        echo -e "${RED}Error: Cannot connect to Ollama at $OLLAMA_HOST${NC}" >&2
+        echo "" >&2
+        echo "Ollama is not responding. Possible causes:" >&2
+        echo "  • Ollama service is not running" >&2
+        echo "  • Wrong OLLAMA_HOST configuration" >&2
+        echo "  • Port conflict or firewall blocking" >&2
+        echo "" >&2
+        echo "Troubleshooting:" >&2
+        echo "  • Start Ollama: ollama serve" >&2
+        echo "  • Check if running: ps aux | grep ollama" >&2
+        echo "  • Verify host: curl $OLLAMA_HOST/api/tags" >&2
+        echo "  • List models: ollama list" >&2
+        echo "" >&2
+        echo "Don't have Ollama? Install from: https://ollama.ai" >&2
+        return 1
+    fi
 
     local model_escaped=$(escape_json "$OLLAMA_MODEL")
     local prompt_escaped=$(escape_json "$prompt")
@@ -3062,17 +4044,23 @@ call_ollama() {
         echo ""
     fi
 
-    # Run API call in background with spinner (with timeout)
-    local temp_response="/tmp/gh-commit-ai-response-$$"
-    local temp_error="/tmp/gh-commit-ai-error-$$"
+    # Run API call with retry logic in background with spinner
+    local temp_response
+    local temp_error
+    temp_response=$(create_secure_temp_file "gh-commit-ai-response") || return 1
+    temp_error=$(create_secure_temp_file "gh-commit-ai-error") || {
+        rm -f "$temp_response"
+        return 1
+    }
     local exit_code=0
     (
-        curl -s -X POST "$OLLAMA_HOST/api/generate" \
-            -H "Content-Type: application/json" \
-            -d "$json_payload" \
-            --connect-timeout 10 \
-            --max-time 120 \
-            -o "$temp_response" 2>"$temp_error"
+        retry_api_call \
+            "$OLLAMA_HOST/api/generate" \
+            "$json_payload" \
+            "$temp_response" \
+            "$temp_error" \
+            "Ollama" \
+            -H "Content-Type: application/json"
         echo $? > "${temp_response}.exit"
     ) &
     local api_pid=$!
@@ -3085,19 +4073,49 @@ call_ollama() {
     # Read response from file
     local response=$(cat "$temp_response" 2>/dev/null)
 
-    # Check for network/timeout errors
+    # Check for final failure after all retries
     if [ "$exit_code" != "0" ] || [ -z "$response" ]; then
-        local error_detail=$(cat "$temp_error" 2>/dev/null || echo "Unknown error")
-        if [ "$exit_code" = "28" ]; then
-            echo -e "${RED}Error: Request timeout - Ollama took too long to respond" >&2
-            echo "Tip: Try a smaller model or increase the timeout" >&2
-        elif [ "$exit_code" = "7" ]; then
-            echo -e "${RED}Error: Cannot connect to Ollama at $OLLAMA_HOST" >&2
-            echo "Tip: Make sure Ollama is running (ollama serve)" >&2
-        else
-            echo -e "${RED}Error: Network error (exit code: $exit_code)" >&2
-            echo "Details: $error_detail" >&2
+        echo -e "${RED}Error: Failed to get response from Ollama after $MAX_RETRIES attempts${NC}" >&2
+        echo "" >&2
+        echo "All retry attempts exhausted. Possible causes:" >&2
+        echo "  • Model '$OLLAMA_MODEL' not found or not loaded" >&2
+        echo "  • Ollama service stopped during request" >&2
+        echo "  • Out of memory (model too large)" >&2
+        echo "  • Request timeout" >&2
+        echo "" >&2
+
+        # Show actual error if available
+        if [ -s "$temp_error" ]; then
+            echo -e "${YELLOW}Error details: $(cat "$temp_error" | head -1)${NC}" >&2
+            echo "" >&2
         fi
+
+        echo "Troubleshooting:" >&2
+        echo "  • Check if model exists: ollama list" >&2
+        echo "  • Pull model if needed: ollama pull $OLLAMA_MODEL" >&2
+        echo "  • Verify service: curl $OLLAMA_HOST/api/tags" >&2
+        echo "  • Check service status: ps aux | grep ollama" >&2
+        echo "  • Try smaller model: OLLAMA_MODEL=gemma2:2b gh commit-ai" >&2
+        echo "  • Run with verbose mode: gh commit-ai --verbose" >&2
+
+        rm -f "$temp_response" "$temp_error" "${temp_response}.exit"
+        return 1
+    fi
+
+    # Validate response content
+    if ! validate_api_response "$response"; then
+        echo -e "${RED}Error: Invalid response from Ollama${NC}" >&2
+        echo "" >&2
+        echo "The Ollama API returned an unexpected response format." >&2
+        echo "This could indicate:" >&2
+        echo "  • Model compatibility issues" >&2
+        echo "  • Corrupted model installation" >&2
+        echo "  • Ollama version mismatch" >&2
+        echo "" >&2
+        echo "Try:" >&2
+        echo "  • Update Ollama: brew upgrade ollama" >&2
+        echo "  • Reinstall model: ollama rm $OLLAMA_MODEL && ollama pull $OLLAMA_MODEL" >&2
+        echo "  • Run with verbose mode: gh commit-ai --verbose" >&2
         rm -f "$temp_response" "$temp_error" "${temp_response}.exit"
         return 1
     fi
@@ -3113,8 +4131,24 @@ call_ollama() {
     # Check for errors
     if echo "$response" | grep -q '"error"'; then
         local error_msg=$(echo "$response" | grep -o '"error":"[^"]*"' | sed 's/"error":"//;s/"$//')
-        echo -e "${RED}Error from Ollama: $error_msg" >&2
-        echo "Tip: Make sure Ollama is running (ollama serve) and the model is available (ollama list)" >&2
+        echo -e "${RED}Error from Ollama: $error_msg${NC}" >&2
+        echo "" >&2
+
+        # Check if it's a model not found error
+        if echo "$error_msg" | grep -qi "model.*not found\|pull.*model"; then
+            echo -e "Model '${BLUE}$OLLAMA_MODEL${NC}' is not installed." >&2
+            echo "" >&2
+            echo "To fix this, run:" >&2
+            echo -e "  ${GREEN}ollama pull $OLLAMA_MODEL${NC}" >&2
+            echo "" >&2
+            echo "Or use a different model:" >&2
+            echo -e "  ${GREEN}OLLAMA_MODEL=llama3.2 gh commit-ai${NC}" >&2
+        else
+            echo "Troubleshooting:" >&2
+            echo "  - Check available models: ollama list" >&2
+            echo "  - Verify Ollama status: ollama ps" >&2
+            echo "  - Try verbose mode: gh commit-ai --verbose" >&2
+        fi
         return 1
     fi
 
@@ -3150,9 +4184,29 @@ call_anthropic() {
     local prompt="$1"
 
     if [ -z "$ANTHROPIC_API_KEY" ]; then
-        echo -e "${RED}Error: ANTHROPIC_API_KEY is not set" >&2
-        echo "Tip: Set your API key with: export ANTHROPIC_API_KEY=\"sk-ant-...\"" >&2
-        echo "Get your API key from: https://console.anthropic.com/settings/keys" >&2
+        show_api_key_error "Anthropic" "ANTHROPIC_API_KEY"
+        exit 1
+    fi
+
+    # Check network connectivity before making API call
+    if ! check_network_connectivity; then
+        show_offline_error "Anthropic"
+        exit 1
+    fi
+
+    # Check if Anthropic API is reachable
+    if ! check_host_reachability "api.anthropic.com"; then
+        echo -e "${RED}Error: Cannot reach Anthropic API${NC}" >&2
+        echo "" >&2
+        echo "The API endpoint api.anthropic.com is not reachable." >&2
+        echo "Possible causes:" >&2
+        echo "  • Anthropic service is down" >&2
+        echo "  • Firewall or network filtering" >&2
+        echo "  • DNS issues" >&2
+        echo "" >&2
+        echo "Try:" >&2
+        echo "  • Check service status: https://status.anthropic.com/" >&2
+        echo "  • Use a different provider (export AI_PROVIDER=groq or ollama)" >&2
         exit 1
     fi
 
@@ -3167,19 +4221,25 @@ call_anthropic() {
         echo ""
     fi
 
-    # Run API call in background with spinner (with timeout)
-    local temp_response="/tmp/gh-commit-ai-response-$$"
-    local temp_error="/tmp/gh-commit-ai-error-$$"
+    # Run API call with retry logic in background with spinner
+    local temp_response
+    local temp_error
+    temp_response=$(create_secure_temp_file "gh-commit-ai-response") || return 1
+    temp_error=$(create_secure_temp_file "gh-commit-ai-error") || {
+        rm -f "$temp_response"
+        return 1
+    }
     local exit_code=0
     (
-        curl -s -X POST "https://api.anthropic.com/v1/messages" \
+        retry_api_call \
+            "https://api.anthropic.com/v1/messages" \
+            "$json_payload" \
+            "$temp_response" \
+            "$temp_error" \
+            "Anthropic" \
             -H "Content-Type: application/json" \
             -H "x-api-key: $ANTHROPIC_API_KEY" \
-            -H "anthropic-version: 2023-06-01" \
-            -d "$json_payload" \
-            --connect-timeout 10 \
-            --max-time 120 \
-            -o "$temp_response" 2>"$temp_error"
+            -H "anthropic-version: 2023-06-01"
         echo $? > "${temp_response}.exit"
     ) &
     local api_pid=$!
@@ -3193,19 +4253,37 @@ call_anthropic() {
     # Read response from file
     local response=$(cat "$temp_response" 2>/dev/null)
 
-    # Check for network/timeout errors
-    if [ "$exit_code" != "0" ] || [ -z "$response" ]; then
-        local error_detail=$(cat "$temp_error" 2>/dev/null || echo "Unknown error")
-        if [ "$exit_code" = "28" ]; then
-            echo -e "${RED}Error: Request timeout - Anthropic API took too long to respond" >&2
-            echo "Tip: Check your internet connection or try again later" >&2
-        elif [ "$exit_code" = "7" ]; then
-            echo -e "${RED}Error: Cannot connect to Anthropic API" >&2
-            echo "Tip: Check your internet connection" >&2
-        else
-            echo -e "${RED}Error: Network error (exit code: $exit_code)" >&2
-            echo "Details: $error_detail" >&2
-        fi
+    # Check for final failure after all retries
+    if [ "$exit_code" != "0" ]; then
+        echo -e "${RED}Error: Failed to get response from Anthropic after $MAX_RETRIES attempts${NC}" >&2
+        echo "" >&2
+        echo "All retry attempts exhausted. This could be due to:" >&2
+        echo "  • Poor network connection" >&2
+        echo "  • API service issues" >&2
+        echo "  • Request timeouts" >&2
+        echo "" >&2
+        echo "Suggestions:" >&2
+        echo "  • Check your internet connection" >&2
+        echo "  • Check Anthropic status: https://status.anthropic.com/" >&2
+        echo "  • Try again in a few minutes" >&2
+        echo "  • Use a different provider: export AI_PROVIDER=ollama" >&2
+        rm -f "$temp_response" "$temp_error" "${temp_response}.exit"
+        return 1
+    fi
+
+    # Validate API response
+    if ! validate_api_response "$response"; then
+        echo -e "${RED}Error: Invalid response from Anthropic${NC}" >&2
+        echo "" >&2
+        echo "The API returned an unexpected response format." >&2
+        echo "This could indicate:" >&2
+        echo "  • API version changes" >&2
+        echo "  • Service degradation" >&2
+        echo "  • Network proxy interference" >&2
+        echo "" >&2
+        echo "Try:" >&2
+        echo "  • Run with verbose mode: gh commit-ai --verbose" >&2
+        echo "  • Use a different provider: export AI_PROVIDER=ollama" >&2
         rm -f "$temp_response" "$temp_error" "${temp_response}.exit"
         return 1
     fi
@@ -3275,9 +4353,29 @@ call_openai() {
     local prompt="$1"
 
     if [ -z "$OPENAI_API_KEY" ]; then
-        echo -e "${RED}Error: OPENAI_API_KEY is not set" >&2
-        echo "Tip: Set your API key with: export OPENAI_API_KEY=\"sk-proj-...\"" >&2
-        echo "Get your API key from: https://platform.openai.com/api-keys" >&2
+        show_api_key_error "OpenAI" "OPENAI_API_KEY"
+        exit 1
+    fi
+
+    # Check network connectivity before making API call
+    if ! check_network_connectivity; then
+        show_offline_error "OpenAI"
+        exit 1
+    fi
+
+    # Check if OpenAI API is reachable
+    if ! check_host_reachability "api.openai.com"; then
+        echo -e "${RED}Error: Cannot reach OpenAI API${NC}" >&2
+        echo "" >&2
+        echo "The API endpoint api.openai.com is not reachable." >&2
+        echo "Possible causes:" >&2
+        echo "  • OpenAI service is down" >&2
+        echo "  • Firewall or network filtering" >&2
+        echo "  • DNS issues" >&2
+        echo "" >&2
+        echo "Try:" >&2
+        echo "  • Check service status: https://status.openai.com/" >&2
+        echo "  • Use a different provider (export AI_PROVIDER=groq or ollama)" >&2
         exit 1
     fi
 
@@ -3292,18 +4390,24 @@ call_openai() {
         echo ""
     fi
 
-    # Run API call in background with spinner (with timeout)
-    local temp_response="/tmp/gh-commit-ai-response-$$"
-    local temp_error="/tmp/gh-commit-ai-error-$$"
+    # Run API call with retry logic in background with spinner
+    local temp_response
+    local temp_error
+    temp_response=$(create_secure_temp_file "gh-commit-ai-response") || return 1
+    temp_error=$(create_secure_temp_file "gh-commit-ai-error") || {
+        rm -f "$temp_response"
+        return 1
+    }
     local exit_code=0
     (
-        curl -s -X POST "https://api.openai.com/v1/chat/completions" \
+        retry_api_call \
+            "https://api.openai.com/v1/chat/completions" \
+            "$json_payload" \
+            "$temp_response" \
+            "$temp_error" \
+            "OpenAI" \
             -H "Content-Type: application/json" \
-            -H "Authorization: Bearer $OPENAI_API_KEY" \
-            -d "$json_payload" \
-            --connect-timeout 10 \
-            --max-time 120 \
-            -o "$temp_response" 2>"$temp_error"
+            -H "Authorization: Bearer $OPENAI_API_KEY"
         echo $? > "${temp_response}.exit"
     ) &
     local api_pid=$!
@@ -3317,19 +4421,41 @@ call_openai() {
     # Read response from file
     local response=$(cat "$temp_response" 2>/dev/null)
 
-    # Check for network/timeout errors
+    # Check for final failure after all retries
     if [ "$exit_code" != "0" ] || [ -z "$response" ]; then
-        local error_detail=$(cat "$temp_error" 2>/dev/null || echo "Unknown error")
-        if [ "$exit_code" = "28" ]; then
-            echo -e "${RED}Error: Request timeout - OpenAI API took too long to respond" >&2
-            echo "Tip: Check your internet connection or try again later" >&2
-        elif [ "$exit_code" = "7" ]; then
-            echo -e "${RED}Error: Cannot connect to OpenAI API" >&2
-            echo "Tip: Check your internet connection" >&2
-        else
-            echo -e "${RED}Error: Network error (exit code: $exit_code)" >&2
-            echo "Details: $error_detail" >&2
-        fi
+        echo -e "${RED}Error: Failed to get response from OpenAI after $MAX_RETRIES attempts${NC}" >&2
+        echo "" >&2
+        echo "All retry attempts exhausted. Possible causes:" >&2
+        echo "  • Network connection issues" >&2
+        echo "  • OpenAI API is experiencing downtime" >&2
+        echo "  • Request timeout (large diff or slow connection)" >&2
+        echo "  • Rate limiting or quota exceeded" >&2
+        echo "" >&2
+        echo "Suggestions:" >&2
+        echo "  • Check your internet: ping api.openai.com" >&2
+        echo "  • Verify service status: https://status.openai.com/" >&2
+        echo "  • Try reducing diff size: DIFF_MAX_LINES=50 gh commit-ai" >&2
+        echo "  • Use a different provider:" >&2
+        echo "    - Groq (fast, free tier): export AI_PROVIDER=groq" >&2
+        echo "    - Ollama (local, no internet): export AI_PROVIDER=ollama" >&2
+        echo "  • Wait a few minutes and try again" >&2
+        rm -f "$temp_response" "$temp_error" "${temp_response}.exit"
+        return 1
+    fi
+
+    # Validate response content
+    if ! validate_api_response "$response"; then
+        echo -e "${RED}Error: Invalid response from OpenAI${NC}" >&2
+        echo "" >&2
+        echo "The API returned an unexpected response format." >&2
+        echo "This could indicate:" >&2
+        echo "  • API version changes" >&2
+        echo "  • Service degradation" >&2
+        echo "  • Network proxy interference" >&2
+        echo "" >&2
+        echo "Try:" >&2
+        echo "  • Run with verbose mode: gh commit-ai --verbose" >&2
+        echo "  • Use a different provider: export AI_PROVIDER=ollama" >&2
         rm -f "$temp_response" "$temp_error" "${temp_response}.exit"
         return 1
     fi
@@ -3370,6 +4496,184 @@ call_openai() {
 
     # Extract commit message from response
     # OpenAI returns: {"choices":[{"message":{"content":"..."},...}],...}
+    # Use awk to properly extract JSON string value (handles escaped quotes)
+    local raw_message=$(echo "$response" | awk -F'"content":"' '{
+        if (NF > 1) {
+            str = $2
+            result = ""
+            escaped = 0
+            for (i = 1; i <= length(str); i++) {
+                c = substr(str, i, 1)
+                if (escaped) {
+                    result = result c
+                    escaped = 0
+                } else if (c == "\\") {
+                    result = result c
+                    escaped = 1
+                } else if (c == "\"") {
+                    break
+                } else {
+                    result = result c
+                }
+            }
+            print result
+            exit
+        }
+    }')
+
+    # Cleanup temp files
+    rm -f "$temp_response"
+
+    unescape_json "$raw_message"
+}
+
+call_groq() {
+    local prompt="$1"
+
+    if [ -z "$GROQ_API_KEY" ]; then
+        show_api_key_error "Groq" "GROQ_API_KEY"
+        exit 1
+    fi
+
+    # Check network connectivity before making API call
+    if ! check_network_connectivity; then
+        show_offline_error "Groq"
+        exit 1
+    fi
+
+    # Check if Groq API is reachable
+    if ! check_host_reachability "api.groq.com"; then
+        echo -e "${RED}Error: Cannot reach Groq API${NC}" >&2
+        echo "" >&2
+        echo "The API endpoint api.groq.com is not reachable." >&2
+        echo "Possible causes:" >&2
+        echo "  • Groq service is down" >&2
+        echo "  • Firewall or network filtering" >&2
+        echo "  • DNS issues" >&2
+        echo "" >&2
+        echo "Try:" >&2
+        echo "  • Check service status: https://status.groq.com/" >&2
+        echo "  • Use a different provider (export AI_PROVIDER=ollama)" >&2
+        exit 1
+    fi
+
+    local prompt_escaped=$(escape_json "$prompt")
+    local json_payload=$(printf '{"model":"%s","messages":[{"role":"user","content":"%s"}],"temperature":0.7}' "$GROQ_MODEL" "$prompt_escaped")
+
+    if [ "$VERBOSE" = "true" ]; then
+        echo "[Verbose] API Endpoint:${NC} https://api.groq.com/openai/v1/chat/completions"
+        echo "[Verbose] Model:${NC} $GROQ_MODEL"
+        echo "[Verbose] Request payload:"
+        echo "$json_payload" | jq '.' 2>/dev/null || echo "$json_payload"
+        echo ""
+    fi
+
+    # Run API call with retry logic in background with spinner
+    local temp_response
+    local temp_error
+    temp_response=$(create_secure_temp_file "gh-commit-ai-response") || return 1
+    temp_error=$(create_secure_temp_file "gh-commit-ai-error") || {
+        rm -f "$temp_response"
+        return 1
+    }
+    local exit_code=0
+    (
+        retry_api_call \
+            "https://api.groq.com/openai/v1/chat/completions" \
+            "$json_payload" \
+            "$temp_response" \
+            "$temp_error" \
+            "Groq" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $GROQ_API_KEY"
+        echo $? > "${temp_response}.exit"
+    ) &
+    local api_pid=$!
+
+    show_spinner "$api_pid" "Thinking"
+    wait "$api_pid"
+
+    # Read exit code
+    exit_code=$(cat "${temp_response}.exit" 2>/dev/null || echo "1")
+
+    # Read response from file
+    local response=$(cat "$temp_response" 2>/dev/null)
+
+    # Check for final failure after all retries
+    if [ "$exit_code" != "0" ] || [ -z "$response" ]; then
+        echo -e "${RED}Error: Failed to get response from Groq after $MAX_RETRIES attempts${NC}" >&2
+        echo "" >&2
+        echo "All retry attempts exhausted. Possible causes:" >&2
+        echo "  • Network connection issues" >&2
+        echo "  • Groq API is experiencing downtime" >&2
+        echo "  • Request timeout (large diff or slow connection)" >&2
+        echo "  • Rate limiting or quota exceeded" >&2
+        echo "" >&2
+        echo "Suggestions:" >&2
+        echo "  • Check your internet: ping api.groq.com" >&2
+        echo "  • Verify service status: https://status.groq.com/" >&2
+        echo "  • Try reducing diff size: DIFF_MAX_LINES=50 gh commit-ai" >&2
+        echo "  • Use a different provider:" >&2
+        echo "    - Ollama (local, no internet): export AI_PROVIDER=ollama" >&2
+        echo "    - Anthropic: export AI_PROVIDER=anthropic" >&2
+        echo "  • Wait a few minutes and try again" >&2
+        rm -f "$temp_response" "$temp_error" "${temp_response}.exit"
+        return 1
+    fi
+
+    # Validate response content
+    if ! validate_api_response "$response"; then
+        echo -e "${RED}Error: Invalid response from Groq${NC}" >&2
+        echo "" >&2
+        echo "The API returned an unexpected response format." >&2
+        echo "This could indicate:" >&2
+        echo "  • API version changes" >&2
+        echo "  • Service degradation" >&2
+        echo "  • Network proxy interference" >&2
+        echo "" >&2
+        echo "Try:" >&2
+        echo "  • Run with verbose mode: gh commit-ai --verbose" >&2
+        echo "  • Use a different provider: export AI_PROVIDER=ollama" >&2
+        rm -f "$temp_response" "$temp_error" "${temp_response}.exit"
+        return 1
+    fi
+
+    # Cleanup temp files
+    rm -f "$temp_error" "${temp_response}.exit"
+
+    if [ "$VERBOSE" = "true" ]; then
+        echo "[Verbose] Response:"
+        echo "$response" | jq '.' 2>/dev/null || echo "$response"
+        echo ""
+    fi
+
+    # Check for errors
+    if echo "$response" | grep -q '"error"'; then
+        local error_type=$(echo "$response" | grep -o '"type":"[^"]*"' | head -1 | sed 's/"type":"//;s/"$//')
+        local error_msg=$(echo "$response" | grep -o '"message":"[^"]*"' | head -1 | sed 's/"message":"//;s/"$//')
+        local error_code=$(echo "$response" | grep -o '"code":"[^"]*"' | head -1 | sed 's/"code":"//;s/"$//')
+
+        echo -e "${RED}Error from Groq" >&2
+        [ -n "$error_code" ] && echo -e "${RED}Code: $error_code" >&2
+        [ -n "$error_type" ] && echo -e "${RED}Type: $error_type" >&2
+        [ -n "$error_msg" ] && echo -e "${RED}Message: $error_msg" >&2
+
+        if [[ "$error_code" == *"invalid_api_key"* ]] || [[ "$error_msg" == *"API key"* ]]; then
+            echo "Tip: Check your API key is valid" >&2
+        elif [[ "$error_code" == *"rate_limit"* ]]; then
+            echo "Tip: You've hit the rate limit. Wait a moment and try again" >&2
+        elif [[ "$error_code" == *"model_not_found"* ]]; then
+            echo "Tip: The model '$GROQ_MODEL' doesn't exist or you don't have access" >&2
+        fi
+        return 1
+    fi
+
+    # Extract token usage (global variables for cost tracking)
+    INPUT_TOKENS=$(echo "$response" | grep -o '"prompt_tokens":[0-9]*' | head -1 | grep -o '[0-9]*')
+    OUTPUT_TOKENS=$(echo "$response" | grep -o '"completion_tokens":[0-9]*' | head -1 | grep -o '[0-9]*')
+
+    # Extract commit message from response
+    # Groq uses OpenAI format: {"choices":[{"message":{"content":"..."},...}],...}
     # Use awk to properly extract JSON string value (handles escaped quotes)
     local raw_message=$(echo "$response" | awk -F'"content":"' '{
         if (NF > 1) {
@@ -3461,9 +4765,12 @@ case "$AI_PROVIDER" in
     openai)
         COMMIT_MSG=$(call_openai "$PROMPT")
         ;;
+    groq)
+        COMMIT_MSG=$(call_groq "$PROMPT")
+        ;;
     *)
         echo -e "${RED}Error: Unknown AI provider '$AI_PROVIDER'"
-        echo "Supported providers: ollama, anthropic, openai"
+        echo "Supported providers: ollama, anthropic, openai, groq"
         exit 1
         ;;
 esac

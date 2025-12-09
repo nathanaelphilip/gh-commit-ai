@@ -1,24 +1,45 @@
 # gh-commit-ai
 
-A GitHub CLI extension that uses AI to generate git commit messages. Supports Ollama (local), Anthropic Claude, and OpenAI GPT models.
+A GitHub CLI extension that uses AI to generate git commit messages. Supports Ollama (local), Groq (ultra-fast), Anthropic Claude, and OpenAI GPT models.
 
 ## Prerequisites
 
 - [GitHub CLI](https://cli.github.com/) installed
 - One of the following AI providers:
   - [Ollama](https://ollama.ai/) (default, free, runs locally)
+  - [Groq](https://groq.com/) (ultra-fast, generous free tier, requires API key)
   - [Anthropic API](https://www.anthropic.com/) (requires API key)
   - [OpenAI API](https://openai.com/) (requires API key)
 
 ## Installation
 
-### Option 1: Install from GitHub (recommended)
+### Option 1: Homebrew (Recommended for macOS/Linux)
+
+```bash
+# Add the tap
+brew tap nathanaelphilip/gh-commit-ai
+
+# Install
+brew install gh-commit-ai
+```
+
+**Benefits:**
+- Automatic dependency management
+- Easy updates with `brew upgrade`
+- Includes shell completion
+- System-wide installation
+
+See [HOMEBREW.md](HOMEBREW.md) for detailed Homebrew installation instructions.
+
+### Option 2: Install as GitHub CLI Extension
 
 ```bash
 gh extension install nathanaelphilip/gh-commit-ai
 ```
 
-### Option 2: Install from local directory
+Then use: `gh commit-ai`
+
+### Option 3: Install from local directory
 
 If you've cloned the repository:
 
@@ -27,7 +48,7 @@ cd gh-commit-ai
 gh extension install .
 ```
 
-### Option 3: Install manually
+### Option 4: Install manually
 
 1. Copy the `gh-commit-ai` script to your PATH:
    ```bash
@@ -39,18 +60,27 @@ gh extension install .
    chmod +x /usr/local/bin/gh-commit-ai
    ```
 
-### Upgrading
+## Upgrading
 
-To upgrade to the latest version:
+**Homebrew:**
+```bash
+brew update && brew upgrade gh-commit-ai
+```
 
+**GitHub CLI Extension:**
 ```bash
 gh extension upgrade commit-ai
 ```
 
-### Uninstalling
+## Uninstalling
 
-To remove the extension:
+**Homebrew:**
+```bash
+brew uninstall gh-commit-ai
+brew untap nathanaelphilip/gh-commit-ai  # Optional
+```
 
+**GitHub CLI Extension:**
 ```bash
 gh extension remove commit-ai
 ```
@@ -74,6 +104,17 @@ gh commit-ai [options]
 - `--verbose, -v` - Show detailed API request/response for debugging
 - `--version` - Show version number
 - `--help, -h` - Show help message
+
+### Man Page
+
+For detailed documentation, install and view the man page:
+
+```bash
+gh commit-ai install-man
+man gh-commit-ai
+```
+
+The man page includes comprehensive documentation on all commands, options, configuration, examples, and troubleshooting.
 
 The extension will:
 1. Analyze your staged (or unstaged) changes
@@ -170,7 +211,7 @@ cp .gh-commit-ai.example.yml ~/.gh-commit-ai.yml
 
 ```yaml
 # AI Provider Selection
-ai_provider: ollama  # Options: ollama, anthropic, openai
+ai_provider: auto  # Options: auto, ollama, anthropic, openai, groq
 
 # Ollama Configuration
 ollama_model: gemma3:12b
@@ -182,6 +223,9 @@ anthropic_model: claude-3-5-sonnet-20241022
 # OpenAI Configuration
 openai_model: gpt-4o-mini
 
+# Groq Configuration
+groq_model: llama-3.3-70b-versatile
+
 # Commit Format
 use_scope: false  # Enable conventional commit scopes
 
@@ -190,8 +234,8 @@ diff_max_lines: 200  # Max diff lines to send to AI
 ```
 
 **Important:**
-- API keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) cannot be stored in config files for security
-- Set API keys as environment variables instead: `export ANTHROPIC_API_KEY="sk-ant-..."`
+- API keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GROQ_API_KEY`) cannot be stored in config files for security
+- Set API keys as environment variables instead: `export GROQ_API_KEY="gsk-..."`
 - Environment variables always take precedence over config file values
 
 #### Environment Variables
@@ -200,8 +244,10 @@ You can also configure using environment variables (these override config files)
 
 #### AI Provider Selection
 
-- `AI_PROVIDER`: Choose your AI provider (default: `ollama`)
+- `AI_PROVIDER`: Choose your AI provider (default: `auto`)
+  - `auto` - Automatically detect available provider (prefers Ollama → Groq → Anthropic → OpenAI)
   - `ollama` - Use local Ollama instance
+  - `groq` - Use Groq API (ultra-fast, generous free tier)
   - `anthropic` - Use Anthropic Claude API
   - `openai` - Use OpenAI GPT API
 
@@ -238,6 +284,20 @@ export AI_PROVIDER="openai"
 gh commit-ai
 ```
 
+#### Groq Configuration
+
+- `GROQ_API_KEY`: Your Groq API key (required, get one at [console.groq.com](https://console.groq.com/keys))
+- `GROQ_MODEL`: The model to use (default: `llama-3.3-70b-versatile`)
+  - Available models: `llama-3.3-70b-versatile`, `llama-3.1-8b-instant`, `mixtral-8x7b-32768`, `gemma2-9b-it`
+- Free tier: 100 requests/minute (very generous for development)
+- Ultra-fast inference: 10-20x faster than other providers
+
+```bash
+export GROQ_API_KEY="gsk-..."
+export AI_PROVIDER="groq"
+gh commit-ai
+```
+
 #### Commit Format Configuration
 
 - `USE_SCOPE`: Enable/disable conventional commit scopes (default: `false`)
@@ -268,6 +328,32 @@ DIFF_MAX_LINES=100 gh commit-ai
 
 # For more context (more lines)
 DIFF_MAX_LINES=500 gh commit-ai
+```
+
+#### Network Reliability Configuration
+
+The tool includes automatic retry logic with exponential backoff for handling network failures:
+
+- `MAX_RETRIES`: Number of retry attempts (default: `3`)
+- `RETRY_DELAY`: Initial delay between retries in seconds (default: `2`)
+- `CONNECT_TIMEOUT`: Connection timeout in seconds (default: `10`)
+- `MAX_TIME`: Maximum time for entire request in seconds (default: `120`)
+
+**Retry Behavior:**
+- Automatically retries on network errors (timeouts, connection failures, SSL errors)
+- Exponential backoff: 2s → 4s → 8s (doubles delay after each attempt)
+- Shows user-friendly progress messages during retries
+- Handles all providers (Ollama, Anthropic, OpenAI, Groq)
+
+```bash
+# More aggressive retries for unstable connections
+MAX_RETRIES=5 gh commit-ai
+
+# Faster retries (useful for quick local Ollama)
+RETRY_DELAY=1 gh commit-ai
+
+# Longer timeouts for slow connections
+CONNECT_TIMEOUT=30 MAX_TIME=300 gh commit-ai
 ```
 
 #### Model Recommendations
@@ -327,6 +413,48 @@ When presented with a generated commit message, you can:
 - Press `y` to accept and commit
 - Press `n` to cancel
 - Press `e` to edit the message in your default editor before committing
+
+## Security
+
+gh-commit-ai implements multiple security measures to protect your code and API keys:
+
+### Input Validation
+- All command-line inputs are validated before use
+- Numeric parameters (`--threshold`, `--max-lines`) must be positive integers
+- String parameters (`--type`) are restricted to allowed values only
+- Prevents command injection and invalid inputs
+
+### Secure Temporary Files
+- Uses `mktemp` for cryptographically secure random file names
+- Sets restrictive permissions (600 - owner read/write only)
+- Automatic cleanup on exit or error
+- No predictable file names (prevents race conditions)
+
+### API Key Protection
+- **Never store API keys in config files** - use environment variables only
+- API keys are never logged or displayed in output
+- Keys are only transmitted via HTTPS to AI providers
+- No exposure in error messages or verbose mode
+
+### Best Practices
+
+**✅ Do:**
+- Store API keys in environment variables or shell profiles
+- Review diffs before committing (use `--preview` or `--dry-run`)
+- Use Ollama (local AI) for sensitive repositories
+- Regularly rotate API keys
+
+**❌ Don't:**
+- Commit API keys to git repositories
+- Store keys in `.gh-commit-ai.yml` files
+- Share API keys via email or chat
+- Run the tool on repositories containing secrets without reviewing diffs first
+
+For detailed security information, see [SECURITY.md](SECURITY.md).
+
+### Reporting Security Issues
+
+Please report security vulnerabilities responsibly - see [SECURITY.md](SECURITY.md) for details.
 
 ## How It Works
 
