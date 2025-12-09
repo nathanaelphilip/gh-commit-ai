@@ -97,12 +97,15 @@ jobs:
           git checkout -b "$BRANCH_NAME"
 
           git add Formula/gh-commit-ai.rb
-          git commit -m "chore: update Homebrew formula for v${{ steps.get_version.outputs.version }}
+          git commit -m "$(cat <<'EOF'
+chore: update Homebrew formula for v${{ steps.get_version.outputs.version }}
 
 - Update version to ${{ steps.get_version.outputs.version }}
 - Update SHA256 to ${{ steps.sha256.outputs.sha256 }}
 
-🤖 Generated with automated release workflow"
+🤖 Generated with automated release workflow
+EOF
+          )"
 
           git push origin "$BRANCH_NAME"
 
