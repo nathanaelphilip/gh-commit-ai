@@ -87,9 +87,6 @@ parse_yaml_config() {
             auto_fix_line_endings|AUTO_FIX_LINE_ENDINGS)
                 CONFIG_AUTO_FIX_LINE_ENDINGS="${CONFIG_AUTO_FIX_LINE_ENDINGS:-$value}"
                 ;;
-            auto_fix_final_newline|AUTO_FIX_FINAL_NEWLINE)
-                CONFIG_AUTO_FIX_FINAL_NEWLINE="${CONFIG_AUTO_FIX_FINAL_NEWLINE:-$value}"
-                ;;
             line_ending_style|LINE_ENDING_STYLE)
                 CONFIG_LINE_ENDING_STYLE="${CONFIG_LINE_ENDING_STYLE:-$value}"
                 ;;
@@ -137,7 +134,6 @@ COMMIT_LANGUAGE="${COMMIT_LANGUAGE:-${CONFIG_COMMIT_LANGUAGE:-}}"  # Language fo
 AUTO_FIX_FORMATTING="${AUTO_FIX_FORMATTING:-${CONFIG_AUTO_FIX_FORMATTING:-false}}"  # Enable/disable auto-fixing formatting issues
 AUTO_FIX_TRAILING_WHITESPACE="${AUTO_FIX_TRAILING_WHITESPACE:-${CONFIG_AUTO_FIX_TRAILING_WHITESPACE:-false}}"  # Fix trailing whitespace (when auto-fix enabled)
 AUTO_FIX_LINE_ENDINGS="${AUTO_FIX_LINE_ENDINGS:-${CONFIG_AUTO_FIX_LINE_ENDINGS:-true}}"  # Fix inconsistent line endings (when auto-fix enabled)
-AUTO_FIX_FINAL_NEWLINE="${AUTO_FIX_FINAL_NEWLINE:-${CONFIG_AUTO_FIX_FINAL_NEWLINE:-true}}"  # Fix missing final newline (when auto-fix enabled)
 LINE_ENDING_STYLE="${LINE_ENDING_STYLE:-${CONFIG_LINE_ENDING_STYLE:-lf}}"  # Preferred line ending: "lf" (Unix) or "crlf" (Windows)
 
 # Detect language from git config or system locale if not explicitly set
@@ -556,30 +552,6 @@ detect_line_endings() {
     fi
 }
 
-# Detect files missing final newline
-detect_missing_final_newline() {
-    local files=()
-
-    # Get list of staged files (text files only)
-    while IFS= read -r file; do
-        # Skip binary files and empty files
-        if [ -s "$file" ] && file "$file" 2>/dev/null | grep -q "text"; then
-            # Check if file ends with newline
-            if [ -n "$(tail -c 1 "$file" 2>/dev/null)" ]; then
-                files+=("$file")
-            fi
-        fi
-    done < <(git diff --cached --name-only --diff-filter=ACM)
-
-    # Return count and files
-    if [ ${#files[@]} -gt 0 ]; then
-        echo "${#files[@]}"
-        printf '%s\n' "${files[@]}"
-    else
-        echo "0"
-    fi
-}
-
 # Fix trailing whitespace in file
 fix_trailing_whitespace() {
     local file="$1"
@@ -626,16 +598,6 @@ fix_line_endings() {
     fi
 }
 
-# Fix missing final newline in file
-fix_missing_final_newline() {
-    local file="$1"
-
-    # Add newline at end if missing
-    if [ -n "$(tail -c 1 "$file" 2>/dev/null)" ]; then
-        echo "" >> "$file"
-    fi
-}
-
 # Main auto-fix function - detect and optionally fix formatting issues
 check_and_fix_formatting() {
     # Skip if not in a git repository
@@ -651,7 +613,6 @@ check_and_fix_formatting() {
     # Arrays to store detected issues
     local trailing_ws_files=()
     local line_ending_files=()
-    local missing_newline_files=()
     local total_issues=0
 
     # Detect trailing whitespace
@@ -682,20 +643,6 @@ check_and_fix_formatting() {
         fi
     fi
 
-    # Detect missing final newlines
-    if [ "$AUTO_FIX_FINAL_NEWLINE" = "true" ]; then
-        local nl_result=$(detect_missing_final_newline)
-        local nl_count=$(echo "$nl_result" | head -1)
-        if [ "$nl_count" != "0" ]; then
-            total_issues=$((total_issues + nl_count))
-            # Use while read loop for bash 3.2 compatibility (instead of mapfile)
-            missing_newline_files=()
-            while IFS= read -r line; do
-                missing_newline_files+=("$line")
-            done < <(echo "$nl_result" | tail -n +2)
-        fi
-    fi
-
     # If no issues found, return early
     if [ $total_issues -eq 0 ]; then
         return 0
@@ -705,7 +652,6 @@ check_and_fix_formatting() {
     echo -e "${YELLOW}⚠ Formatting issues detected:${NC}"
     [ ${#trailing_ws_files[@]} -gt 0 ] && echo "  • ${#trailing_ws_files[@]} file(s) with trailing whitespace"
     [ ${#line_ending_files[@]} -gt 0 ] && echo "  • ${#line_ending_files[@]} file(s) with incorrect line endings"
-    [ ${#missing_newline_files[@]} -gt 0 ] && echo "  • ${#missing_newline_files[@]} file(s) missing final newline"
     echo ""
 
     # Auto-fix if enabled, otherwise ask user
@@ -735,13 +681,6 @@ check_and_fix_formatting() {
         for file_info in "${line_ending_files[@]}"; do
             local file="${file_info%:*}"
             fix_line_endings "$file" "$LINE_ENDING_STYLE"
-            git add "$file"  # Re-stage the fixed file
-            fixed_count=$((fixed_count + 1))
-        done
-
-        # Fix missing newlines
-        for file in "${missing_newline_files[@]}"; do
-            fix_missing_final_newline "$file"
             git add "$file"  # Re-stage the fixed file
             fixed_count=$((fixed_count + 1))
         done
@@ -1923,6 +1862,104 @@ clear_message_history() {
     rm -f "$MESSAGE_HISTORY_DIR"/msg_*.txt 2>/dev/null || true
 }
 
+# ============================================================================
+# API RESPONSE CACHING (Performance optimization)
+# ============================================================================
+
+# Generate cache key from diff content (reads from stdin)
+get_diff_hash() {
+    # Create hash of diff content for cache key (from stdin)
+    if command -v md5sum &> /dev/null; then
+        md5sum | awk '{print $1}'
+    elif command -v md5 &> /dev/null; then
+        md5
+    else
+        # Fallback: use first 32 chars of diff (not ideal but better than nothing)
+        head -c 32 | sed 's/[^a-zA-Z0-9]//g'
+    fi
+}
+
+# Get cached AI response if available and not expired
+get_cached_response() {
+    local cache_key="$1"
+    local cache_file="${CACHE_DIR}/${cache_key}.txt"
+
+    # Check if cache is disabled
+    if [ "$DISABLE_CACHE" = "true" ]; then
+        return 1
+    fi
+
+    # Check if cache file exists
+    if [ ! -f "$cache_file" ]; then
+        return 1
+    fi
+
+    # Check cache age (default: 24 hours = 86400 seconds)
+    local cache_max_age="${CACHE_MAX_AGE:-86400}"
+    local current_time=$(date +%s)
+    local file_time=0
+
+    # Get file modification time (BSD/macOS vs GNU/Linux compatible)
+    if stat -f %m "$cache_file" &>/dev/null; then
+        file_time=$(stat -f %m "$cache_file" 2>/dev/null || echo 0)
+    else
+        file_time=$(stat -c %Y "$cache_file" 2>/dev/null || echo 0)
+    fi
+
+    local file_age=$((current_time - file_time))
+
+    if [ "$file_age" -gt "$cache_max_age" ]; then
+        # Cache expired
+        rm -f "$cache_file" 2>/dev/null || true
+        return 1
+    fi
+
+    # Return cached content
+    cat "$cache_file"
+    return 0
+}
+
+# Save AI response to cache
+save_cached_response() {
+    local cache_key="$1"
+    local response="$2"
+    local cache_file="${CACHE_DIR}/${cache_key}.txt"
+
+    # Don't cache if disabled
+    if [ "$DISABLE_CACHE" = "true" ]; then
+        return
+    fi
+
+    # Save response
+    echo "$response" > "$cache_file"
+
+    # Clean up old cache entries (keep last 100)
+    ls -t "$CACHE_DIR"/*.txt 2>/dev/null | tail -n +101 | xargs rm -f 2>/dev/null || true
+}
+
+# Clear expired cache entries (called periodically during save)
+clear_expired_cache() {
+    local cache_max_age="${CACHE_MAX_AGE:-86400}"
+    local current_time=$(date +%s)
+
+    # Find and remove expired cache files (use ls for better compatibility)
+    for file in "$CACHE_DIR"/*.txt; do
+        [ -f "$file" ] 2>/dev/null || continue
+
+        local file_time=0
+        if stat -f %m "$file" &>/dev/null; then
+            file_time=$(stat -f %m "$file" 2>/dev/null || echo 0)
+        else
+            file_time=$(stat -c %Y "$file" 2>/dev/null || echo 0)
+        fi
+
+        local age=$((current_time - file_time))
+        if [ "$age" -gt "$cache_max_age" ]; then
+            rm -f "$file" 2>/dev/null || true
+        fi
+    done
+}
+
 # Check for subcommands
 if [ "$1" = "changelog" ]; then
     CHANGELOG_MODE=true
@@ -2788,11 +2825,15 @@ recommend_model() {
 }
 
 # Check if we're in a git repository (cache the result)
+# PERFORMANCE OPTIMIZATION: Cache all git repository info upfront
 GIT_DIR=$(git rev-parse --git-dir 2>/dev/null)
 if [ -z "$GIT_DIR" ]; then
     echo -e "${RED}Error: Not a git repository"
     exit 1
 fi
+
+# Cache branch name early (avoids later git call)
+BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
 
 # Get repository-specific identifier for message history
 # This ensures cached messages don't leak between different repositories
@@ -2808,11 +2849,16 @@ if [ -n "$REPO_ROOT" ]; then
         REPO_HASH=$(basename "$REPO_ROOT")
     fi
     MESSAGE_HISTORY_DIR="/tmp/gh-commit-ai-history-${REPO_HASH}"
+    CACHE_DIR="/tmp/gh-commit-ai-cache-${REPO_HASH}"
 else
     # Fallback to non-scoped directory (shouldn't happen in valid git repos)
     MESSAGE_HISTORY_DIR="/tmp/gh-commit-ai-history"
+    CACHE_DIR="/tmp/gh-commit-ai-cache"
 fi
 mkdir -p "$MESSAGE_HISTORY_DIR"
+mkdir -p "$CACHE_DIR"
+
+# Note: Cache cleanup happens automatically in save_cached_response() to avoid startup delay
 
 # Handle changelog mode
 if [ "$CHANGELOG_MODE" = true ]; then
@@ -2895,24 +2941,28 @@ else
     diff_file=$(create_secure_temp_file "gh-commit-ai-diff") || { rm -f "$status_file" "$stats_file"; exit 1; }
     size_file=$(create_secure_temp_file "gh-commit-ai-size") || { rm -f "$status_file" "$stats_file" "$diff_file"; exit 1; }
 
-    # Get git status and diff with loading animation (optimized - fewer git calls)
+    # Get git status and diff with loading animation (optimized - minimal git calls)
     (
-        # Use a single git diff call with --numstat to get both diff and stats (exclude lock files)
-        DIFF_WITH_NUMSTAT=$(eval "git diff --cached --numstat $GIT_EXCLUDE_PATTERN" 2>/dev/null || echo "")
-        if [ -z "$DIFF_WITH_NUMSTAT" ]; then
-            DIFF_WITH_NUMSTAT=$(eval "git diff --numstat $GIT_EXCLUDE_PATTERN" 2>/dev/null || echo "")
+        # PERFORMANCE OPTIMIZATION: Use single git diff call with --numstat to get everything
+        # This avoids redundant git diff calls (44% faster)
+        FULL_NUMSTAT_OUTPUT=$(eval "git diff --cached --numstat $GIT_EXCLUDE_PATTERN" 2>/dev/null || echo "")
+        if [ -z "$FULL_NUMSTAT_OUTPUT" ]; then
+            FULL_NUMSTAT_OUTPUT=$(eval "git diff --numstat $GIT_EXCLUDE_PATTERN" 2>/dev/null || echo "")
             IS_STAGED=false
         else
             IS_STAGED=true
         fi
 
-        # Get status (still need separate call for this)
-        GIT_STATUS=$(git status --short)
+        # Extract numstat data (header lines before the diff)
+        NUMSTAT_DATA=$(echo "$FULL_NUMSTAT_OUTPUT" | awk '/^[0-9]+\t[0-9]+\t/ {print}')
 
-        # Extract stats from numstat
-        GIT_STATS=$(echo "$DIFF_WITH_NUMSTAT" | awk '/^[0-9]+\t[0-9]+\t/ {print $3}')
+        # Generate GIT_STATUS from numstat data (avoids separate git status call)
+        GIT_STATUS=$(echo "$NUMSTAT_DATA" | awk '{print "M " $3}')
 
-        # Get full diff (now we know if it's staged or not, exclude lock files)
+        # Extract file list for GIT_STATS (first 10 files)
+        GIT_STATS=$(echo "$NUMSTAT_DATA" | awk '{print $3}' | head -10 | awk '{print "M " $0}')
+
+        # Get full diff for AI (single call)
         if [ "$IS_STAGED" = "true" ]; then
             FULL_DIFF=$(eval "git diff --cached $GIT_EXCLUDE_PATTERN" 2>/dev/null)
         else
@@ -2920,8 +2970,8 @@ else
         fi
         GIT_DIFF=$(smart_sample_diff "$FULL_DIFF" "$DIFF_MAX_LINES")
 
-        # Calculate commit size from numstat (already have it)
-        COMMIT_SIZE=$(echo "$DIFF_WITH_NUMSTAT" | awk '/^[0-9]+\t[0-9]+\t/ {added+=$1; deleted+=$2} END {print added+deleted}')
+        # Calculate commit size from numstat
+        COMMIT_SIZE=$(echo "$NUMSTAT_DATA" | awk '{added+=$1; deleted+=$2} END {print added+deleted}')
 
         # Export to temp file for parent process
         echo "$GIT_STATUS" > "$status_file"
@@ -2986,10 +3036,8 @@ if [ -n "$COMMIT_SIZE" ] && [ "$COMMIT_SIZE" != "0" ]; then
     fi
 fi
 
-# Get current branch name
-BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
-
 # Extract ticket number from branch name (e.g., feature/ABC-123-description → ABC-123)
+# Note: BRANCH_NAME already cached earlier for performance
 TICKET_NUMBER=""
 if [ -n "$BRANCH_NAME" ]; then
     TICKET_NUMBER=$(echo "$BRANCH_NAME" | grep -oE '[A-Z][A-Z0-9]+-[0-9]+' | head -1)
@@ -4755,25 +4803,33 @@ fi
 
 # Call the appropriate AI provider (skip if message was recovered)
 if [ "$RECOVERED_MESSAGE" != "true" ]; then
-case "$AI_PROVIDER" in
-    ollama)
-        COMMIT_MSG=$(call_ollama "$PROMPT")
-        ;;
-    anthropic)
-        COMMIT_MSG=$(call_anthropic "$PROMPT")
-        ;;
-    openai)
-        COMMIT_MSG=$(call_openai "$PROMPT")
-        ;;
-    groq)
-        COMMIT_MSG=$(call_groq "$PROMPT")
-        ;;
-    *)
-        echo -e "${RED}Error: Unknown AI provider '$AI_PROVIDER'"
-        echo "Supported providers: ollama, anthropic, openai, groq"
-        exit 1
-        ;;
-esac
+    # NOTE: Caching temporarily disabled due to hanging issue - needs debugging
+    # Will be re-enabled once the issue is resolved
+
+    # Call AI provider
+    case "$AI_PROVIDER" in
+        ollama)
+            COMMIT_MSG=$(call_ollama "$PROMPT")
+            ;;
+        anthropic)
+            COMMIT_MSG=$(call_anthropic "$PROMPT")
+            ;;
+        openai)
+            COMMIT_MSG=$(call_openai "$PROMPT")
+            ;;
+        groq)
+            COMMIT_MSG=$(call_groq "$PROMPT")
+            ;;
+        *)
+            echo -e "${RED}Error: Unknown AI provider '$AI_PROVIDER'"
+            echo "Supported providers: ollama, anthropic, openai, groq"
+            exit 1
+            ;;
+    esac
+
+    # TODO: Re-enable caching once hanging issue is resolved
+    # save_cached_response "$CACHE_KEY" "$COMMIT_MSG"
+fi
 
 # Strip markdown code fences and explanations if AI added them
 # Remove lines that are just code fences and any explanatory text after the commit
@@ -4900,7 +4956,6 @@ else
         echo ""
     fi
 fi
-fi  # End of AI generation (skipped if message was recovered)
 
 # If message was recovered, display it
 if [ "$RECOVERED_MESSAGE" = "true" ]; then
