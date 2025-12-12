@@ -3349,10 +3349,510 @@ analyze_commit_history() {
     echo -e "$insights"
 }
 
+# Extract semantic context from changed filenames
+extract_file_context() {
+    local files="$1"
+    local contexts=()
+
+    # Parse each filename and extract semantic meaning
+    while IFS= read -r line; do
+        # Skip empty lines
+        [ -z "$line" ] && continue
+
+        # Extract filename (remove git status prefix like "M " or "A ")
+        local file=$(echo "$line" | awk '{print $NF}')
+
+        # Convert to lowercase for pattern matching
+        local file_lower=$(echo "$file" | tr '[:upper:]' '[:lower:]')
+
+        # Extract context based on filename patterns
+        case "$file_lower" in
+            *video*) contexts+=("video handling") ;;
+            *audio*|*sound*|*music*) contexts+=("audio processing") ;;
+            *image*|*photo*|*picture*|*img*) contexts+=("image handling") ;;
+            *auth*|*login*|*signin*|*signup*) contexts+=("authentication") ;;
+            *user*|*profile*|*account*) contexts+=("user management") ;;
+            *payment*|*checkout*|*billing*|*invoice*) contexts+=("payment processing") ;;
+            *order*|*cart*|*shopping*) contexts+=("order management") ;;
+            *product*|*catalog*|*inventory*) contexts+=("product catalog") ;;
+            *email*|*mail*|*notification*) contexts+=("email/notifications") ;;
+            *report*|*analytics*|*dashboard*) contexts+=("reporting/analytics") ;;
+            *search*|*query*|*filter*) contexts+=("search functionality") ;;
+            *upload*|*download*|*file*) contexts+=("file handling") ;;
+            *api/*|*endpoint*|*route*) contexts+=("API endpoints") ;;
+            *component*/*|*components/*) contexts+=("UI components") ;;
+            *database*|*db/*|*migration*|*schema*) contexts+=("database") ;;
+            *model*/*|*models/*) contexts+=("data models") ;;
+            *service*/*|*services/*) contexts+=("services layer") ;;
+            *controller*/*|*controllers/*) contexts+=("controllers") ;;
+            *view*/*|*views/*|*template*) contexts+=("views/templates") ;;
+            *test*|*spec*|*.test.*|*.spec.*) contexts+=("tests") ;;
+            *doc*|*readme*) contexts+=("documentation") ;;
+            *config*|*.json|*.yml|*.yaml|*.toml) contexts+=("configuration") ;;
+            *security*|*permission*|*role*) contexts+=("security/permissions") ;;
+            *cache*|*redis*|*memcache*) contexts+=("caching") ;;
+            *queue*|*job*|*worker*) contexts+=("background jobs") ;;
+            *webhook*|*callback*|*integration*) contexts+=("integrations") ;;
+            *export*|*import*) contexts+=("data import/export") ;;
+        esac
+
+        # Domain-specific patterns
+        # Laravel
+        case "$file_lower" in
+            *controller.php) contexts+=("Laravel controller") ;;
+            *model.php|app/models/*) contexts+=("Laravel model") ;;
+            database/migrations/*) contexts+=("Laravel migration") ;;
+            *middleware.php|app/http/middleware/*) contexts+=("Laravel middleware") ;;
+            *request.php|app/http/requests/*) contexts+=("Laravel request validation") ;;
+            *seeder.php|database/seeders/*) contexts+=("Laravel seeder") ;;
+            *provider.php|app/providers/*) contexts+=("Laravel service provider") ;;
+            resources/views/*) contexts+=("Laravel Blade views") ;;
+        esac
+
+        # React/Vue/Angular
+        case "$file_lower" in
+            *component.tsx|*component.jsx) contexts+=("React component") ;;
+            *.tsx|*.jsx) contexts+=("React/TypeScript") ;;
+            *hook*.ts|*hook*.js|use*.ts|use*.js) contexts+=("React hooks") ;;
+            *.vue) contexts+=("Vue component") ;;
+            *component.ts|*component.js) contexts+=("Angular component") ;;
+            *service.ts|*service.js) contexts+=("Angular service") ;;
+            *module.ts) contexts+=("Angular/NestJS module") ;;
+        esac
+
+        # WordPress
+        case "$file_lower" in
+            wp-content/themes/*) contexts+=("WordPress theme") ;;
+            wp-content/plugins/*) contexts+=("WordPress plugin") ;;
+            *functions.php) contexts+=("WordPress theme functions") ;;
+            wp-admin/*) contexts+=("WordPress admin") ;;
+        esac
+
+        # Django/Flask
+        case "$file_lower" in
+            */views.py) contexts+=("Django/Flask views") ;;
+            */models.py) contexts+=("Django models") ;;
+            */serializers.py) contexts+=("Django serializers") ;;
+            */forms.py) contexts+=("Django forms") ;;
+            */urls.py) contexts+=("Django URL routing") ;;
+        esac
+
+        # Ruby on Rails
+        case "$file_lower" in
+            *_controller.rb|app/controllers/*) contexts+=("Rails controller") ;;
+            *_model.rb|app/models/*) contexts+=("Rails model") ;;
+            db/migrate/*) contexts+=("Rails migration") ;;
+            *_helper.rb|app/helpers/*) contexts+=("Rails helper") ;;
+        esac
+
+        # Docker/DevOps
+        case "$file_lower" in
+            dockerfile|*dockerfile*) contexts+=("Docker configuration") ;;
+            docker-compose.yml|docker-compose.yaml) contexts+=("Docker Compose") ;;
+            .github/workflows/*|.gitlab-ci.yml) contexts+=("CI/CD pipeline") ;;
+            kubernetes/*|k8s/*|*.yaml|*.yml) contexts+=("Kubernetes config") ;;
+        esac
+
+        # Also extract from directory names
+        if [[ "$file_lower" == *"/"* ]]; then
+            local dir=$(dirname "$file_lower")
+            local base=$(basename "$dir")
+            case "$base" in
+                video*|videos) contexts+=("video handling") ;;
+                audio*|sounds|music) contexts+=("audio processing") ;;
+                image*|images|photos) contexts+=("image handling") ;;
+                auth*|authentication) contexts+=("authentication") ;;
+                user*|users|profiles) contexts+=("user management") ;;
+                payment*|payments|billing) contexts+=("payment processing") ;;
+                order*|orders) contexts+=("order management") ;;
+                product*|products) contexts+=("product catalog") ;;
+                api|apis) contexts+=("API endpoints") ;;
+                admin*|dashboard) contexts+=("admin dashboard") ;;
+            esac
+        fi
+    done <<< "$files"
+
+    # Return unique contexts as comma-separated string
+    if [ ${#contexts[@]} -gt 0 ]; then
+        printf '%s\n' "${contexts[@]}" | sort -u | paste -sd ", " -
+    fi
+}
+
+# Extract function and class names from diff
+extract_changed_functions() {
+    local diff="$1"
+    local functions=()
+
+    # Extract function names from various languages
+    # PHP: function name() or public function name()
+    while IFS= read -r line; do
+        if [[ "$line" =~ ^\+.*function[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*) ]]; then
+            functions+=("${BASH_REMATCH[1]}()")
+        fi
+    done <<< "$diff"
+
+    # Python: def name(
+    while IFS= read -r line; do
+        if [[ "$line" =~ ^\+.*def[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*) ]]; then
+            functions+=("${BASH_REMATCH[1]}()")
+        fi
+    done <<< "$diff"
+
+    # JavaScript/TypeScript: function name( or const name = function
+    while IFS= read -r line; do
+        if [[ "$line" =~ ^\+.*(const|let|var)[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*= ]] || \
+           [[ "$line" =~ ^\+.*function[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*) ]]; then
+            local name="${BASH_REMATCH[2]:-${BASH_REMATCH[1]}}"
+            [[ "$name" != "const" && "$name" != "let" && "$name" != "var" ]] && functions+=("${name}()")
+        fi
+    done <<< "$diff"
+
+    # Class names: class ClassName
+    while IFS= read -r line; do
+        if [[ "$line" =~ ^\+.*class[[:space:]]+([A-Z][a-zA-Z0-9_]*) ]]; then
+            functions+=("${BASH_REMATCH[1]}")
+        fi
+    done <<< "$diff"
+
+    # Return unique function/class names (limit to first 8 to avoid clutter)
+    if [ ${#functions[@]} -gt 0 ]; then
+        local result=$(printf '%s\n' "${functions[@]}" | sort -u | head -8 | paste -sd "," -)
+        echo "$result" | sed 's/,/, /g'
+    fi
+}
+
+# Extract best commit examples from repository history
+get_best_commit_examples() {
+    # Get last 100 commits with subject and body
+    local commits=$(git log --pretty=format:"%s|||%b" -100 2>/dev/null)
+
+    [ -z "$commits" ] && return
+
+    local examples=""
+    local count=0
+    local max_examples=2
+
+    # Find well-formed commits with bullets and proper conventional format
+    while IFS='|||' read -r subject body; do
+        # Check if has proper format and bullets
+        if [[ "$subject" =~ ^(feat|fix|docs|refactor|test|chore|perf|style) ]] && \
+           [[ "$body" == *"- "* ]]; then
+            # This is a good example
+            if [ $count -eq 0 ]; then
+                examples="EXAMPLES FROM THIS REPOSITORY:"
+            fi
+
+            examples="$examples
+
+$subject
+$body"
+
+            count=$((count + 1))
+            [ $count -ge $max_examples ] && break
+        fi
+    done <<< "$commits"
+
+    if [ -n "$examples" ]; then
+        echo "$examples"
+    fi
+}
+
+# Analyze the type of changes in the diff (semantic analysis)
+analyze_change_type() {
+    local diff="$1"
+    local change_types=()
+
+    # Count additions vs deletions
+    local adds=$(echo "$diff" | grep -c "^+" 2>/dev/null)
+    local dels=$(echo "$diff" | grep -c "^-" 2>/dev/null)
+
+    # Ensure numeric values (default to 0 if empty)
+    adds=${adds:-0}
+    dels=${dels:-0}
+
+    # Detect error handling additions
+    if echo "$diff" | grep -qE '^\+.*(throw new|try \{|catch|except:|raise )'; then
+        change_types+=("added error handling")
+    fi
+
+    # Detect TODO/FIXME additions
+    if echo "$diff" | grep -qE '^\+.*(TODO|FIXME|XXX|HACK)'; then
+        change_types+=("added TODOs")
+    fi
+
+    # Detect logging additions
+    if echo "$diff" | grep -qE '^\+.*(console\.log|logger\.|logging\.|log\.|print\()'; then
+        change_types+=("added logging")
+    fi
+
+    # Detect test additions
+    if echo "$diff" | grep -qE '^\+.*(it\(|test\(|describe\(|assert|expect\()'; then
+        change_types+=("added tests")
+    fi
+
+    # Detect validation additions
+    if echo "$diff" | grep -qE '^\+.*(validate|check|verify|assert|ensure).*\('; then
+        change_types+=("added validation")
+    fi
+
+    # Detect API/endpoint changes
+    if echo "$diff" | grep -qE '^\+.*(route|endpoint|@RequestMapping|@GetMapping|@PostMapping|@app\.route)'; then
+        change_types+=("added API endpoints")
+    fi
+
+    # Detect database/model changes
+    if echo "$diff" | grep -qE '^\+.*(CREATE TABLE|ALTER TABLE|migration|Schema::|add_column|create_table)'; then
+        change_types+=("database schema changes")
+    fi
+
+    # Detect code removal (refactoring)
+    if [ "$dels" -gt 0 ] && [ "$adds" -gt 0 ] && [ "$dels" -gt $((adds * 2)) ]; then
+        change_types+=("code removal/cleanup")
+    fi
+
+    # Detect new function/class additions
+    if echo "$diff" | grep -qE '^\+.*(function |def |class |const .* = \()'; then
+        change_types+=("new functions/classes")
+    fi
+
+    # Detect configuration changes
+    if echo "$diff" | grep -qE '^\+.*(config|settings|env|ENV|CONST)'; then
+        change_types+=("configuration updates")
+    fi
+
+    # Detect dependency changes
+    if echo "$diff" | grep -qE '^\+.*(import |require\(|from .* import|include |use )'; then
+        change_types+=("dependency changes")
+    fi
+
+    # Detect documentation
+    if echo "$diff" | grep -qE '^\+.*(\/\*\*|"""|\* @|#.*:|<!-- )'; then
+        change_types+=("documentation updates")
+    fi
+
+    # Return change types
+    if [ ${#change_types[@]} -gt 0 ]; then
+        local result=$(printf '%s\n' "${change_types[@]}" | sort -u | paste -sd "," -)
+        echo "$result" | sed 's/,/, /g'
+    fi
+}
+
+# Generate per-file change summaries
+generate_file_summaries() {
+    local status="$1"
+    local summaries=""
+    local count=0
+    local max_files=5
+
+    # Use git diff --numstat for accurate per-file statistics
+    # Format: <added lines> <deleted lines> <filename>
+    local numstat
+    if [ "$AMEND_MODE" = "true" ]; then
+        numstat=$(git show HEAD --numstat --format="" 2>/dev/null)
+    else
+        numstat=$(git diff --cached --numstat 2>/dev/null)
+    fi
+
+    # Parse git status to get changed files
+    while IFS= read -r line; do
+        [ -z "$line" ] && continue
+        [ "$count" -ge "$max_files" ] && break
+
+        # Extract status and filename
+        local file_status=$(echo "$line" | awk '{print $1}')
+        local file=$(echo "$line" | awk '{print $NF}')
+
+        # Skip if empty
+        [ -z "$file" ] && continue
+
+        # Get stats from numstat for this file
+        local adds=0
+        local dels=0
+        local stats=$(echo "$numstat" | grep -F "$file" | head -1)
+        if [ -n "$stats" ]; then
+            adds=$(echo "$stats" | awk '{print $1}')
+            dels=$(echo "$stats" | awk '{print $2}')
+
+            # Handle binary files (marked with -)
+            [ "$adds" = "-" ] && adds=0
+            [ "$dels" = "-" ] && dels=0
+        fi
+
+        # Ensure numeric values (default to 0 if empty)
+        adds=${adds:-0}
+        dels=${dels:-0}
+
+        # Create summary
+        local action=""
+        case "$file_status" in
+            A) action="new file" ;;
+            M) action="modified" ;;
+            D) action="deleted" ;;
+            R) action="renamed" ;;
+            *) action="changed" ;;
+        esac
+
+        # Only show files with significant changes
+        if [ "$adds" -gt 2 ] || [ "$dels" -gt 2 ] || [ "$file_status" = "A" ] || [ "$file_status" = "D" ]; then
+            if [ -z "$summaries" ]; then
+                summaries="FILE SUMMARIES:"
+            fi
+            summaries="$summaries
+- $file: $action (+$adds/-$dels lines)"
+            count=$((count + 1))
+        fi
+    done <<< "$status"
+
+    echo "$summaries"
+}
+
+# Detect relationships between changed files
+detect_file_relationships() {
+    local files="$1"
+    local relationships=()
+
+    # Convert to lowercase for matching
+    local files_lower=$(echo "$files" | tr '[:upper:]' '[:lower:]')
+
+    # Migration + Model pattern
+    if echo "$files_lower" | grep -q "migration" && echo "$files_lower" | grep -qE "(model|schema)"; then
+        relationships+=("database migration with model changes")
+    fi
+
+    # Test + Source pattern
+    local has_test=$(echo "$files_lower" | grep -cE "(test|spec)" 2>/dev/null)
+    local total_files=$(echo "$files" | wc -l | tr -d ' ')
+
+    # Ensure numeric values
+    has_test=${has_test:-0}
+    total_files=${total_files:-0}
+
+    if [ "$has_test" -gt 0 ] && [ "$total_files" -gt "$has_test" ]; then
+        relationships+=("includes test coverage")
+    fi
+
+    # Component + Style pattern
+    if echo "$files_lower" | grep -qE "\.(tsx|jsx|vue)" && echo "$files_lower" | grep -qE "\.(css|scss|sass|less)"; then
+        relationships+=("component with styling changes")
+    fi
+
+    # Controller + View pattern
+    if echo "$files_lower" | grep -q "controller" && echo "$files_lower" | grep -qE "(view|template)"; then
+        relationships+=("controller and view updates")
+    fi
+
+    # API + Documentation pattern
+    if echo "$files_lower" | grep -qE "(api|endpoint|route)" && echo "$files_lower" | grep -qE "(readme|doc|swagger)"; then
+        relationships+=("API changes with documentation")
+    fi
+
+    # Config + Code pattern
+    if echo "$files_lower" | grep -qE "(config|\.env|settings)" && echo "$files" | wc -l | awk '{if ($1 > 1) print "yes"}' | grep -q "yes"; then
+        relationships+=("configuration changes with code")
+    fi
+
+    # Docker + CI pattern
+    if echo "$files_lower" | grep -qE "(dockerfile|docker-compose)" && echo "$files_lower" | grep -qE "(\.github|\.gitlab|jenkins|ci)"; then
+        relationships+=("Docker and CI/CD updates")
+    fi
+
+    # Return relationships
+    if [ ${#relationships[@]} -gt 0 ]; then
+        printf '%s\n' "${relationships[@]}" | paste -sd ", " -
+    fi
+}
+
 # Run history analysis if enabled
 HISTORY_INSIGHTS=""
 if [ "$LEARN_FROM_HISTORY" = "true" ]; then
     HISTORY_INSIGHTS=$(analyze_commit_history)
+fi
+
+# Define few-shot examples for better AI learning
+FEW_SHOT_EXAMPLES="
+EXAMPLES OF GOOD COMMIT MESSAGES (BE SPECIFIC LIKE THESE):
+
+Example 1 - Video feature:
+Input: Changed video.php, added uploadVideo() function
+Output:
+feat: add video upload with format validation
+
+- implement uploadVideo() function
+- add support for mp4, avi, mov formats
+- validate file size and duration
+
+Example 2 - Authentication:
+Input: Modified auth/login.php, updated validateUser()
+Output:
+fix: resolve session timeout in user login
+
+- increase session lifetime to 24 hours
+- add automatic token refresh
+- fix validateUser() edge case
+
+Example 3 - Payment processing:
+Input: Changed payment.php and invoice.php
+Output:
+fix: correct tax calculation in payment flow
+
+- fix rounding error in calculateTax()
+- update invoice generation logic
+- add currency conversion handling
+
+BAD EXAMPLES (AVOID THESE - TOO GENERIC):
+❌ 'fix: resolve bug'
+❌ 'update: change files'
+❌ 'feat: add feature'
+❌ 'chore: update code'
+
+REMEMBER: Mention the SPECIFIC AREA (video, auth, payment, etc.) and WHAT changed (function names, features)."
+
+# Extract file context from changed files
+FILE_CONTEXT=""
+EXTRACTED_CONTEXTS=$(extract_file_context "$GIT_STATUS")
+if [ -n "$EXTRACTED_CONTEXTS" ]; then
+    FILE_CONTEXT="
+Detected code areas being modified: $EXTRACTED_CONTEXTS
+Make sure your commit message reflects the specific area(s) being changed."
+fi
+
+# Extract function and class names from diff
+FUNCTION_CONTEXT=""
+EXTRACTED_FUNCTIONS=$(extract_changed_functions "$GIT_DIFF")
+if [ -n "$EXTRACTED_FUNCTIONS" ]; then
+    FUNCTION_CONTEXT="
+Modified functions/classes: $EXTRACTED_FUNCTIONS
+Consider mentioning these in your commit message if they represent significant changes."
+fi
+
+# Get best commit examples from repository
+REPO_EXAMPLES=""
+if [ "$LEARN_FROM_HISTORY" = "true" ]; then
+    REPO_EXAMPLES=$(get_best_commit_examples)
+    if [ -n "$REPO_EXAMPLES" ]; then
+        REPO_EXAMPLES="
+
+$REPO_EXAMPLES"
+    fi
+fi
+
+# Analyze change types semantically
+SEMANTIC_ANALYSIS=""
+CHANGE_TYPES=$(analyze_change_type "$GIT_DIFF")
+if [ -n "$CHANGE_TYPES" ]; then
+    SEMANTIC_ANALYSIS="
+Type of changes detected: $CHANGE_TYPES"
+fi
+
+# Generate file summaries
+FILE_SUMMARIES=$(generate_file_summaries "$GIT_STATUS")
+
+# Detect file relationships
+FILE_RELATIONSHIPS=""
+DETECTED_RELATIONSHIPS=$(detect_file_relationships "$GIT_STATUS")
+if [ -n "$DETECTED_RELATIONSHIPS" ]; then
+    FILE_RELATIONSHIPS="
+Related file changes: $DETECTED_RELATIONSHIPS"
 fi
 
 # Prepare branch context
@@ -3375,7 +3875,13 @@ if [ "$IS_BREAKING" = "true" ]; then
 fi
 
 # Prepare closing instruction
-CLOSING_INSTRUCTION="Think: What are all the changes? Then: What's the one-line summary that captures all of them?"
+CLOSING_INSTRUCTION="CRITICAL: Look at the filenames being changed and describe WHAT FEATURE/AREA is affected.
+- If video.php is changed, mention 'video' in your summary (e.g., 'fix video upload', 'add video processing')
+- If auth/login.php is changed, mention 'authentication' or 'login'
+- If UserProfile.tsx is changed, mention 'user profile'
+- Make your commit message SPECIFIC to what was actually worked on, not generic.
+
+Think: What are all the changes? Then: What's the one-line summary that captures the specific area and all changes?"
 if [ -n "$TICKET_NUMBER" ]; then
     CLOSING_INSTRUCTION="$CLOSING_INSTRUCTION Include ticket as ($TICKET_NUMBER) after the type, like: feat: ($TICKET_NUMBER) summary text"
 fi
@@ -3542,12 +4048,24 @@ RULES:
 
 $SCOPE_EXAMPLES
 
+$FEW_SHOT_EXAMPLES
+$REPO_EXAMPLES
+
 $BRANCH_CONTEXT
 
 $HISTORY_INSIGHTS
+$FILE_CONTEXT
+$FUNCTION_CONTEXT
+$SEMANTIC_ANALYSIS
+$FILE_RELATIONSHIPS
 
-Files changed:
+=== KEY FILES MODIFIED ===
+Pay special attention to these filenames when writing your commit message.
+Your summary line MUST reflect WHAT PART of the application was changed.
+
 $GIT_STATUS
+
+$FILE_SUMMARIES
 
 Stats:
 $GIT_STATS
