@@ -57,9 +57,6 @@ parse_yaml_config() {
             learn_from_history|LEARN_FROM_HISTORY)
                 CONFIG_LEARN_FROM_HISTORY="${CONFIG_LEARN_FROM_HISTORY:-$value}"
                 ;;
-            auto_select_model|AUTO_SELECT_MODEL)
-                CONFIG_AUTO_SELECT_MODEL="${CONFIG_AUTO_SELECT_MODEL:-$value}"
-                ;;
             use_gitmoji|USE_GITMOJI)
                 CONFIG_USE_GITMOJI="${CONFIG_USE_GITMOJI:-$value}"
                 ;;
@@ -107,8 +104,6 @@ DIFF_MAX_LINES="${DIFF_MAX_LINES:-${CONFIG_DIFF_MAX_LINES:-200}}"  # Limit diff 
 USE_SCOPE="${USE_SCOPE:-${CONFIG_USE_SCOPE:-false}}"  # Enable/disable conventional commit scopes
 USE_GITMOJI="${USE_GITMOJI:-${CONFIG_USE_GITMOJI:-false}}"  # Enable/disable gitmoji prefixes
 LEARN_FROM_HISTORY="${LEARN_FROM_HISTORY:-${CONFIG_LEARN_FROM_HISTORY:-true}}"  # Enable/disable learning from commit history
-AUTO_SELECT_MODEL="${AUTO_SELECT_MODEL:-${CONFIG_AUTO_SELECT_MODEL:-false}}"  # Auto-select recommended model based on commit size
-
 # Code review specific models (optional - falls back to regular models if not set)
 CODE_REVIEW_MODEL="${CODE_REVIEW_MODEL:-${CONFIG_CODE_REVIEW_MODEL:-}}"  # Dedicated model for code reviews (Ollama)
 CODE_REVIEW_ANTHROPIC_MODEL="${CODE_REVIEW_ANTHROPIC_MODEL:-${CONFIG_CODE_REVIEW_ANTHROPIC_MODEL:-}}"  # Anthropic model for reviews
@@ -2389,7 +2384,6 @@ while [[ $# -gt 0 ]]; do
             echo "  USE_SCOPE           Enable/disable scopes (true/false)"
             echo "  USE_GITMOJI         Enable/disable gitmoji prefixes (true/false)"
             echo "  DIFF_MAX_LINES      Maximum diff lines to send to AI"
-            echo "  AUTO_SELECT_MODEL   Auto-select model based on commit size (true/false)"
             echo "  GH_COMMIT_AI        Set to 1 to enable hook (opt-in)"
             echo ""
             echo "Configuration Files:"
@@ -2516,66 +2510,6 @@ analyze_commit_size() {
     local total=$((added + deleted))
 
     echo "$total"
-}
-
-# Recommend model based on commit size
-recommend_model() {
-    local size="$1"
-    local provider="$2"
-    local current_model="$3"
-
-    # Define size categories
-    local category=""
-    if [ "$size" -lt 100 ]; then
-        category="small"
-    elif [ "$size" -lt 500 ]; then
-        category="medium"
-    else
-        category="large"
-    fi
-
-    # Recommend models based on provider and size
-    case "$provider" in
-        ollama)
-            case "$category" in
-                small)
-                    echo "gemma2:2b"
-                    ;;
-                medium)
-                    echo "gemma3:12b"
-                    ;;
-                large)
-                    echo "llama3.3:70b"
-                    ;;
-            esac
-            ;;
-        anthropic)
-            case "$category" in
-                small)
-                    echo "claude-3-5-haiku-20241022"
-                    ;;
-                medium)
-                    echo "claude-3-5-sonnet-20241022"
-                    ;;
-                large)
-                    echo "claude-3-5-sonnet-20241022"
-                    ;;
-            esac
-            ;;
-        openai)
-            case "$category" in
-                small)
-                    echo "gpt-4o-mini"
-                    ;;
-                medium)
-                    echo "gpt-4o-mini"
-                    ;;
-                large)
-                    echo "gpt-4o"
-                    ;;
-            esac
-            ;;
-    esac
 }
 
 # Check if we're in a git repository (cache the result)
@@ -2757,33 +2691,6 @@ else
                 echo "Using OpenAI (auto-detected)"
                 ;;
         esac
-    fi
-fi
-
-# Model recommendation based on commit size
-if [ -n "$COMMIT_SIZE" ] && [ "$COMMIT_SIZE" != "0" ]; then
-    RECOMMENDED_MODEL=$(recommend_model "$COMMIT_SIZE" "$AI_PROVIDER" "")
-
-    if [ "$AUTO_SELECT_MODEL" = "true" ] && [ -n "$RECOMMENDED_MODEL" ]; then
-        # Auto-select the recommended model
-        case "$AI_PROVIDER" in
-            ollama) OLLAMA_MODEL="$RECOMMENDED_MODEL" ;;
-            anthropic) ANTHROPIC_MODEL="$RECOMMENDED_MODEL" ;;
-            openai) OPENAI_MODEL="$RECOMMENDED_MODEL" ;;
-        esac
-        echo "Model auto-selected: $RECOMMENDED_MODEL (${COMMIT_SIZE} lines changed)"
-    elif [ -n "$RECOMMENDED_MODEL" ]; then
-        # Show recommendation but don't auto-select
-        CURRENT_MODEL=""
-        case "$AI_PROVIDER" in
-            ollama) CURRENT_MODEL="$OLLAMA_MODEL" ;;
-            anthropic) CURRENT_MODEL="$ANTHROPIC_MODEL" ;;
-            openai) CURRENT_MODEL="$OPENAI_MODEL" ;;
-        esac
-
-        if [ "$RECOMMENDED_MODEL" != "$CURRENT_MODEL" ]; then
-            echo "Tip: For ${COMMIT_SIZE} lines changed, consider using $RECOMMENDED_MODEL"
-        fi
     fi
 fi
 
