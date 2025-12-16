@@ -1375,11 +1375,45 @@ resources/views/*        → "Laravel Blade views"
 
 **WordPress:**
 ```
-wp-content/themes/*      → "WordPress theme"
-wp-content/plugins/*     → "WordPress plugin"
+wp-content/themes/*      → "{theme-name} theme" (extracts name)
+wp-content/plugins/*     → "{plugin-name} plugin" (extracts name)
 functions.php            → "WordPress theme functions"
 wp-admin/*               → "WordPress admin"
 ```
+
+**WordPress Bulk Update Detection:**
+
+When 80%+ of changed files are in a single WordPress plugin or theme directory, the tool automatically uses a simplified commit message format:
+
+**Behavior:**
+- Detects single plugin/theme updates (e.g., all files in `wp-content/plugins/woocommerce/`)
+- Skips detailed file analysis (performance optimization)
+- Generates simple, focused commit message
+- Uses "chore" type for plugin/theme updates
+
+**Example:**
+```bash
+# Files changed:
+# wp-content/plugins/woocommerce/includes/class-wc-cart.php
+# wp-content/plugins/woocommerce/includes/class-wc-product.php
+# wp-content/plugins/woocommerce/templates/cart.php
+
+# Generated commit message:
+chore: update woocommerce plugin
+
+- update cart handling logic
+- improve product class structure
+```
+
+**Requirements:**
+- 80% or more files must be in the same plugin/theme directory
+- Only one plugin/theme can be detected (mixed updates use normal analysis)
+- Works for both plugins and themes
+
+**Benefits:**
+- Faster commit message generation (less API processing)
+- Consistent format for plugin/theme updates
+- Avoids overly detailed messages for bulk plugin changes
 
 **Django/Flask:**
 ```

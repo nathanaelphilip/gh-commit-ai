@@ -78,18 +78,6 @@ parse_yaml_config() {
             commit_language|COMMIT_LANGUAGE)
                 CONFIG_COMMIT_LANGUAGE="${CONFIG_COMMIT_LANGUAGE:-$value}"
                 ;;
-            auto_fix_formatting|AUTO_FIX_FORMATTING)
-                CONFIG_AUTO_FIX_FORMATTING="${CONFIG_AUTO_FIX_FORMATTING:-$value}"
-                ;;
-            auto_fix_trailing_whitespace|AUTO_FIX_TRAILING_WHITESPACE)
-                CONFIG_AUTO_FIX_TRAILING_WHITESPACE="${CONFIG_AUTO_FIX_TRAILING_WHITESPACE:-$value}"
-                ;;
-            auto_fix_line_endings|AUTO_FIX_LINE_ENDINGS)
-                CONFIG_AUTO_FIX_LINE_ENDINGS="${CONFIG_AUTO_FIX_LINE_ENDINGS:-$value}"
-                ;;
-            line_ending_style|LINE_ENDING_STYLE)
-                CONFIG_LINE_ENDING_STYLE="${CONFIG_LINE_ENDING_STYLE:-$value}"
-                ;;
         esac
     done < "$config_file"
 }
@@ -129,12 +117,6 @@ CODE_REVIEW_GROQ_MODEL="${CODE_REVIEW_GROQ_MODEL:-${CONFIG_CODE_REVIEW_GROQ_MODE
 
 # Language configuration for commit messages
 COMMIT_LANGUAGE="${COMMIT_LANGUAGE:-${CONFIG_COMMIT_LANGUAGE:-}}"  # Language for commit messages (en, es, fr, de, ja, zh, etc.)
-
-# Auto-fix formatting configuration
-AUTO_FIX_FORMATTING="${AUTO_FIX_FORMATTING:-${CONFIG_AUTO_FIX_FORMATTING:-false}}"  # Enable/disable auto-fixing formatting issues
-AUTO_FIX_TRAILING_WHITESPACE="${AUTO_FIX_TRAILING_WHITESPACE:-${CONFIG_AUTO_FIX_TRAILING_WHITESPACE:-false}}"  # Fix trailing whitespace (when auto-fix enabled)
-AUTO_FIX_LINE_ENDINGS="${AUTO_FIX_LINE_ENDINGS:-${CONFIG_AUTO_FIX_LINE_ENDINGS:-true}}"  # Fix inconsistent line endings (when auto-fix enabled)
-LINE_ENDING_STYLE="${LINE_ENDING_STYLE:-${CONFIG_LINE_ENDING_STYLE:-lf}}"  # Preferred line ending: "lf" (Unix) or "crlf" (Windows)
 
 # Detect language from git config or system locale if not explicitly set
 detect_language() {
@@ -489,210 +471,6 @@ retry_api_call() {
     done
 
     return 1  # All retries failed
-}
-
-# ============================================================================
-# Auto-Fix Formatting Functions
-# ============================================================================
-
-# Detect files with trailing whitespace
-detect_trailing_whitespace() {
-    local files=()
-
-    # Get list of staged files (text files only)
-    while IFS= read -r file; do
-        # Skip binary files
-        if file "$file" 2>/dev/null | grep -q "text"; then
-            # Check for trailing whitespace
-            if grep -q '[[:space:]]$' "$file" 2>/dev/null; then
-                files+=("$file")
-            fi
-        fi
-    done < <(git diff --cached --name-only --diff-filter=ACM)
-
-    # Return count and files
-    if [ ${#files[@]} -gt 0 ]; then
-        echo "${#files[@]}"
-        printf '%s\n' "${files[@]}"
-    else
-        echo "0"
-    fi
-}
-
-# Detect files with inconsistent line endings
-detect_line_endings() {
-    local files=()
-
-    # Get list of staged files (text files only)
-    while IFS= read -r file; do
-        # Skip binary files
-        if file "$file" 2>/dev/null | grep -q "text"; then
-            # Check for CRLF line endings
-            if file "$file" | grep -q "CRLF"; then
-                local has_crlf=true
-            else
-                local has_crlf=false
-            fi
-
-            # Check for mixed line endings or wrong type
-            if [ "$LINE_ENDING_STYLE" = "lf" ] && [ "$has_crlf" = "true" ]; then
-                files+=("$file:crlf")
-            elif [ "$LINE_ENDING_STYLE" = "crlf" ] && [ "$has_crlf" = "false" ]; then
-                files+=("$file:lf")
-            fi
-        fi
-    done < <(git diff --cached --name-only --diff-filter=ACM)
-
-    # Return count and files
-    if [ ${#files[@]} -gt 0 ]; then
-        echo "${#files[@]}"
-        printf '%s\n' "${files[@]}"
-    else
-        echo "0"
-    fi
-}
-
-# Fix trailing whitespace in file
-fix_trailing_whitespace() {
-    local file="$1"
-
-    # Remove trailing whitespace using sed (compatible with both GNU and BSD sed)
-    if sed --version 2>/dev/null | grep -q "GNU"; then
-        # GNU sed
-        sed -i 's/[[:space:]]*$//' "$file"
-    else
-        # BSD sed (macOS)
-        sed -i '' 's/[[:space:]]*$//' "$file"
-    fi
-}
-
-# Fix line endings in file
-fix_line_endings() {
-    local file="$1"
-    local target_style="$2"  # "lf" or "crlf"
-
-    if [ "$target_style" = "lf" ]; then
-        # Convert CRLF to LF
-        if command -v dos2unix &> /dev/null; then
-            dos2unix "$file" 2>/dev/null
-        else
-            # Fallback: use sed or tr
-            if sed --version 2>/dev/null | grep -q "GNU"; then
-                sed -i 's/\r$//' "$file"
-            else
-                sed -i '' 's/\r$//' "$file"
-            fi
-        fi
-    else
-        # Convert LF to CRLF
-        if command -v unix2dos &> /dev/null; then
-            unix2dos "$file" 2>/dev/null
-        else
-            # Fallback: use sed
-            if sed --version 2>/dev/null | grep -q "GNU"; then
-                sed -i 's/$/\r/' "$file"
-            else
-                sed -i '' 's/$/\r/' "$file"
-            fi
-        fi
-    fi
-}
-
-# Main auto-fix function - detect and optionally fix formatting issues
-check_and_fix_formatting() {
-    # Skip if not in a git repository
-    if ! git rev-parse --is-inside-work-tree &>/dev/null; then
-        return 0
-    fi
-
-    # Skip if no staged files
-    if [ -z "$(git diff --cached --name-only)" ]; then
-        return 0
-    fi
-
-    # Arrays to store detected issues
-    local trailing_ws_files=()
-    local line_ending_files=()
-    local total_issues=0
-
-    # Detect trailing whitespace
-    if [ "$AUTO_FIX_TRAILING_WHITESPACE" = "true" ]; then
-        local ws_result=$(detect_trailing_whitespace)
-        local ws_count=$(echo "$ws_result" | head -1)
-        if [ "$ws_count" != "0" ]; then
-            total_issues=$((total_issues + ws_count))
-            # Use while read loop for bash 3.2 compatibility (instead of mapfile)
-            trailing_ws_files=()
-            while IFS= read -r line; do
-                trailing_ws_files+=("$line")
-            done < <(echo "$ws_result" | tail -n +2)
-        fi
-    fi
-
-    # Detect line ending issues
-    if [ "$AUTO_FIX_LINE_ENDINGS" = "true" ]; then
-        local le_result=$(detect_line_endings)
-        local le_count=$(echo "$le_result" | head -1)
-        if [ "$le_count" != "0" ]; then
-            total_issues=$((total_issues + le_count))
-            # Use while read loop for bash 3.2 compatibility (instead of mapfile)
-            line_ending_files=()
-            while IFS= read -r line; do
-                line_ending_files+=("$line")
-            done < <(echo "$le_result" | tail -n +2)
-        fi
-    fi
-
-    # If no issues found, return early
-    if [ $total_issues -eq 0 ]; then
-        return 0
-    fi
-
-    # Display detected issues
-    echo -e "${YELLOW}⚠ Formatting issues detected:${NC}"
-    [ ${#trailing_ws_files[@]} -gt 0 ] && echo "  • ${#trailing_ws_files[@]} file(s) with trailing whitespace"
-    [ ${#line_ending_files[@]} -gt 0 ] && echo "  • ${#line_ending_files[@]} file(s) with incorrect line endings"
-    echo ""
-
-    # Auto-fix if enabled, otherwise ask user
-    local should_fix=false
-    if [ "$AUTO_FIX_FORMATTING" = "true" ]; then
-        should_fix=true
-        echo -e "${BLUE}Auto-fixing formatting issues...${NC}"
-    else
-        echo -n "Would you like to fix these issues automatically? (y/n): "
-        read -r response
-        if [[ "$response" =~ ^[Yy]$ ]]; then
-            should_fix=true
-        fi
-    fi
-
-    if [ "$should_fix" = "true" ]; then
-        local fixed_count=0
-
-        # Fix trailing whitespace
-        for file in "${trailing_ws_files[@]}"; do
-            fix_trailing_whitespace "$file"
-            git add "$file"  # Re-stage the fixed file
-            fixed_count=$((fixed_count + 1))
-        done
-
-        # Fix line endings
-        for file_info in "${line_ending_files[@]}"; do
-            local file="${file_info%:*}"
-            fix_line_endings "$file" "$LINE_ENDING_STYLE"
-            git add "$file"  # Re-stage the fixed file
-            fixed_count=$((fixed_count + 1))
-        done
-
-        echo -e "${GREEN}✓ Fixed $fixed_count formatting issue(s)${NC}"
-        echo ""
-    else
-        echo -e "${YELLOW}Continuing without fixes...${NC}"
-        echo ""
-    fi
-
-    return 0
 }
 
 # Auto-detect available AI providers and models
@@ -2932,9 +2710,6 @@ else
         exit 0
     fi
 
-    # Check and optionally fix formatting issues
-    check_and_fix_formatting
-
     # Create secure temp files for inter-process communication
     status_file=$(create_secure_temp_file "gh-commit-ai-status") || exit 1
     stats_file=$(create_secure_temp_file "gh-commit-ai-stats") || { rm -f "$status_file"; exit 1; }
@@ -3349,6 +3124,64 @@ analyze_commit_history() {
     echo -e "$insights"
 }
 
+# Detect WordPress plugin/theme updates
+# Returns "plugin:name" or "theme:name" if any files are in plugin/theme directories
+detect_wordpress_plugin_update() {
+    local files="$1"
+    local plugin_names=()
+    local theme_names=()
+
+    # Parse each filename and check if it's in a plugin/theme directory
+    while IFS= read -r line; do
+        # Skip empty lines
+        [ -z "$line" ] && continue
+
+        # Extract filename (remove git status prefix like "M " or "A ")
+        local file=$(echo "$line" | awk '{print $NF}')
+
+        # Convert to lowercase for pattern matching
+        local file_lower=$(echo "$file" | tr '[:upper:]' '[:lower:]')
+
+        # Check if file is in wp-content/plugins/
+        if [[ "$file_lower" =~ wp-content/plugins/([^/]+) ]]; then
+            local plugin_name="${BASH_REMATCH[1]}"
+
+            # Add plugin name to array if not already there
+            if [[ ! " ${plugin_names[@]} " =~ " ${plugin_name} " ]]; then
+                plugin_names+=("$plugin_name")
+            fi
+        fi
+
+        # Check if file is in wp-content/themes/
+        if [[ "$file_lower" =~ wp-content/themes/([^/]+) ]]; then
+            local theme_name="${BASH_REMATCH[1]}"
+
+            # Add theme name to array if not already there
+            if [[ ! " ${theme_names[@]} " =~ " ${theme_name} " ]]; then
+                theme_names+=("$theme_name")
+            fi
+        fi
+    done <<< "$files"
+
+    # If any plugin files found, return plugin names (comma-separated if multiple)
+    if [ ${#plugin_names[@]} -gt 0 ]; then
+        # Join plugin names with commas
+        local plugin_list=$(IFS=,; echo "${plugin_names[*]}")
+        echo "plugin:${plugin_list}"
+        return 0
+    fi
+
+    # If any theme files found, return theme names (comma-separated if multiple)
+    if [ ${#theme_names[@]} -gt 0 ]; then
+        # Join theme names with commas
+        local theme_list=$(IFS=,; echo "${theme_names[*]}")
+        echo "theme:${theme_list}"
+        return 0
+    fi
+
+    return 1
+}
+
 # Extract semantic context from changed filenames
 extract_file_context() {
     local files="$1"
@@ -3422,8 +3255,24 @@ extract_file_context() {
 
         # WordPress
         case "$file_lower" in
-            wp-content/themes/*) contexts+=("WordPress theme") ;;
-            wp-content/plugins/*) contexts+=("WordPress plugin") ;;
+            wp-content/themes/*)
+                # Extract theme name from path
+                if [[ "$file_lower" =~ wp-content/themes/([^/]+) ]]; then
+                    local theme_name="${BASH_REMATCH[1]}"
+                    contexts+=("$theme_name theme")
+                else
+                    contexts+=("WordPress theme")
+                fi
+                ;;
+            wp-content/plugins/*)
+                # Extract plugin name from path
+                if [[ "$file_lower" =~ wp-content/plugins/([^/]+) ]]; then
+                    local plugin_name="${BASH_REMATCH[1]}"
+                    contexts+=("$plugin_name plugin")
+                else
+                    contexts+=("WordPress plugin")
+                fi
+                ;;
             *functions.php) contexts+=("WordPress theme functions") ;;
             wp-admin/*) contexts+=("WordPress admin") ;;
         esac
@@ -3807,6 +3656,16 @@ BAD EXAMPLES (AVOID THESE - TOO GENERIC):
 
 REMEMBER: Mention the SPECIFIC AREA (video, auth, payment, etc.) and WHAT changed (function names, features)."
 
+# Check for WordPress plugin/theme bulk update
+WP_COMPONENT_TYPE=""
+WP_COMPONENT_NAME=""
+DETECTED_WP_COMPONENT=$(detect_wordpress_plugin_update "$GIT_STATUS" || true)
+if [ $? -eq 0 ] && [ -n "$DETECTED_WP_COMPONENT" ]; then
+    # Parse type:name format
+    WP_COMPONENT_TYPE=$(echo "$DETECTED_WP_COMPONENT" | cut -d: -f1)
+    WP_COMPONENT_NAME=$(echo "$DETECTED_WP_COMPONENT" | cut -d: -f2)
+fi
+
 # Extract file context from changed files
 FILE_CONTEXT=""
 EXTRACTED_CONTEXTS=$(extract_file_context "$GIT_STATUS")
@@ -4023,7 +3882,69 @@ IMPORTANT - LANGUAGE:
   - [bullet 2 in $LANGUAGE_NAME]"
 fi
 
-PROMPT="Analyze these git changes and create a commit message.
+# Use simplified prompt for WordPress plugin/theme updates
+if [ -n "$WP_COMPONENT_NAME" ]; then
+    # Capitalize first letter for display (portable method)
+    if [ "$WP_COMPONENT_TYPE" = "plugin" ]; then
+        WP_COMPONENT_TYPE_CAP="Plugin"
+        WP_COMPONENT_TYPE_PLURAL="plugins"
+    else
+        WP_COMPONENT_TYPE_CAP="Theme"
+        WP_COMPONENT_TYPE_PLURAL="themes"
+    fi
+
+    # Check if multiple plugins/themes (comma-separated)
+    if [[ "$WP_COMPONENT_NAME" == *,* ]]; then
+        # Multiple components
+        PROMPT="Create a simple commit message for WordPress $WP_COMPONENT_TYPE_PLURAL updates.
+
+$WP_COMPONENT_TYPE_CAP names: $WP_COMPONENT_NAME
+
+Files changed:
+$GIT_STATUS
+
+Stats:
+$GIT_STATS
+
+Generate a commit message in this format:
+chore: update $WP_COMPONENT_TYPE_PLURAL
+
+- <brief description of changes>
+
+RULES:
+- Use type 'chore' for $WP_COMPONENT_TYPE updates
+- Summary line: update $WP_COMPONENT_TYPE_PLURAL (or list specific names if only 2-3)
+- Add 1-2 brief bullets if needed
+- Use lowercase for all text
+- Use imperative mood (add/fix not added/fixed)
+- Output ONLY the commit message, NO explanations, NO markdown, NO code fences$LANGUAGE_INSTRUCTION"
+    else
+        # Single component
+        PROMPT="Create a simple commit message for a WordPress $WP_COMPONENT_TYPE update.
+
+$WP_COMPONENT_TYPE_CAP name: $WP_COMPONENT_NAME
+
+Files changed:
+$GIT_STATUS
+
+Stats:
+$GIT_STATS
+
+Generate a commit message in this format:
+chore: update $WP_COMPONENT_NAME $WP_COMPONENT_TYPE
+
+- <brief description of main changes>
+
+RULES:
+- Use type 'chore' for $WP_COMPONENT_TYPE updates
+- Summary line: update $WP_COMPONENT_NAME $WP_COMPONENT_TYPE
+- Add 1-2 brief bullets if needed
+- Use lowercase for all text
+- Use imperative mood (add/fix not added/fixed)
+- Output ONLY the commit message, NO explanations, NO markdown, NO code fences$LANGUAGE_INSTRUCTION"
+    fi
+else
+    PROMPT="Analyze these git changes and create a commit message.
 
 PROCESS:
 1. First, identify all significant changes and list them as bullets
@@ -4074,6 +3995,7 @@ Diff sample:
 $GIT_DIFF
 
 $CLOSING_INSTRUCTION$MULTIPLE_OPTIONS_INSTRUCTION"
+fi
 
 # Escape JSON strings (replace backslash, double quote, newline, carriage return, tab)
 escape_json() {
