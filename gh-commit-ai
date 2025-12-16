@@ -500,6 +500,19 @@ detect_available_providers() {
 
 # Get largest available Ollama model by parameter count
 get_best_ollama_model() {
+    # Use global cache (not repo-specific)
+    local cache_file="/tmp/gh-commit-ai-ollama-model-cache"
+    local cache_ttl=3600  # 1 hour
+
+    # Check cache first
+    if [ -f "$cache_file" ]; then
+        local file_age=$(($(date +%s) - $(stat -f%m "$cache_file" 2>/dev/null || stat -c%Y "$cache_file" 2>/dev/null)))
+        if [ "$file_age" -lt "$cache_ttl" ]; then
+            cat "$cache_file"
+            return
+        fi
+    fi
+
     # Query Ollama for available models
     local models=$(curl -s "$OLLAMA_HOST/api/tags" 2>/dev/null | grep -o '"name":"[^"]*"' | sed 's/"name":"//;s/"//')
 
@@ -536,12 +549,12 @@ get_best_ollama_model() {
 
     # If we found a model with size, use it
     if [ -n "$largest_model" ]; then
-        echo "$largest_model"
+        echo "$largest_model" | tee "$cache_file"
         return
     fi
 
     # Fallback: just return first model (for models without size in name)
-    echo "$models" | head -1
+    echo "$models" | head -1 | tee "$cache_file"
 }
 
 # Auto-select provider if set to "auto"
@@ -2548,6 +2561,38 @@ mkdir -p "$CACHE_DIR"
 
 # Note: Cache cleanup happens automatically in save_cached_response() to avoid startup delay
 
+# ============================================================================
+# Cache Helper Functions
+# ============================================================================
+
+# Get cached value if fresh (within TTL)
+# Args: cache_key, ttl_seconds
+# Returns: cached content if valid, empty otherwise
+get_cache() {
+    local cache_key="$1"
+    local ttl="${2:-3600}"  # Default 1 hour
+    local cache_file="${CACHE_DIR}/${cache_key}"
+
+    if [ -f "$cache_file" ]; then
+        local file_age=$(($(date +%s) - $(stat -f%m "$cache_file" 2>/dev/null || stat -c%Y "$cache_file" 2>/dev/null)))
+        if [ "$file_age" -lt "$ttl" ]; then
+            cat "$cache_file"
+            return 0
+        fi
+    fi
+    return 1
+}
+
+# Save value to cache
+# Args: cache_key, content
+set_cache() {
+    local cache_key="$1"
+    local content="$2"
+    local cache_file="${CACHE_DIR}/${cache_key}"
+
+    echo "$content" > "$cache_file"
+}
+
 # Handle changelog mode
 if [ "$CHANGELOG_MODE" = true ]; then
     echo "Generating changelog"
@@ -2899,6 +2944,16 @@ analyze_commit_history() {
         return
     fi
 
+    # Check cache first (keyed by latest commit hash)
+    local latest_commit=$(git rev-parse HEAD 2>/dev/null || echo "")
+    if [ -n "$latest_commit" ]; then
+        local cached=$(get_cache "commit-history-${latest_commit}" 3600 2>/dev/null)
+        if [ $? -eq 0 ] && [ -n "$cached" ]; then
+            echo "$cached"
+            return
+        fi
+    fi
+
     # Get last 50 commits (or less if repo is new)
     local commits=$(git log --pretty=format:"%s" -n 50 2>/dev/null)
 
@@ -3003,6 +3058,11 @@ analyze_commit_history() {
     fi
 
     insights="$insights\n\nMatch this repository's style in your commit message."
+
+    # Cache the result
+    if [ -n "$latest_commit" ]; then
+        set_cache "commit-history-${latest_commit}" "$insights" 2>/dev/null
+    fi
 
     echo -e "$insights"
 }
@@ -3255,6 +3315,16 @@ extract_changed_functions() {
 
 # Extract best commit examples from repository history
 get_best_commit_examples() {
+    # Check cache first (keyed by latest commit hash)
+    local latest_commit=$(git rev-parse HEAD 2>/dev/null || echo "")
+    if [ -n "$latest_commit" ]; then
+        local cached=$(get_cache "commit-examples-${latest_commit}" 3600 2>/dev/null)
+        if [ $? -eq 0 ] && [ -n "$cached" ]; then
+            echo "$cached"
+            return
+        fi
+    fi
+
     # Get last 100 commits with subject and body
     local commits=$(git log --pretty=format:"%s|||%b" -100 2>/dev/null)
 
@@ -3285,6 +3355,10 @@ $body"
     done <<< "$commits"
 
     if [ -n "$examples" ]; then
+        # Cache the result
+        if [ -n "$latest_commit" ]; then
+            set_cache "commit-examples-${latest_commit}" "$examples" 2>/dev/null
+        fi
         echo "$examples"
     fi
 }
@@ -3494,10 +3568,104 @@ detect_file_relationships() {
     fi
 }
 
-# Run history analysis if enabled
-HISTORY_INSIGHTS=""
+# ============================================================================
+# PARALLEL ANALYSIS - Run all analysis functions simultaneously for speed
+# ============================================================================
+
+# Create temp files for parallel job outputs
+TEMP_HISTORY="${CACHE_DIR}/temp_history_$$"
+TEMP_EXAMPLES="${CACHE_DIR}/temp_examples_$$"
+TEMP_CONTEXTS="${CACHE_DIR}/temp_contexts_$$"
+TEMP_FUNCTIONS="${CACHE_DIR}/temp_functions_$$"
+TEMP_CHANGES="${CACHE_DIR}/temp_changes_$$"
+TEMP_SUMMARIES="${CACHE_DIR}/temp_summaries_$$"
+TEMP_RELATIONSHIPS="${CACHE_DIR}/temp_relationships_$$"
+
+# Spawn all analysis jobs in parallel (background)
 if [ "$LEARN_FROM_HISTORY" = "true" ]; then
-    HISTORY_INSIGHTS=$(analyze_commit_history)
+    analyze_commit_history > "$TEMP_HISTORY" 2>/dev/null &
+    get_best_commit_examples > "$TEMP_EXAMPLES" 2>/dev/null &
+fi
+
+extract_file_context "$GIT_STATUS" > "$TEMP_CONTEXTS" 2>/dev/null &
+extract_changed_functions "$GIT_DIFF" > "$TEMP_FUNCTIONS" 2>/dev/null &
+analyze_change_type "$GIT_DIFF" > "$TEMP_CHANGES" 2>/dev/null &
+generate_file_summaries "$GIT_STATUS" > "$TEMP_SUMMARIES" 2>/dev/null &
+detect_file_relationships "$GIT_STATUS" > "$TEMP_RELATIONSHIPS" 2>/dev/null &
+
+# Wait for all background jobs to complete
+wait
+
+# Read results from temp files
+HISTORY_INSIGHTS=""
+if [ "$LEARN_FROM_HISTORY" = "true" ] && [ -f "$TEMP_HISTORY" ]; then
+    HISTORY_INSIGHTS=$(cat "$TEMP_HISTORY")
+fi
+
+REPO_EXAMPLES=""
+if [ "$LEARN_FROM_HISTORY" = "true" ] && [ -f "$TEMP_EXAMPLES" ]; then
+    REPO_EXAMPLES=$(cat "$TEMP_EXAMPLES")
+    if [ -n "$REPO_EXAMPLES" ]; then
+        REPO_EXAMPLES="
+
+$REPO_EXAMPLES"
+    fi
+fi
+
+FILE_CONTEXT=""
+if [ -f "$TEMP_CONTEXTS" ]; then
+    EXTRACTED_CONTEXTS=$(cat "$TEMP_CONTEXTS")
+    if [ -n "$EXTRACTED_CONTEXTS" ]; then
+        FILE_CONTEXT="
+Detected code areas being modified: $EXTRACTED_CONTEXTS
+Make sure your commit message reflects the specific area(s) being changed."
+    fi
+fi
+
+FUNCTION_CONTEXT=""
+if [ -f "$TEMP_FUNCTIONS" ]; then
+    EXTRACTED_FUNCTIONS=$(cat "$TEMP_FUNCTIONS")
+    if [ -n "$EXTRACTED_FUNCTIONS" ]; then
+        FUNCTION_CONTEXT="
+Modified functions/classes: $EXTRACTED_FUNCTIONS
+Consider mentioning these in your commit message if they represent significant changes."
+    fi
+fi
+
+SEMANTIC_ANALYSIS=""
+if [ -f "$TEMP_CHANGES" ]; then
+    CHANGE_TYPES=$(cat "$TEMP_CHANGES")
+    if [ -n "$CHANGE_TYPES" ]; then
+        SEMANTIC_ANALYSIS="
+Type of changes detected: $CHANGE_TYPES"
+    fi
+fi
+
+FILE_SUMMARIES=""
+if [ -f "$TEMP_SUMMARIES" ]; then
+    FILE_SUMMARIES=$(cat "$TEMP_SUMMARIES")
+fi
+
+FILE_RELATIONSHIPS=""
+if [ -f "$TEMP_RELATIONSHIPS" ]; then
+    DETECTED_RELATIONSHIPS=$(cat "$TEMP_RELATIONSHIPS")
+    if [ -n "$DETECTED_RELATIONSHIPS" ]; then
+        FILE_RELATIONSHIPS="
+Related file changes: $DETECTED_RELATIONSHIPS"
+    fi
+fi
+
+# Cleanup temp files
+rm -f "$TEMP_HISTORY" "$TEMP_EXAMPLES" "$TEMP_CONTEXTS" "$TEMP_FUNCTIONS" "$TEMP_CHANGES" "$TEMP_SUMMARIES" "$TEMP_RELATIONSHIPS" 2>/dev/null
+
+# Check for WordPress plugin/theme bulk update
+WP_COMPONENT_TYPE=""
+WP_COMPONENT_NAME=""
+DETECTED_WP_COMPONENT=$(detect_wordpress_plugin_update "$GIT_STATUS" || true)
+if [ $? -eq 0 ] && [ -n "$DETECTED_WP_COMPONENT" ]; then
+    # Parse type:name format
+    WP_COMPONENT_TYPE=$(echo "$DETECTED_WP_COMPONENT" | cut -d: -f1)
+    WP_COMPONENT_NAME=$(echo "$DETECTED_WP_COMPONENT" | cut -d: -f2)
 fi
 
 # Define few-shot examples for better AI learning
@@ -3538,64 +3706,6 @@ BAD EXAMPLES (AVOID THESE - TOO GENERIC):
 ❌ 'chore: update code'
 
 REMEMBER: Mention the SPECIFIC AREA (video, auth, payment, etc.) and WHAT changed (function names, features)."
-
-# Check for WordPress plugin/theme bulk update
-WP_COMPONENT_TYPE=""
-WP_COMPONENT_NAME=""
-DETECTED_WP_COMPONENT=$(detect_wordpress_plugin_update "$GIT_STATUS" || true)
-if [ $? -eq 0 ] && [ -n "$DETECTED_WP_COMPONENT" ]; then
-    # Parse type:name format
-    WP_COMPONENT_TYPE=$(echo "$DETECTED_WP_COMPONENT" | cut -d: -f1)
-    WP_COMPONENT_NAME=$(echo "$DETECTED_WP_COMPONENT" | cut -d: -f2)
-fi
-
-# Extract file context from changed files
-FILE_CONTEXT=""
-EXTRACTED_CONTEXTS=$(extract_file_context "$GIT_STATUS")
-if [ -n "$EXTRACTED_CONTEXTS" ]; then
-    FILE_CONTEXT="
-Detected code areas being modified: $EXTRACTED_CONTEXTS
-Make sure your commit message reflects the specific area(s) being changed."
-fi
-
-# Extract function and class names from diff
-FUNCTION_CONTEXT=""
-EXTRACTED_FUNCTIONS=$(extract_changed_functions "$GIT_DIFF")
-if [ -n "$EXTRACTED_FUNCTIONS" ]; then
-    FUNCTION_CONTEXT="
-Modified functions/classes: $EXTRACTED_FUNCTIONS
-Consider mentioning these in your commit message if they represent significant changes."
-fi
-
-# Get best commit examples from repository
-REPO_EXAMPLES=""
-if [ "$LEARN_FROM_HISTORY" = "true" ]; then
-    REPO_EXAMPLES=$(get_best_commit_examples)
-    if [ -n "$REPO_EXAMPLES" ]; then
-        REPO_EXAMPLES="
-
-$REPO_EXAMPLES"
-    fi
-fi
-
-# Analyze change types semantically
-SEMANTIC_ANALYSIS=""
-CHANGE_TYPES=$(analyze_change_type "$GIT_DIFF")
-if [ -n "$CHANGE_TYPES" ]; then
-    SEMANTIC_ANALYSIS="
-Type of changes detected: $CHANGE_TYPES"
-fi
-
-# Generate file summaries
-FILE_SUMMARIES=$(generate_file_summaries "$GIT_STATUS")
-
-# Detect file relationships
-FILE_RELATIONSHIPS=""
-DETECTED_RELATIONSHIPS=$(detect_file_relationships "$GIT_STATUS")
-if [ -n "$DETECTED_RELATIONSHIPS" ]; then
-    FILE_RELATIONSHIPS="
-Related file changes: $DETECTED_RELATIONSHIPS"
-fi
 
 # Prepare branch context
 BRANCH_CONTEXT="Branch context:
