@@ -503,7 +503,7 @@ detect_available_providers() {
     echo "$available" | xargs  # Trim whitespace
 }
 
-# Get best available Ollama model
+# Get largest available Ollama model by parameter count
 get_best_ollama_model() {
     # Query Ollama for available models
     local models=$(curl -s "$OLLAMA_HOST/api/tags" 2>/dev/null | grep -o '"name":"[^"]*"' | sed 's/"name":"//;s/"//')
@@ -513,63 +513,39 @@ get_best_ollama_model() {
         return
     fi
 
-    # Priority list of preferred models (in order of preference)
-    # Prefer larger, more capable models for better instruction following
-    # Quality > Speed for commit messages
-    local preferred_models=(
-        # Large code-focused models (best quality)
-        "qwen2.5-coder:32b"
-        "qwen2.5-coder:14b"
-        "codellama:34b"
-        "codellama:13b"
-        "deepseek-coder:33b"
-        "deepseek-coder:6.7b"
+    local largest_model=""
+    local largest_size=0
 
-        # Medium code-focused models (good balance)
-        "qwen2.5-coder:7b"
-        "codellama:7b"
-        "codellama"  # Alias for latest (usually 7B)
-        "starcoder2:15b"
-        "starcoder2:7b"
+    # Parse each model name and extract parameter size
+    while IFS= read -r model; do
+        # Extract size from model name (e.g., "70b", "32b", "7b", "1.5b")
+        # Matches patterns like :70b, :32b, :7b, :1.5b, -70b, -32b, etc.
+        local size=$(echo "$model" | grep -oE '[:_-]([0-9]+\.?[0-9]*)b' | grep -oE '[0-9]+\.?[0-9]*' | head -1)
 
-        # Large general models (good instruction following)
-        "llama3.3:70b"
-        "llama3.1:70b"
-        "gemma3:12b"
-        "qwen2.5:14b"
-        "qwen2.5:7b"
+        if [ -n "$size" ]; then
+            # Convert to integer for comparison (multiply by 10 to handle decimals like 1.5b)
+            local size_int=$(echo "$size * 10" | bc 2>/dev/null | cut -d. -f1)
 
-        # Medium general models (decent quality)
-        "llama3.1:8b"
-        "llama3:8b"
-        "llama3"  # Alias for latest
-        "gemma2:9b"
-        "mistral:7b"
-        "mistral"
+            if [ -z "$size_int" ]; then
+                # Fallback if bc not available
+                size_int=$(printf "%.0f" "$(echo "$size * 10" | awk '{print $1 * $3}')")
+            fi
 
-        # Smaller code models (faster but less capable)
-        "qwen2.5-coder:3b"
-        "starcoder2:3b"
-        "qwen2.5-coder:1.5b"
-
-        # Small general models (fast but struggle with instructions)
-        "gemma3:4b"
-        "phi3:3.8b"
-        "llama3.2:3b"
-        "gemma2:2b"
-        "llama3.2:1b"
-        "phi3:mini"
-    )
-
-    # Check each preferred model in order
-    for preferred in "${preferred_models[@]}"; do
-        if echo "$models" | grep -q "^${preferred}$"; then
-            echo "$preferred"
-            return
+            # Pick the largest model
+            if [ "$size_int" -gt "$largest_size" ]; then
+                largest_size="$size_int"
+                largest_model="$model"
+            fi
         fi
-    done
+    done <<< "$models"
 
-    # If no preferred model found, return the first available model
+    # If we found a model with size, use it
+    if [ -n "$largest_model" ]; then
+        echo "$largest_model"
+        return
+    fi
+
+    # Fallback: just return first model (for models without size in name)
     echo "$models" | head -1
 }
 
