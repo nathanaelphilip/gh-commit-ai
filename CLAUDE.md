@@ -1773,6 +1773,111 @@ With all 8 layers active, commit messages typically include:
 - ✅ Related changes noted (tests, documentation, etc.)
 - ✅ Follows repository conventions automatically
 
+### 9. WordPress Function Intelligence (Lines 3316-3402)
+
+For WordPress projects, the tool automatically detects and explains WordPress-specific functions using official WordPress.org documentation.
+
+**Architecture:**
+
+Three new functions provide WordPress-specific intelligence:
+- `extract_wordpress_function_calls()` (lines 3316-3335): Extracts WordPress function calls from diff
+- `lookup_wordpress_function()` (lines 3337-3369): Queries WordPress.org REST API for function documentation
+- `build_wordpress_context()` (lines 3371-3402): Combines functions + arguments + documentation
+
+**Supported WordPress Functions:**
+- `register_post_type($name, $args)` - Custom post types
+- `register_taxonomy($name, $post_type, $args)` - Taxonomies
+- `add_action($hook, $callback)` - Action hooks
+- `add_filter($hook, $callback)` - Filter hooks
+- `wp_enqueue_script($handle, $src)` - Script enqueuing
+- `wp_enqueue_style($handle, $src)` - Style enqueuing
+- `register_nav_menu($location, $description)` - Navigation menus
+- `add_theme_support($feature)` - Theme features
+- `register_sidebar($args)` - Widget areas
+- `register_widget($widget_class)` - Widgets
+
+**API Integration:**
+- **Endpoint**: `https://developer.wordpress.org/wp-json/wp/v2/wp-parser-function?slug={function_name}`
+- **Caching**: Results cached in `/tmp/gh-commit-ai-wp-docs-cache/` to avoid repeated API calls
+- **Timeout**: 3-5 seconds (graceful fallback if API unavailable)
+- **No dependencies**: Uses curl + grep/sed (no jq required)
+
+**Activation:**
+- Automatically enabled when WordPress files detected (wp-content, wp-admin)
+- Runs in parallel with other analysis functions
+- Silent fallback if API unavailable
+
+**Example:**
+
+**Without WordPress Intelligence:**
+```bash
+# Input: Modified functions.php
++register_post_type('book', array(...));
++register_taxonomy('genre', 'book', array(...));
+
+# Generated commit:
+chore: update functions
+
+- add post type registration
+- add taxonomy
+```
+
+**With WordPress Intelligence:**
+```bash
+# Input: Same changes
++register_post_type('book', array(...));
++register_taxonomy('genre', 'book', array(...));
+
+# WordPress functions detected:
+- register_post_type('book'): Registers a post type.
+- register_taxonomy('genre'): Creates or modifies a taxonomy object.
+
+# Generated commit:
+feat: register book custom post type and genre taxonomy
+
+- implement register_post_type for books
+- add genre taxonomy for book categorization
+- configure post type with custom labels
+```
+
+**Integration Points:**
+
+1. **Parallel Analysis** (line 3684):
+   ```bash
+   extract_wordpress_function_calls "$GIT_DIFF" > "$TEMP_WP_FUNCTIONS" &
+   ```
+
+2. **WordPress Detection** (lines 3761-3767):
+   ```bash
+   if [ -n "$WP_COMPONENT_NAME" ]; then
+       WP_FUNCTION_CALLS=$(cat "$TEMP_WP_FUNCTIONS")
+       if [ -n "$WP_FUNCTION_CALLS" ]; then
+           WP_CONTEXT=$(build_wordpress_context "$WP_FUNCTION_CALLS")
+       fi
+   fi
+   ```
+
+3. **Enhanced Prompt** (lines 3998-4060):
+   - WordPress context section added to prompt
+   - Instructions to incorporate function details
+   - More specific commit types (feat/fix instead of just chore)
+
+**Benefits:**
+
+1. **Specificity**: "register book custom post type" vs "update functions"
+2. **Context**: AI understands what WordPress functions do
+3. **Accuracy**: Function arguments (post type names, hook names) included
+4. **Documentation**: Leverages official WordPress.org documentation
+5. **Performance**: Cached lookups minimize API calls
+6. **Zero-dependency**: Uses existing tools (curl)
+7. **Graceful Degradation**: Silent fallback if API unavailable
+8. **Automatic**: Works automatically when WordPress functions detected
+
+**Performance:**
+- Minimal overhead (<500ms for API calls, cached after first lookup)
+- Runs in parallel with other analysis (no blocking)
+- Short timeouts prevent delays if API is slow
+
 ## Code Review Mode
 
 The tool includes a `review` subcommand that performs AI-powered code review on your changes before committing.

@@ -3313,6 +3313,117 @@ extract_changed_functions() {
     fi
 }
 
+# Extract WordPress function calls from diff
+extract_wordpress_function_calls() {
+    local diff="$1"
+
+    # Whitelist of important WordPress functions to detect
+    local wp_functions="register_post_type|register_taxonomy|add_action|add_filter|wp_enqueue_script|wp_enqueue_style|register_nav_menu|add_theme_support|register_sidebar|register_widget"
+
+    # Extract function calls with first argument
+    # Pattern: +.*function_name('argument' or "argument")
+    local functions=$(echo "$diff" | grep -E "^\+.*(${wp_functions})\(" | \
+        sed -E "s/.*($wp_functions)[^'\"]*['\"]([^'\"]+)['\"].*/\1:\2/" | \
+        grep ":" | \
+        sort -u | \
+        head -10)
+
+    # Return comma-separated format (function_name:arg_value,...)
+    if [ -n "$functions" ]; then
+        echo "$functions" | tr '\n' ',' | sed 's/,$//'
+    fi
+}
+
+# Look up WordPress function documentation from WordPress.org API
+lookup_wordpress_function() {
+    local function_name="$1"
+
+    # Cache directory for WordPress function documentation
+    local cache_dir="/tmp/gh-commit-ai-wp-docs-cache"
+    local cache_file="$cache_dir/$function_name"
+
+    # Check cache first to avoid repeated API calls
+    if [ -f "$cache_file" ]; then
+        cat "$cache_file"
+        return
+    fi
+
+    # Query WordPress.org Developer Resources REST API (with timeout)
+    local url="https://developer.wordpress.org/wp-json/wp/v2/wp-parser-function?slug=$function_name"
+    local response=$(curl -s --connect-timeout 3 --max-time 5 "$url" 2>/dev/null)
+
+    # Parse JSON response (no jq dependency - use grep/sed)
+    # Extract description from excerpt field, strip HTML tags
+    local description=$(echo "$response" | \
+        grep -o '"rendered":"<p>[^<]*' | \
+        sed 's/"rendered":"<p>//' | \
+        head -1)
+
+    # Cache the result if successful
+    if [ -n "$description" ]; then
+        mkdir -p "$cache_dir"
+        echo "$description" > "$cache_file"
+        echo "$description"
+    fi
+}
+
+# Build WordPress context from function calls and documentation
+build_wordpress_context() {
+    local wp_function_calls="$1"
+
+    if [ -z "$wp_function_calls" ]; then
+        return
+    fi
+
+    local context="🚨 WORDPRESS FUNCTIONS DETECTED - READ THIS FIRST 🚨\n\n"
+    local first_func=""
+    local first_arg=""
+
+    # Parse comma-separated function calls
+    IFS=',' read -ra CALLS <<< "$wp_function_calls"
+    for call in "${CALLS[@]}"; do
+        [ -z "$call" ] && continue
+
+        # Split function_name:arg_value
+        IFS=':' read -r func_name arg_value <<< "$call"
+
+        # Save first function for example
+        if [ -z "$first_func" ]; then
+            first_func="$func_name"
+            first_arg="$arg_value"
+        fi
+
+        # Look up function documentation from API
+        local func_desc=$(lookup_wordpress_function "$func_name")
+
+        # Build context line with function, argument, and description
+        if [ -n "$func_desc" ]; then
+            context="${context}${func_name}('${arg_value}'): ${func_desc}\n"
+        else
+            # Fallback if API lookup fails
+            context="${context}${func_name}('${arg_value}')\n"
+        fi
+    done
+
+    # Add immediate instructions using the detected function
+    if [ -n "$first_func" ]; then
+        context="${context}\n⚠️ YOUR SUMMARY LINE MUST USE THE FUNCTION NAME ABOVE:\n"
+        if [ "$first_func" = "register_post_type" ]; then
+            context="${context}  ✓ CORRECT: 'feat: register ${first_arg} custom post type'\n"
+            context="${context}  ✗ WRONG: 'feat: update ${first_arg} post type fields'\n"
+        elif [ "$first_func" = "register_taxonomy" ]; then
+            context="${context}  ✓ CORRECT: 'feat: add ${first_arg} taxonomy'\n"
+            context="${context}  ✗ WRONG: 'feat: update ${first_arg} taxonomy fields'\n"
+        else
+            context="${context}  ✓ Start with: 'feat: ${first_func} ${first_arg}...'\n"
+            context="${context}  ✗ Do NOT start with: 'feat: update...'\n"
+        fi
+        context="${context}Write what is being REGISTERED/ADDED, not what is being 'updated'.\n"
+    fi
+
+    echo -e "$context"
+}
+
 # Extract best commit examples from repository history
 get_best_commit_examples() {
     # Check cache first (keyed by latest commit hash)
@@ -3580,6 +3691,7 @@ TEMP_FUNCTIONS="${CACHE_DIR}/temp_functions_$$"
 TEMP_CHANGES="${CACHE_DIR}/temp_changes_$$"
 TEMP_SUMMARIES="${CACHE_DIR}/temp_summaries_$$"
 TEMP_RELATIONSHIPS="${CACHE_DIR}/temp_relationships_$$"
+TEMP_WP_FUNCTIONS="${CACHE_DIR}/temp_wp_functions_$$"
 
 # Spawn all analysis jobs in parallel (background)
 if [ "$LEARN_FROM_HISTORY" = "true" ]; then
@@ -3592,6 +3704,7 @@ extract_changed_functions "$GIT_DIFF" > "$TEMP_FUNCTIONS" 2>/dev/null &
 analyze_change_type "$GIT_DIFF" > "$TEMP_CHANGES" 2>/dev/null &
 generate_file_summaries "$GIT_STATUS" > "$TEMP_SUMMARIES" 2>/dev/null &
 detect_file_relationships "$GIT_STATUS" > "$TEMP_RELATIONSHIPS" 2>/dev/null &
+extract_wordpress_function_calls "$GIT_DIFF" > "$TEMP_WP_FUNCTIONS" 2>/dev/null &
 
 # Wait for all background jobs to complete
 wait
@@ -3655,8 +3768,18 @@ Related file changes: $DETECTED_RELATIONSHIPS"
     fi
 fi
 
-# Cleanup temp files
-rm -f "$TEMP_HISTORY" "$TEMP_EXAMPLES" "$TEMP_CONTEXTS" "$TEMP_FUNCTIONS" "$TEMP_CHANGES" "$TEMP_SUMMARIES" "$TEMP_RELATIONSHIPS" 2>/dev/null
+# Extract WordPress function calls and build context (for all WordPress projects)
+# IMPORTANT: Must happen BEFORE cleanup since it reads from TEMP_WP_FUNCTIONS
+WP_CONTEXT=""
+if [ -f "$TEMP_WP_FUNCTIONS" ]; then
+    WP_FUNCTION_CALLS=$(cat "$TEMP_WP_FUNCTIONS")
+    if [ -n "$WP_FUNCTION_CALLS" ]; then
+        WP_CONTEXT=$(build_wordpress_context "$WP_FUNCTION_CALLS")
+    fi
+fi
+
+# Cleanup temp files (after reading WordPress functions)
+rm -f "$TEMP_HISTORY" "$TEMP_EXAMPLES" "$TEMP_CONTEXTS" "$TEMP_FUNCTIONS" "$TEMP_CHANGES" "$TEMP_SUMMARIES" "$TEMP_RELATIONSHIPS" "$TEMP_WP_FUNCTIONS" 2>/dev/null
 
 # Check for WordPress plugin/theme bulk update
 WP_COMPONENT_TYPE=""
@@ -3734,6 +3857,26 @@ CLOSING_INSTRUCTION="CRITICAL: Look at the filenames being changed and describe 
 - Make your commit message SPECIFIC to what was actually worked on, not generic.
 
 Think: What are all the changes? Then: What's the one-line summary that captures the specific area and all changes?"
+if [ -n "$WP_CONTEXT" ]; then
+    CLOSING_INSTRUCTION="$CLOSING_INSTRUCTION
+
+🚨 CRITICAL - WORDPRESS FUNCTIONS DETECTED 🚨
+Your summary line MUST describe the WordPress functionality being added/modified.
+
+REQUIRED format for summary line:
+- register_post_type('research') → feat: register research custom post type
+- register_taxonomy('genre') → feat: add genre taxonomy for [post type]
+- add_action('init', ...) → feat: add [what] initialization hook
+- wp_enqueue_script('handle') → feat: enqueue [handle] script
+
+DO NOT write:
+❌ 'feat: update research post type fields'
+❌ 'feat: modify register function'
+❌ 'feat: update acf fields and register function'
+
+The summary MUST start with the WordPress action (register/add/enqueue) and the specific thing being registered.
+Your FIRST PRIORITY is describing the WordPress function being used."
+fi
 if [ -n "$TICKET_NUMBER" ]; then
     CLOSING_INSTRUCTION="$CLOSING_INSTRUCTION Include ticket as ($TICKET_NUMBER) after the type, like: feat: ($TICKET_NUMBER) summary text"
 fi
@@ -3889,49 +4032,73 @@ if [ -n "$WP_COMPONENT_NAME" ]; then
     # Check if multiple plugins/themes (comma-separated)
     if [[ "$WP_COMPONENT_NAME" == *,* ]]; then
         # Multiple components
-        PROMPT="Create a simple commit message for WordPress $WP_COMPONENT_TYPE_PLURAL updates.
+        WP_CONTEXT_SECTION=""
+        if [ -n "$WP_CONTEXT" ]; then
+            WP_CONTEXT_SECTION="
+$WP_CONTEXT
+"
+        fi
+
+        PROMPT="Create a commit message for WordPress $WP_COMPONENT_TYPE_PLURAL updates.
 
 $WP_COMPONENT_TYPE_CAP names: $WP_COMPONENT_NAME
-
+${WP_CONTEXT_SECTION}
 Files changed:
 $GIT_STATUS
 
 Stats:
 $GIT_STATS
 
-Generate a commit message in this format:
-chore: update $WP_COMPONENT_TYPE_PLURAL
+Generate a commit message describing what WordPress functionality was added or modified.
+If specific WordPress functions are detected above, incorporate them into your message.
 
-- <brief description of changes>
+Format:
+<type>: <specific description>
+
+- <detailed change 1>
+- <detailed change 2>
 
 RULES:
-- Use type 'chore' for $WP_COMPONENT_TYPE updates
-- Summary line: update $WP_COMPONENT_TYPE_PLURAL (or list specific names if only 2-3)
-- Add 1-2 brief bullets if needed
+- Choose appropriate type based on changes: feat (new functionality), fix (bug fixes), chore (maintenance)
+- Summary line should be specific about what was changed (not just 'update $WP_COMPONENT_TYPE_PLURAL')
+- If WordPress functions are detected, mention them specifically
+- Add detailed bullets describing the changes
 - Use lowercase for all text
 - Use imperative mood (add/fix not added/fixed)
 - Output ONLY the commit message, NO explanations, NO markdown, NO code fences$LANGUAGE_INSTRUCTION"
     else
         # Single component
-        PROMPT="Create a simple commit message for a WordPress $WP_COMPONENT_TYPE update.
+        WP_CONTEXT_SECTION=""
+        if [ -n "$WP_CONTEXT" ]; then
+            WP_CONTEXT_SECTION="
+$WP_CONTEXT
+"
+        fi
+
+        PROMPT="Create a commit message for WordPress $WP_COMPONENT_TYPE changes.
 
 $WP_COMPONENT_TYPE_CAP name: $WP_COMPONENT_NAME
-
+${WP_CONTEXT_SECTION}
 Files changed:
 $GIT_STATUS
 
 Stats:
 $GIT_STATS
 
-Generate a commit message in this format:
-chore: update $WP_COMPONENT_NAME $WP_COMPONENT_TYPE
+Generate a commit message describing what WordPress functionality was added or modified.
+If specific WordPress functions are detected above, incorporate them into your message.
 
-- <brief description of main changes>
+Format:
+<type>: <specific description>
+
+- <detailed change 1>
+- <detailed change 2>
 
 RULES:
-- Use type 'chore' for $WP_COMPONENT_TYPE updates
-- Summary line: update $WP_COMPONENT_NAME $WP_COMPONENT_TYPE
-- Add 1-2 brief bullets if needed
+- Choose appropriate type based on changes: feat (new functionality), fix (bug fixes), chore (maintenance)
+- Summary line should be specific about what was changed (e.g., 'register book custom post type', not just 'update $WP_COMPONENT_NAME')
+- If WordPress functions are detected, mention them specifically
+- Add detailed bullets describing the changes
 - Use lowercase for all text
 - Use imperative mood (add/fix not added/fixed)
 - Output ONLY the commit message, NO explanations, NO markdown, NO code fences$LANGUAGE_INSTRUCTION"
@@ -3968,6 +4135,7 @@ $REPO_EXAMPLES
 $BRANCH_CONTEXT
 
 $HISTORY_INSIGHTS
+$WP_CONTEXT
 $FILE_CONTEXT
 $FUNCTION_CONTEXT
 $SEMANTIC_ANALYSIS
