@@ -1,0 +1,103 @@
+# WordPress Function Database
+# Format: function_name|description
+# Top 100 most common WordPress functions used in themes and plugins
+
+register_post_type|Registers a post type.
+register_taxonomy|Creates or modifies a taxonomy object.
+add_action|Adds a callback function to an action hook.
+add_filter|Adds a callback function to a filter hook.
+wp_enqueue_script|Enqueues a script for use on all pages.
+wp_enqueue_style|Enqueues a CSS stylesheet for use on all pages.
+register_nav_menu|Registers a navigation menu location.
+add_theme_support|Registers theme support for a given feature.
+register_sidebar|Builds the definition for a single sidebar and returns the ID.
+register_widget|Registers a widget.
+get_template_part|Loads a template part into a template.
+the_content|Displays the post content.
+the_title|Displays or retrieves the current post title with optional markup.
+the_permalink|Displays the permalink for the current post.
+get_permalink|Retrieves the full permalink for the current post or post ID.
+wp_get_attachment_image|Gets an HTML img element representing an image attachment.
+wp_insert_post|Inserts or update a post.
+wp_update_post|Updates a post with new post data.
+wp_delete_post|Trashes or deletes a post or page.
+get_posts|Retrieves an array of the latest posts.
+wp_query|The WordPress Query class.
+get_option|Retrieves an option value based on an option name.
+update_option|Updates the value of an option that was already added.
+add_option|Adds a new option to the database.
+delete_option|Removes an option by name.
+get_post_meta|Retrieves a post meta field for the given post ID.
+update_post_meta|Updates a post meta field based on the given post ID.
+add_post_meta|Adds a meta field to the given post.
+delete_post_meta|Deletes a post meta field for the given post ID.
+get_user_meta|Retrieves user meta field for a user.
+update_user_meta|Updates user meta field based on user ID.
+add_user_meta|Adds meta data field to a user.
+delete_user_meta|Removes metadata matching criteria from a user.
+wp_create_user|Creates a new user with just a username, password, and email address.
+wp_update_user|Updates a user in the database.
+wp_delete_user|Deletes a user from the database.
+get_current_user_id|Gets the current user's ID.
+is_user_logged_in|Determines whether the current visitor is a logged in user.
+current_user_can|Returns whether the current user has the specified capability.
+register_rest_route|Registers a REST API route.
+register_rest_field|Registers a new field on an existing WordPress object type.
+add_meta_box|Adds a meta box to one or more screens.
+remove_meta_box|Removes a meta box from one or more screens.
+wp_nonce_field|Retrieves or display nonce hidden field for forms.
+wp_verify_nonce|Verifies that a correct security nonce was used with time limit.
+wp_mail|Sends an email, similar to PHP's mail function.
+wp_upload_dir|Returns an array containing the current upload path and URL, or an error message.
+wp_handle_upload|Handles PHP uploads in WordPress, sanitizing file names, checking extensions for mime type, and moving the file to the appropriate directory within the uploads directory.
+wp_redirect|Redirects to another page.
+wp_safe_redirect|Performs a safe (local) redirect, using wp_redirect().
+home_url|Retrieves the URL for the current site where the front end is accessible.
+site_url|Retrieves the URL for the current site where WordPress core files are accessible.
+admin_url|Retrieves the URL to the admin area for the current site.
+get_stylesheet_directory_uri|Retrieves stylesheet directory URI for the active theme.
+get_template_directory_uri|Retrieves template directory URI for the active theme.
+get_theme_mod|Retrieves theme modification value for the active theme.
+set_theme_mod|Updates theme modification value for the active theme.
+wp_localize_script|Localizes a script, used for passing PHP data to JavaScript.
+wp_register_script|Registers a script to be enqueued later using wp_enqueue_script().
+wp_deregister_script|Removes a registered script.
+wp_register_style|Registers a CSS stylesheet to be enqueued later using wp_enqueue_style().
+wp_deregister_style|Removes a registered stylesheet.
+get_post_type|Retrieves the post type of the current post or of a given post.
+get_post_format|Retrieves the format slug for a post.
+set_post_format|Assigns a format to a post.
+has_post_thumbnail|Determines whether a post has an image attached.
+the_post_thumbnail|Displays the post thumbnail.
+set_post_thumbnail|Sets the post thumbnail (featured image) for the given post.
+register_block_type|Registers a block type from metadata stored in the block.json file.
+register_block_pattern|Registers a new block pattern.
+wp_add_inline_script|Adds extra code to a registered script.
+wp_add_inline_style|Adds extra CSS styles to a registered stylesheet.
+sanitize_text_field|Sanitizes a string from user input or from the database.
+esc_html|Escaping for HTML blocks.
+esc_attr|Escaping for HTML attributes.
+esc_url|Checks and cleans a URL.
+wp_kses|Filters text content and strips out disallowed HTML.
+wp_die|Kills WordPress execution and displays HTML page with an error message.
+_e|Displays translated text.
+__| Retrieves the translation of $text.
+esc_html_e|Displays translated text that has been escaped for safe use in HTML output.
+esc_html__|Retrieves the translation of $text and escapes it for safe use in HTML output.
+get_bloginfo|Retrieves information about the current site.
+wp_get_current_user|Retrieves the current user object.
+get_avatar|Retrieves the avatar `<img>` tag for a user.
+the_author|Displays the name of the author of the current post.
+get_the_author|Retrieves the author of the current post.
+the_date|Displays or retrieves the date the current post was written.
+get_the_date|Retrieves the date on which the post was written.
+the_time|Displays the time at which the post was written.
+get_the_time|Retrieves the time at which the post was written.
+the_excerpt|Displays the excerpt of the current post.
+get_the_excerpt|Retrieves the post excerpt.
+wp_trim_words|Trims text to a certain number of words.
+paginate_links|Retrieves paginated links for archive post pages.
+previous_post_link|Displays the previous post link that is adjacent to the current post.
+next_post_link|Displays the next post link that is adjacent to the current post.
+wp_get_attachment_url|Retrieves the URL for an attachment.
+wp_get_attachment_image_src|Retrieves an image to represent an attachment.

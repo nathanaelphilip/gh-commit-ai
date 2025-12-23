@@ -75,6 +75,9 @@ parse_yaml_config() {
             commit_language|COMMIT_LANGUAGE)
                 CONFIG_COMMIT_LANGUAGE="${CONFIG_COMMIT_LANGUAGE:-$value}"
                 ;;
+            analysis_threshold|ANALYSIS_THRESHOLD)
+                CONFIG_ANALYSIS_THRESHOLD="${CONFIG_ANALYSIS_THRESHOLD:-$value}"
+                ;;
         esac
     done < "$config_file"
 }
@@ -104,6 +107,7 @@ DIFF_MAX_LINES="${DIFF_MAX_LINES:-${CONFIG_DIFF_MAX_LINES:-200}}"  # Limit diff 
 USE_SCOPE="${USE_SCOPE:-${CONFIG_USE_SCOPE:-false}}"  # Enable/disable conventional commit scopes
 USE_GITMOJI="${USE_GITMOJI:-${CONFIG_USE_GITMOJI:-false}}"  # Enable/disable gitmoji prefixes
 LEARN_FROM_HISTORY="${LEARN_FROM_HISTORY:-${CONFIG_LEARN_FROM_HISTORY:-true}}"  # Enable/disable learning from commit history
+ANALYSIS_THRESHOLD="${ANALYSIS_THRESHOLD:-${CONFIG_ANALYSIS_THRESHOLD:-15}}"  # Skip expensive analysis for commits smaller than this (lines changed)
 # Code review specific models (optional - falls back to regular models if not set)
 CODE_REVIEW_MODEL="${CODE_REVIEW_MODEL:-${CONFIG_CODE_REVIEW_MODEL:-}}"  # Dedicated model for code reviews (Ollama)
 CODE_REVIEW_ANTHROPIC_MODEL="${CODE_REVIEW_ANTHROPIC_MODEL:-${CONFIG_CODE_REVIEW_ANTHROPIC_MODEL:-}}"  # Anthropic model for reviews
@@ -2931,8 +2935,13 @@ detect_breaking_changes() {
     echo "false|"
 }
 
-# Run breaking change detection
-BREAKING_RESULT=$(detect_breaking_changes "$GIT_DIFF")
+# Run breaking change detection (skip for docs-only commits - no code changes)
+if [ "$SMART_TYPE" = "docs" ]; then
+    # Docs-only commits can't have breaking changes
+    BREAKING_RESULT="false|"
+else
+    BREAKING_RESULT=$(detect_breaking_changes "$GIT_DIFF")
+fi
 IS_BREAKING=$(echo "$BREAKING_RESULT" | cut -d'|' -f1)
 BREAKING_REASON=$(echo "$BREAKING_RESULT" | cut -d'|' -f2)
 
@@ -3334,7 +3343,7 @@ extract_wordpress_function_calls() {
     fi
 }
 
-# Look up WordPress function documentation from WordPress.org API
+# Look up WordPress function documentation (local database first, then API)
 lookup_wordpress_function() {
     local function_name="$1"
 
@@ -3342,15 +3351,42 @@ lookup_wordpress_function() {
     local cache_dir="/tmp/gh-commit-ai-wp-docs-cache"
     local cache_file="$cache_dir/$function_name"
 
-    # Check cache first to avoid repeated API calls
+    # Check cache first to avoid repeated lookups
     if [ -f "$cache_file" ]; then
         cat "$cache_file"
         return
     fi
 
-    # Query WordPress.org Developer Resources REST API (with timeout)
+    # Check local database first (fast, no network required)
+    local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local local_db="${script_dir}/data/wordpress-functions.txt"
+
+    # If installed via gh extension, try extension directory
+    if [ ! -f "$local_db" ]; then
+        local_db="${HOME}/.local/share/gh/extensions/gh-commit-ai/data/wordpress-functions.txt"
+    fi
+
+    # If installed via homebrew, try homebrew directory
+    if [ ! -f "$local_db" ] && command -v brew &>/dev/null; then
+        local brew_prefix=$(brew --prefix 2>/dev/null)
+        local_db="${brew_prefix}/opt/gh-commit-ai/data/wordpress-functions.txt"
+    fi
+
+    if [ -f "$local_db" ]; then
+        # Look up function in local database (format: function_name|description)
+        local description=$(grep "^${function_name}|" "$local_db" | cut -d'|' -f2-)
+        if [ -n "$description" ]; then
+            # Cache the result
+            mkdir -p "$cache_dir"
+            echo "$description" > "$cache_file"
+            echo "$description"
+            return
+        fi
+    fi
+
+    # Fallback to API for uncommon functions (with reduced timeout)
     local url="https://developer.wordpress.org/wp-json/wp/v2/wp-parser-function?slug=$function_name"
-    local response=$(curl -s --connect-timeout 3 --max-time 5 "$url" 2>/dev/null)
+    local response=$(curl -s --connect-timeout 1 --max-time 2 "$url" 2>/dev/null)
 
     # Parse JSON response (no jq dependency - use grep/sed)
     # Extract description from excerpt field, strip HTML tags
@@ -3693,18 +3729,31 @@ TEMP_SUMMARIES="${CACHE_DIR}/temp_summaries_$$"
 TEMP_RELATIONSHIPS="${CACHE_DIR}/temp_relationships_$$"
 TEMP_WP_FUNCTIONS="${CACHE_DIR}/temp_wp_functions_$$"
 
+# Determine if this is a small commit that can skip expensive analysis
+SKIP_EXPENSIVE_ANALYSIS=false
+COMMIT_SIZE_INT=$(echo "${COMMIT_SIZE:-0}" | tr -d ' ')
+if [ "$COMMIT_SIZE_INT" -lt "$ANALYSIS_THRESHOLD" ] && [ "$COMMIT_SIZE_INT" -gt 0 ]; then
+    SKIP_EXPENSIVE_ANALYSIS=true
+fi
+
 # Spawn all analysis jobs in parallel (background)
+# Skip expensive operations for small commits to improve speed
 if [ "$LEARN_FROM_HISTORY" = "true" ]; then
     analyze_commit_history > "$TEMP_HISTORY" 2>/dev/null &
     get_best_commit_examples > "$TEMP_EXAMPLES" 2>/dev/null &
 fi
 
+# Lightweight analysis (always run)
 extract_file_context "$GIT_STATUS" > "$TEMP_CONTEXTS" 2>/dev/null &
-extract_changed_functions "$GIT_DIFF" > "$TEMP_FUNCTIONS" 2>/dev/null &
-analyze_change_type "$GIT_DIFF" > "$TEMP_CHANGES" 2>/dev/null &
 generate_file_summaries "$GIT_STATUS" > "$TEMP_SUMMARIES" 2>/dev/null &
-detect_file_relationships "$GIT_STATUS" > "$TEMP_RELATIONSHIPS" 2>/dev/null &
-extract_wordpress_function_calls "$GIT_DIFF" > "$TEMP_WP_FUNCTIONS" 2>/dev/null &
+
+# Expensive analysis (skip for small commits)
+if [ "$SKIP_EXPENSIVE_ANALYSIS" = false ]; then
+    extract_changed_functions "$GIT_DIFF" > "$TEMP_FUNCTIONS" 2>/dev/null &
+    analyze_change_type "$GIT_DIFF" > "$TEMP_CHANGES" 2>/dev/null &
+    detect_file_relationships "$GIT_STATUS" > "$TEMP_RELATIONSHIPS" 2>/dev/null &
+    extract_wordpress_function_calls "$GIT_DIFF" > "$TEMP_WP_FUNCTIONS" 2>/dev/null &
+fi
 
 # Wait for all background jobs to complete
 wait
@@ -3731,7 +3780,9 @@ if [ -f "$TEMP_CONTEXTS" ]; then
     if [ -n "$EXTRACTED_CONTEXTS" ]; then
         FILE_CONTEXT="
 Detected code areas being modified: $EXTRACTED_CONTEXTS
-Make sure your commit message reflects the specific area(s) being changed."
+Make sure your commit message reflects the specific area(s) being changed.
+Analyze the diff content to understand the nature and purpose of the changes.
+"
     fi
 fi
 
@@ -5404,32 +5455,105 @@ fi
 
 # Call the appropriate AI provider (skip if message was recovered)
 if [ "$RECOVERED_MESSAGE" != "true" ]; then
-    # NOTE: Caching temporarily disabled due to hanging issue - needs debugging
-    # Will be re-enabled once the issue is resolved
+    # Caching with debug instrumentation
+    CACHE_KEY=""
+    CACHED_MSG=""
 
-    # Call AI provider
-    case "$AI_PROVIDER" in
-        ollama)
-            COMMIT_MSG=$(call_ollama "$PROMPT")
-            ;;
-        anthropic)
-            COMMIT_MSG=$(call_anthropic "$PROMPT")
-            ;;
-        openai)
-            COMMIT_MSG=$(call_openai "$PROMPT")
-            ;;
-        groq)
-            COMMIT_MSG=$(call_groq "$PROMPT")
-            ;;
-        *)
-            echo -e "${RED}Error: Unknown AI provider '$AI_PROVIDER'"
-            echo "Supported providers: ollama, anthropic, openai, groq"
-            exit 1
-            ;;
-    esac
+    # Debug logging function (only when CACHE_DEBUG=true)
+    cache_debug() {
+        if [ "$CACHE_DEBUG" = "true" ]; then
+            # Cross-platform timestamp (BSD date doesn't support milliseconds)
+            local timestamp=$(date +%H:%M:%S 2>/dev/null || date +%T)
+            echo "[$timestamp] $*" >> "${CACHE_DIR}/debug.log"
+        fi
+    }
 
-    # TODO: Re-enable caching once hanging issue is resolved
-    # save_cached_response "$CACHE_KEY" "$COMMIT_MSG"
+    # Initialize debug log
+    if [ "$CACHE_DEBUG" = "true" ]; then
+        echo "=== Cache Debug Log ===" > "${CACHE_DIR}/debug.log"
+    fi
+
+    # Generate cache key from diff (with timing and error handling)
+    if [ "$DISABLE_CACHE" != "true" ]; then
+        cache_debug "Starting cache key generation"
+
+        # Use the already-generated GIT_DIFF variable to avoid redundant git calls
+        if [ -n "$GIT_DIFF" ]; then
+            cache_debug "Using GIT_DIFF for cache key (length: ${#GIT_DIFF})"
+            CACHE_KEY=$(echo "$GIT_DIFF" | get_diff_hash 2>/dev/null)
+        else
+            cache_debug "No diff available, generating from git"
+            if [ "$AMEND_MODE" = true ]; then
+                CACHE_KEY=$(git show HEAD 2>/dev/null | get_diff_hash 2>/dev/null)
+            else
+                CACHE_KEY=$(git diff --cached 2>/dev/null | get_diff_hash 2>/dev/null)
+            fi
+        fi
+
+        cache_debug "Cache key generated: $CACHE_KEY"
+
+        # Check cache
+        if [ -n "$CACHE_KEY" ]; then
+            cache_debug "Checking cache for key: $CACHE_KEY"
+            CACHED_MSG=$(get_cached_response "$CACHE_KEY" 2>/dev/null) || true
+            if [ -n "$CACHED_MSG" ]; then
+                cache_debug "Cache check complete (found: yes)"
+            else
+                cache_debug "Cache check complete (found: no)"
+            fi
+        else
+            cache_debug "ERROR: Cache key is empty"
+        fi
+    else
+        cache_debug "Cache disabled via DISABLE_CACHE"
+    fi
+
+    # Use cached message if available
+    if [ -n "$CACHED_MSG" ]; then
+        cache_debug "Using cached message"
+        echo "✓ Using cached commit message"
+        COMMIT_MSG="$CACHED_MSG"
+    else
+        cache_debug "No cache hit, calling AI provider: $AI_PROVIDER"
+
+        # Call AI provider
+        case "$AI_PROVIDER" in
+            ollama)
+                cache_debug "Calling call_ollama"
+                COMMIT_MSG=$(call_ollama "$PROMPT")
+                cache_debug "call_ollama returned (length: ${#COMMIT_MSG})"
+                ;;
+            anthropic)
+                cache_debug "Calling call_anthropic"
+                COMMIT_MSG=$(call_anthropic "$PROMPT")
+                cache_debug "call_anthropic returned (length: ${#COMMIT_MSG})"
+                ;;
+            openai)
+                cache_debug "Calling call_openai"
+                COMMIT_MSG=$(call_openai "$PROMPT")
+                cache_debug "call_openai returned (length: ${#COMMIT_MSG})"
+                ;;
+            groq)
+                cache_debug "Calling call_groq"
+                COMMIT_MSG=$(call_groq "$PROMPT")
+                cache_debug "call_groq returned (length: ${#COMMIT_MSG})"
+                ;;
+            *)
+                echo -e "${RED}Error: Unknown AI provider '$AI_PROVIDER'"
+                echo "Supported providers: ollama, anthropic, openai, groq"
+                exit 1
+                ;;
+        esac
+
+        # Save to cache (with error handling)
+        if [ -n "$CACHE_KEY" ] && [ -n "$COMMIT_MSG" ] && [ "$DISABLE_CACHE" != "true" ]; then
+            cache_debug "Saving to cache"
+            save_cached_response "$CACHE_KEY" "$COMMIT_MSG" 2>/dev/null || cache_debug "ERROR: Failed to save cache"
+            cache_debug "Cache save complete"
+        fi
+    fi
+
+    cache_debug "AI provider section complete"
 fi
 
 # Strip markdown code fences and explanations if AI added them
