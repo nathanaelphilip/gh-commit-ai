@@ -257,8 +257,14 @@ The script supports several command-line flags:
 **`--options`**
 - Generates 3 different commit message variations
 - Variations: concise, detailed, and alternative perspective
-- Displays all options with numbers
-- User selects their preferred option
+- **AI provides reasoning for each option** explaining when to use it
+- **AI recommendation** suggests which option is most appropriate
+- Color-coded display showing:
+  - Green: Option number and commit message
+  - Yellow: Reasoning for that option
+  - Cyan: AI's overall recommendation
+- Interactive selection menu with numbers
+- User selects their preferred option (can override AI recommendation)
 - Useful for exploring different ways to describe changes
 
 **`--help, -h`**
@@ -268,6 +274,9 @@ The script supports several command-line flags:
 
 **Example usage:**
 ```bash
+# Multiple options with reasoning and recommendation
+gh commit-ai --options
+
 # Preview mode
 gh commit-ai --preview
 
@@ -279,6 +288,45 @@ gh commit-ai --amend
 
 # Normal mode (default)
 gh commit-ai
+```
+
+**Example --options output:**
+```
+Generated 3 commit message options:
+
+Option 1:
+feat: add user authentication
+
+- implement JWT token generation
+- create login endpoint
+
+Reasoning: This is concise and captures the core functionality without excessive detail.
+
+Option 2:
+feat: implement user authentication system
+
+- implement JWT token generation with secure keys
+- create login endpoint with validation
+- add password hashing with bcrypt
+- set up session management
+
+Reasoning: This provides comprehensive detail about all aspects of the authentication implementation.
+
+Option 3:
+feat(auth): add login functionality
+
+- implement JWT-based authentication
+- create secure login endpoint
+- add password encryption
+
+Reasoning: Uses scope notation for better organization and balances detail with brevity.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+AI Recommendation:
+I recommend Option 2 because this is a significant feature addition that touches multiple security-critical areas. The detailed bullet points help future developers understand the full scope of authentication changes, which is important for security auditing and maintenance.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Select option (1-3), or 'n' to cancel: _
 ```
 
 ## Message Recovery

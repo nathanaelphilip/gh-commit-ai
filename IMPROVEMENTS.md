@@ -124,6 +124,9 @@ This document tracks potential improvements and features for gh-commit-ai.
 - [x] User selection with validation (1-N or 'n' to cancel)
 - [x] Works with all providers (Ollama, Anthropic, OpenAI)
 - [x] Each option processed through lowercase enforcement
+- [x] AI provides reasoning for each option
+- [x] AI recommendation displayed showing which option is best
+- [x] Enhanced display with color-coded sections (option, reasoning, recommendation)
 
 ### 12. Changelog Generation
 - [x] Implement `gh commit-ai changelog` command
