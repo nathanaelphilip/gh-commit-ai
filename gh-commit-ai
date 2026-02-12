@@ -3136,17 +3136,6 @@ detect_wordpress_plugin_update() {
         fi
     fi
 
-    # Check for single theme bulk update (80%+ of files in one theme)
-    if [ ${#theme_names[@]} -eq 1 ] && [ $total_files -gt 0 ]; then
-        local theme_name="${theme_names[0]}"
-        local percentage=$((theme_files * 100 / total_files))
-
-        if [ $percentage -ge $single_plugin_threshold ]; then
-            echo "theme-bulk:${theme_name}"
-            return 0
-        fi
-    fi
-
     # If any plugin files found, return plugin names (comma-separated if multiple)
     if [ ${#plugin_names[@]} -gt 0 ]; then
         # Join plugin names with commas
@@ -3864,7 +3853,7 @@ fi
 # Cleanup temp files (after reading WordPress functions)
 rm -f "$TEMP_HISTORY" "$TEMP_EXAMPLES" "$TEMP_CONTEXTS" "$TEMP_FUNCTIONS" "$TEMP_CHANGES" "$TEMP_SUMMARIES" "$TEMP_RELATIONSHIPS" "$TEMP_WP_FUNCTIONS" 2>/dev/null
 
-# Check for WordPress plugin/theme bulk update
+# Check for WordPress plugin bulk update
 WP_COMPONENT_TYPE=""
 WP_COMPONENT_NAME=""
 DETECTED_WP_COMPONENT=$(detect_wordpress_plugin_update "$GIT_STATUS" || true)
@@ -4135,9 +4124,9 @@ IMPORTANT - LANGUAGE:
   - [bullet 2 in $LANGUAGE_NAME]"
 fi
 
-# Use simplified prompt for WordPress plugin/theme updates
+# Use simplified prompt for WordPress plugin updates
 if [ -n "$WP_COMPONENT_NAME" ]; then
-    # Check if this is a bulk update (plugin-bulk or theme-bulk)
+    # Check if this is a bulk plugin update
     if [ "$WP_COMPONENT_TYPE" = "plugin-bulk" ]; then
         # Very simple prompt for bulk plugin updates
         PROMPT="Create a simple commit message for a WordPress plugin update.
@@ -4152,24 +4141,6 @@ chore: update $WP_COMPONENT_NAME plugin
 RULES:
 - Type must be 'chore'
 - Summary line: 'update $WP_COMPONENT_NAME plugin' (use the exact plugin name)
-- NO bullet points
-- NO detailed changes
-- Use lowercase for all text
-- Output ONLY the commit message, NO explanations, NO markdown, NO code fences$LANGUAGE_INSTRUCTION"
-    elif [ "$WP_COMPONENT_TYPE" = "theme-bulk" ]; then
-        # Very simple prompt for bulk theme updates
-        PROMPT="Create a simple commit message for a WordPress theme update.
-
-Theme name: $WP_COMPONENT_NAME
-
-Generate a minimal commit message with NO detailed bullets.
-
-Format:
-chore: update $WP_COMPONENT_NAME theme
-
-RULES:
-- Type must be 'chore'
-- Summary line: 'update $WP_COMPONENT_NAME theme' (use the exact theme name)
 - NO bullet points
 - NO detailed changes
 - Use lowercase for all text

@@ -1455,14 +1455,15 @@ wp-admin/*               → "WordPress admin"
 
 **WordPress Bulk Update Detection:**
 
-When 80%+ of changed files are in a single WordPress plugin or theme directory, the tool automatically uses a simplified commit message format:
+When 80%+ of changed files are in a single WordPress plugin directory, the tool automatically uses a simplified commit message format:
 
 **Behavior:**
-- Detects single plugin/theme updates (e.g., all files in `wp-content/plugins/woocommerce/`)
+- Detects single plugin updates (e.g., all files in `wp-content/plugins/woocommerce/`)
 - Skips detailed file analysis (performance optimization)
 - Generates simple, one-line commit message with NO bullet points
-- Uses "chore" type for plugin/theme updates
-- Format: `chore: update [plugin-name] plugin` or `chore: update [theme-name] theme`
+- Uses "chore" type for plugin updates
+- Format: `chore: update [plugin-name] plugin`
+- **Note:** This only applies to `wp-content/plugins/**`, NOT `wp-content/themes/**` (theme development gets full detailed analysis)
 
 **Example:**
 ```bash
@@ -1475,9 +1476,9 @@ When 80%+ of changed files are in a single WordPress plugin or theme directory, 
 chore: update woocommerce plugin
 ```
 
-**Multiple Plugins/Themes:**
+**Multiple Plugins:**
 
-When files are changed in multiple WordPress plugins or themes (but they represent the majority of changes), the tool generates a simple bullet list:
+When files are changed in multiple WordPress plugins (but they represent the majority of changes), the tool generates a simple bullet list:
 
 ```bash
 # Files changed:
@@ -1492,14 +1493,15 @@ chore: update wordpress plugins
 ```
 
 **Requirements:**
-- 80% or more files must be in the same plugin/theme directory for single plugin bulk mode
-- Multiple plugins/themes generate simple bullet lists (one bullet per plugin/theme)
-- Works for both plugins and themes
+- 80% or more files must be in the same plugin directory for single plugin bulk mode
+- Multiple plugins generate simple bullet lists (one bullet per plugin)
+- Only works for plugins, NOT themes
 
 **Benefits:**
 - Faster commit message generation (less API processing)
-- Consistent format for plugin/theme updates
+- Consistent format for plugin updates
 - Avoids overly detailed messages for bulk plugin changes
+- Theme development in `wp-content/themes/**` gets full detailed analysis
 
 **Django/Flask:**
 ```
