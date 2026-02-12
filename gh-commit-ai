@@ -3082,6 +3082,10 @@ detect_wordpress_plugin_update() {
     local files="$1"
     local plugin_names=()
     local theme_names=()
+    local total_files=0
+    local plugin_files=0
+    local theme_files=0
+    local single_plugin_threshold=80  # 80% threshold for bulk update detection
 
     # Parse each filename and check if it's in a plugin/theme directory
     while IFS= read -r line; do
@@ -3094,6 +3098,8 @@ detect_wordpress_plugin_update() {
         # Convert to lowercase for pattern matching
         local file_lower=$(echo "$file" | tr '[:upper:]' '[:lower:]')
 
+        total_files=$((total_files + 1))
+
         # Check if file is in wp-content/plugins/
         if [[ "$file_lower" =~ wp-content/plugins/([^/]+) ]]; then
             local plugin_name="${BASH_REMATCH[1]}"
@@ -3102,6 +3108,8 @@ detect_wordpress_plugin_update() {
             if [[ ! " ${plugin_names[@]} " =~ " ${plugin_name} " ]]; then
                 plugin_names+=("$plugin_name")
             fi
+
+            plugin_files=$((plugin_files + 1))
         fi
 
         # Check if file is in wp-content/themes/
@@ -3112,8 +3120,32 @@ detect_wordpress_plugin_update() {
             if [[ ! " ${theme_names[@]} " =~ " ${theme_name} " ]]; then
                 theme_names+=("$theme_name")
             fi
+
+            theme_files=$((theme_files + 1))
         fi
     done <<< "$files"
+
+    # Check for single plugin bulk update (80%+ of files in one plugin)
+    if [ ${#plugin_names[@]} -eq 1 ] && [ $total_files -gt 0 ]; then
+        local plugin_name="${plugin_names[0]}"
+        local percentage=$((plugin_files * 100 / total_files))
+
+        if [ $percentage -ge $single_plugin_threshold ]; then
+            echo "plugin-bulk:${plugin_name}"
+            return 0
+        fi
+    fi
+
+    # Check for single theme bulk update (80%+ of files in one theme)
+    if [ ${#theme_names[@]} -eq 1 ] && [ $total_files -gt 0 ]; then
+        local theme_name="${theme_names[0]}"
+        local percentage=$((theme_files * 100 / total_files))
+
+        if [ $percentage -ge $single_plugin_threshold ]; then
+            echo "theme-bulk:${theme_name}"
+            return 0
+        fi
+    fi
 
     # If any plugin files found, return plugin names (comma-separated if multiple)
     if [ ${#plugin_names[@]} -gt 0 ]; then
@@ -3879,7 +3911,28 @@ BAD EXAMPLES (AVOID THESE - TOO GENERIC):
 ❌ 'feat: add feature'
 ❌ 'chore: update code'
 
-REMEMBER: Mention the SPECIFIC AREA (video, auth, payment, etc.) and WHAT changed (function names, features)."
+BAD FORMAT (NEVER DO THIS - PARAGRAPH STYLE):
+❌ WRONG:
+feat: add new icons to library
+
+- this commit expands the icons library by adding new icons for data saving, data thresholding, light bulb, profile, storage, and videocam. it also exports these new icons and updates the index.ts file to include them, making them accessible for use in the application.
+
+✓ CORRECT:
+feat: add new icons to library
+
+- add data saving icon
+- add data thresholding icon
+- add light bulb icon
+- add profile icon
+- add storage icon
+- add videocam icon
+- export new icons in index.ts
+
+REMEMBER:
+- Mention the SPECIFIC AREA (video, auth, payment, etc.) and WHAT changed (function names, features)
+- Keep each bullet to 12 words MAXIMUM (count the words!)
+- Use bullet list format with SHORT lines, NOT paragraphs
+- If you have many similar items, list each one separately"
 
 # Prepare branch context
 BRANCH_CONTEXT="Branch context:
@@ -4084,62 +4137,86 @@ fi
 
 # Use simplified prompt for WordPress plugin/theme updates
 if [ -n "$WP_COMPONENT_NAME" ]; then
-    # Capitalize first letter for display (portable method)
-    if [ "$WP_COMPONENT_TYPE" = "plugin" ]; then
-        WP_COMPONENT_TYPE_CAP="Plugin"
-        WP_COMPONENT_TYPE_PLURAL="plugins"
-    else
-        WP_COMPONENT_TYPE_CAP="Theme"
-        WP_COMPONENT_TYPE_PLURAL="themes"
-    fi
+    # Check if this is a bulk update (plugin-bulk or theme-bulk)
+    if [ "$WP_COMPONENT_TYPE" = "plugin-bulk" ]; then
+        # Very simple prompt for bulk plugin updates
+        PROMPT="Create a simple commit message for a WordPress plugin update.
 
-    # Check if multiple plugins/themes (comma-separated)
-    if [[ "$WP_COMPONENT_NAME" == *,* ]]; then
-        # Multiple components
-        WP_CONTEXT_SECTION=""
-        if [ -n "$WP_CONTEXT" ]; then
-            WP_CONTEXT_SECTION="
-$WP_CONTEXT
-"
-        fi
+Plugin name: $WP_COMPONENT_NAME
 
-        PROMPT="Create a commit message for WordPress $WP_COMPONENT_TYPE_PLURAL updates.
-
-$WP_COMPONENT_TYPE_CAP names: $WP_COMPONENT_NAME
-${WP_CONTEXT_SECTION}
-Files changed:
-$GIT_STATUS
-
-Stats:
-$GIT_STATS
-
-Generate a commit message describing what WordPress functionality was added or modified.
-If specific WordPress functions are detected above, incorporate them into your message.
+Generate a minimal commit message with NO detailed bullets.
 
 Format:
-<type>: <specific description>
-
-- <detailed change 1>
-- <detailed change 2>
+chore: update $WP_COMPONENT_NAME plugin
 
 RULES:
-- Choose appropriate type based on changes: feat (new functionality), fix (bug fixes), chore (maintenance)
-- Summary line should be specific about what was changed (not just 'update $WP_COMPONENT_TYPE_PLURAL')
-- If WordPress functions are detected, mention them specifically
-- Add detailed bullets describing the changes
+- Type must be 'chore'
+- Summary line: 'update $WP_COMPONENT_NAME plugin' (use the exact plugin name)
+- NO bullet points
+- NO detailed changes
 - Use lowercase for all text
-- Use imperative mood (add/fix not added/fixed)
+- Output ONLY the commit message, NO explanations, NO markdown, NO code fences$LANGUAGE_INSTRUCTION"
+    elif [ "$WP_COMPONENT_TYPE" = "theme-bulk" ]; then
+        # Very simple prompt for bulk theme updates
+        PROMPT="Create a simple commit message for a WordPress theme update.
+
+Theme name: $WP_COMPONENT_NAME
+
+Generate a minimal commit message with NO detailed bullets.
+
+Format:
+chore: update $WP_COMPONENT_NAME theme
+
+RULES:
+- Type must be 'chore'
+- Summary line: 'update $WP_COMPONENT_NAME theme' (use the exact theme name)
+- NO bullet points
+- NO detailed changes
+- Use lowercase for all text
 - Output ONLY the commit message, NO explanations, NO markdown, NO code fences$LANGUAGE_INSTRUCTION"
     else
-        # Single component
-        WP_CONTEXT_SECTION=""
-        if [ -n "$WP_CONTEXT" ]; then
-            WP_CONTEXT_SECTION="
-$WP_CONTEXT
-"
+        # Capitalize first letter for display (portable method)
+        if [ "$WP_COMPONENT_TYPE" = "plugin" ]; then
+            WP_COMPONENT_TYPE_CAP="Plugin"
+            WP_COMPONENT_TYPE_PLURAL="plugins"
+        else
+            WP_COMPONENT_TYPE_CAP="Theme"
+            WP_COMPONENT_TYPE_PLURAL="themes"
         fi
 
-        PROMPT="Create a commit message for WordPress $WP_COMPONENT_TYPE changes.
+        # Check if multiple plugins/themes (comma-separated)
+        if [[ "$WP_COMPONENT_NAME" == *,* ]]; then
+            # Multiple components - generate simple bullet list
+            PROMPT="Create a simple commit message for multiple WordPress $WP_COMPONENT_TYPE_PLURAL.
+
+$WP_COMPONENT_TYPE_CAP names: $WP_COMPONENT_NAME
+
+Generate a simple commit message with one bullet per $WP_COMPONENT_TYPE.
+
+Format:
+chore: update wordpress $WP_COMPONENT_TYPE_PLURAL
+
+- update [first-$WP_COMPONENT_TYPE-name] $WP_COMPONENT_TYPE
+- update [second-$WP_COMPONENT_TYPE-name] $WP_COMPONENT_TYPE
+
+RULES:
+- Type must be 'chore'
+- Summary line: 'update wordpress $WP_COMPONENT_TYPE_PLURAL'
+- One bullet point per $WP_COMPONENT_TYPE: 'update [name] $WP_COMPONENT_TYPE'
+- NO detailed changes or explanations
+- Use lowercase for all text
+- Use the exact $WP_COMPONENT_TYPE names provided above
+- Output ONLY the commit message, NO explanations, NO markdown, NO code fences$LANGUAGE_INSTRUCTION"
+        else
+            # Single component
+            WP_CONTEXT_SECTION=""
+            if [ -n "$WP_CONTEXT" ]; then
+                WP_CONTEXT_SECTION="
+$WP_CONTEXT
+"
+            fi
+
+            PROMPT="Create a commit message for WordPress $WP_COMPONENT_TYPE changes.
 
 $WP_COMPONENT_TYPE_CAP name: $WP_COMPONENT_NAME
 ${WP_CONTEXT_SECTION}
@@ -4161,34 +4238,65 @@ Format:
 RULES:
 - Choose appropriate type based on changes: feat (new functionality), fix (bug fixes), chore (maintenance)
 - Summary line should be specific about what was changed (e.g., 'register book custom post type', not just 'update $WP_COMPONENT_NAME')
+- Each bullet point: max 12 words per line
+- Use bullet list format, NOT paragraphs
+- One change per bullet line
 - If WordPress functions are detected, mention them specifically
-- Add detailed bullets describing the changes
 - Use lowercase for all text
 - Use imperative mood (add/fix not added/fixed)
 - Output ONLY the commit message, NO explanations, NO markdown, NO code fences$LANGUAGE_INSTRUCTION"
+        fi
     fi
 else
-    PROMPT="Analyze these git changes and create a commit message.
+    PROMPT="!!!CRITICAL FORMATTING RULES - READ FIRST!!!
 
-PROCESS:
-1. First, identify all significant changes and list them as bullets
-2. Then, synthesize those changes into ONE concise summary line
-3. Choose the right type: feat, fix, docs, style, refactor, test, or chore
+YOU MUST FOLLOW THIS EXACT FORMAT:
+
+<type>: <summary max 50 chars>
+
+- bullet 1 (max 12 words)
+- bullet 2 (max 12 words)
+- bullet 3 (max 12 words)
+
+ABSOLUTELY FORBIDDEN - NEVER DO THIS:
+❌ NO PARAGRAPHS: \"this commit introduces several new icons to the libs/icons package, including addicon, buildcircleicon, datasaverofficon, datathresholdingicon, lightbulbicon...\"
+❌ NO LONG BULLETS: More than 12 words in one line
+❌ NO MULTIPLE SENTENCES: One change per bullet only
+❌ NO EXPLANATORY TEXT: Just list the changes
+
+CORRECT EXAMPLE:
+feat: add new icons to library
+
+- add addicon component
+- add buildcircleicon component
+- add datasaverofficon component
+- add datathresholdingicon component
+- add lightbulbicon component
+- create sidebarcontext for state management
+- add usesidebar hook
+- add onmouseleave utility function
+
+COUNT YOUR WORDS - EACH BULLET MUST BE 12 WORDS OR LESS!
+
+Now analyze these git changes:
 
 $SCOPE_INSTRUCTION
 
-- <change 1>
-- <change 2>
-- <change 3>
-- <change 4>
+PROCESS:
+1. First, identify all significant changes
+2. List each as a SHORT bullet (max 12 words each!)
+3. Write ONE concise summary line
+4. Choose type: feat, fix, docs, style, refactor, test, or chore
 
 RULES:
-- Summary line: max 50 chars, describes the overall purpose
-- Use lowercase for all text (except API, HTTP, JSON, JWT, SQL, and ticket codes like ABC-123)
-- Ticket codes must stay UPPERCASE: use (ABC-123) not (abc-123)
-- Use imperative mood (add/fix not added/fixed)
-- The summary should capture the essence of all bullets below it
-- Do NOT use ! unless instructions above say this breaks existing functionality
+- Summary line: max 50 chars
+- EACH BULLET: MAXIMUM 12 WORDS - COUNT THEM
+- ONE change per bullet line
+- NO paragraphs, NO long sentences
+- Use lowercase (except API, HTTP, JSON, JWT, SQL, ticket codes like ABC-123)
+- Ticket codes stay UPPERCASE: ABC-123 not abc-123
+- Use imperative mood: add/fix not added/fixed
+- Do NOT use ! unless it breaks existing functionality
 - Output ONLY the commit message, NO explanations, NO markdown, NO code fences$LANGUAGE_INSTRUCTION
 
 $SCOPE_EXAMPLES

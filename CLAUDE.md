@@ -686,8 +686,11 @@ Common scopes: `auth`, `api`, `ui`, `db`, `cli`, `docs`, `config`, `tests`, `dep
 3. First line must be 50 characters or less
 4. Blank line after first line
 5. All significant changes listed as bullet points
-6. Use imperative mood (add, fix, update - not added, fixed, updated)
-7. Use lowercase only (except acronyms and ticket numbers)
+6. **Each bullet point must be 12 words or less**
+7. **Use bullet list format, NOT paragraphs**
+8. One change per bullet line
+9. Use imperative mood (add, fix, update - not added, fixed, updated)
+10. Use lowercase only (except acronyms and ticket numbers)
 
 **Example (default, without scope):**
 ```
@@ -712,6 +715,27 @@ feat(auth): add user authentication
 ```
 
 When `USE_SCOPE=true`, the scope "(auth)" is added to indicate this is authentication-related.
+
+**BAD Example (paragraph style - NEVER do this):**
+```
+❌ WRONG:
+feat: add new icons to library
+
+- this commit expands the icons library by adding new icons for data saving, data thresholding, light bulb, profile, storage, and videocam. it also exports these new icons and updates the index.ts file to include them, making them accessible for use in the application.
+
+✓ CORRECT:
+feat: add new icons to library
+
+- add data saving icon
+- add data thresholding icon
+- add light bulb icon
+- add profile icon
+- add storage icon
+- add videocam icon
+- export new icons in index.ts
+```
+
+The correct format uses short, focused bullet points (max 12 words each), not paragraph-style descriptions.
 
 **Lowercase Enforcement:** Even if the AI generates uppercase letters, the `enforce_lowercase()` function automatically converts the message to lowercase while intelligently preserving:
 - Ticket number patterns (e.g., ABC-123, JIRA-456, EWQ-789)
@@ -1436,8 +1460,9 @@ When 80%+ of changed files are in a single WordPress plugin or theme directory, 
 **Behavior:**
 - Detects single plugin/theme updates (e.g., all files in `wp-content/plugins/woocommerce/`)
 - Skips detailed file analysis (performance optimization)
-- Generates simple, focused commit message
+- Generates simple, one-line commit message with NO bullet points
 - Uses "chore" type for plugin/theme updates
+- Format: `chore: update [plugin-name] plugin` or `chore: update [theme-name] theme`
 
 **Example:**
 ```bash
@@ -1448,14 +1473,27 @@ When 80%+ of changed files are in a single WordPress plugin or theme directory, 
 
 # Generated commit message:
 chore: update woocommerce plugin
+```
 
-- update cart handling logic
-- improve product class structure
+**Multiple Plugins/Themes:**
+
+When files are changed in multiple WordPress plugins or themes (but they represent the majority of changes), the tool generates a simple bullet list:
+
+```bash
+# Files changed:
+# wp-content/plugins/woocommerce/file.php
+# wp-content/plugins/jetpack/file.php
+
+# Generated commit message:
+chore: update wordpress plugins
+
+- update woocommerce plugin
+- update jetpack plugin
 ```
 
 **Requirements:**
-- 80% or more files must be in the same plugin/theme directory
-- Only one plugin/theme can be detected (mixed updates use normal analysis)
+- 80% or more files must be in the same plugin/theme directory for single plugin bulk mode
+- Multiple plugins/themes generate simple bullet lists (one bullet per plugin/theme)
 - Works for both plugins and themes
 
 **Benefits:**
