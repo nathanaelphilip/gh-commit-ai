@@ -235,6 +235,7 @@ groq_model: llama-3.3-70b-versatile
 
 # Commit Format
 use_scope: false  # Enable conventional commit scopes
+auto_fix: true    # Auto-fix common formatting issues
 
 # Performance
 diff_max_lines: 200  # Max diff lines to send to AI
@@ -321,6 +322,31 @@ USE_SCOPE=false gh commit-ai
 
 Common scopes: `auth`, `api`, `ui`, `db`, `cli`, `docs`, `config`, `tests`, `deps`
 
+- `AUTO_FIX`: Automatically fix common formatting issues (default: `true`)
+  - Removes trailing periods from summary line
+  - Fixes missing spaces after colons (`feat:add` → `feat: add`)
+  - Removes multiple consecutive spaces
+  - Normalizes bullet point spacing
+  - Removes empty bullet points
+  - Removes trailing whitespace
+  - Consolidates multiple blank lines
+  - **Note**: Case conversion handled separately by `enforce_lowercase()`
+
+```bash
+# Enable auto-fix (default)
+AUTO_FIX=true gh commit-ai
+
+# Disable auto-fix (preserve AI output exactly)
+AUTO_FIX=false gh commit-ai
+```
+
+**What gets fixed:**
+- `feat: add authentication.` → `feat: add authentication` (no trailing period)
+- `feat:add auth` → `feat: add auth` (space after colon)
+- `feat:  add   auth` → `feat: add auth` (multiple spaces)
+
+See [AUTO-FIX-DEMO.md](AUTO-FIX-DEMO.md) for complete examples.
+
 #### Performance Configuration
 
 - `DIFF_MAX_LINES`: Maximum diff lines to send to AI (default: `200`)
@@ -336,6 +362,31 @@ DIFF_MAX_LINES=100 gh commit-ai
 # For more context (more lines)
 DIFF_MAX_LINES=500 gh commit-ai
 ```
+
+- `ANALYSIS_THRESHOLD`: Minimum lines changed to run expensive analysis (default: `15`)
+  - Commits smaller than this skip expensive analysis functions
+  - **Parallel processing**: Up to 8 analysis functions run simultaneously
+  - Lower threshold = more commits skip analysis = faster for small changes
+
+```bash
+# Skip expensive analysis for commits under 20 lines
+ANALYSIS_THRESHOLD=20 gh commit-ai
+
+# Always run full analysis (even for 1-line changes)
+ANALYSIS_THRESHOLD=1 gh commit-ai
+```
+
+**Parallel Processing**:
+- All analysis functions run simultaneously for maximum speed
+- Progress indicator shows: "⚡ Analyzing changes (8 parallel jobs)... ✓"
+- **60-73% faster** for large commits and WordPress projects
+- WordPress API lookups parallelized (5 sequential 2s calls → 5 parallel 2s calls)
+- See [PARALLEL-PROCESSING.md](PARALLEL-PROCESSING.md) for details
+
+**Performance Benchmarks**:
+- Small commits (< 15 lines): ~1s
+- Medium commits (15-200 lines): ~2s
+- Large commits with WordPress (200+ lines): ~4s (was ~15s)
 
 #### Network Reliability Configuration
 

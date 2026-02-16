@@ -78,6 +78,9 @@ parse_yaml_config() {
             analysis_threshold|ANALYSIS_THRESHOLD)
                 CONFIG_ANALYSIS_THRESHOLD="${CONFIG_ANALYSIS_THRESHOLD:-$value}"
                 ;;
+            auto_fix|AUTO_FIX)
+                CONFIG_AUTO_FIX="${CONFIG_AUTO_FIX:-$value}"
+                ;;
         esac
     done < "$config_file"
 }
@@ -107,6 +110,7 @@ DIFF_MAX_LINES="${DIFF_MAX_LINES:-${CONFIG_DIFF_MAX_LINES:-200}}"  # Limit diff 
 USE_SCOPE="${USE_SCOPE:-${CONFIG_USE_SCOPE:-false}}"  # Enable/disable conventional commit scopes
 USE_GITMOJI="${USE_GITMOJI:-${CONFIG_USE_GITMOJI:-false}}"  # Enable/disable gitmoji prefixes
 LEARN_FROM_HISTORY="${LEARN_FROM_HISTORY:-${CONFIG_LEARN_FROM_HISTORY:-true}}"  # Enable/disable learning from commit history
+AUTO_FIX="${AUTO_FIX:-${CONFIG_AUTO_FIX:-true}}"  # Enable/disable automatic fixing of common formatting issues
 ANALYSIS_THRESHOLD="${ANALYSIS_THRESHOLD:-${CONFIG_ANALYSIS_THRESHOLD:-15}}"  # Skip expensive analysis for commits smaller than this (lines changed)
 # Code review specific models (optional - falls back to regular models if not set)
 CODE_REVIEW_MODEL="${CODE_REVIEW_MODEL:-${CONFIG_CODE_REVIEW_MODEL:-}}"  # Dedicated model for code reviews (Ollama)
@@ -2400,6 +2404,8 @@ while [[ $# -gt 0 ]]; do
             echo "                      Default: auto-detect from system locale"
             echo "  USE_SCOPE           Enable/disable scopes (true/false)"
             echo "  USE_GITMOJI         Enable/disable gitmoji prefixes (true/false)"
+            echo "  AUTO_FIX            Auto-fix common formatting issues (true/false)"
+            echo "                      Default: true"
             echo "  DIFF_MAX_LINES      Maximum diff lines to send to AI"
             echo "  GH_COMMIT_AI        Set to 1 to enable hook (opt-in)"
             echo ""
@@ -2419,6 +2425,7 @@ while [[ $# -gt 0 ]]; do
             echo "  GH_COMMIT_AI=1 git commit    # With hook installed"
             echo "  USE_SCOPE=false gh commit-ai"
             echo "  USE_GITMOJI=true gh commit-ai"
+            echo "  AUTO_FIX=false gh commit-ai      # Disable auto-fix"
             echo "  COMMIT_LANGUAGE=es gh commit-ai    # Spanish messages"
             echo "  COMMIT_LANGUAGE=ja gh commit-ai    # Japanese messages"
             exit 0
@@ -3436,8 +3443,13 @@ build_wordpress_context() {
     local first_func=""
     local first_arg=""
 
-    # Parse comma-separated function calls
+    # Create temp dir for parallel lookups
+    local lookup_temp_dir=$(mktemp -d)
+    local lookup_pids=()
+
+    # Parse comma-separated function calls and start parallel lookups
     IFS=',' read -ra CALLS <<< "$wp_function_calls"
+    local call_index=0
     for call in "${CALLS[@]}"; do
         [ -z "$call" ] && continue
 
@@ -3450,17 +3462,39 @@ build_wordpress_context() {
             first_arg="$arg_value"
         fi
 
-        # Look up function documentation from API
-        local func_desc=$(lookup_wordpress_function "$func_name")
+        # Start parallel lookup in background
+        (
+            local func_desc=$(lookup_wordpress_function "$func_name")
+            echo "$func_name|$arg_value|$func_desc" > "$lookup_temp_dir/${call_index}.txt"
+        ) &
+        lookup_pids+=($!)
 
-        # Build context line with function, argument, and description
-        if [ -n "$func_desc" ]; then
-            context="${context}${func_name}('${arg_value}'): ${func_desc}\n"
-        else
-            # Fallback if API lookup fails
-            context="${context}${func_name}('${arg_value}')\n"
+        ((call_index++))
+    done
+
+    # Wait for all parallel lookups to complete
+    for pid in "${lookup_pids[@]}"; do
+        wait "$pid" 2>/dev/null
+    done
+
+    # Build context from parallel lookup results (in order)
+    for i in $(seq 0 $((call_index - 1))); do
+        if [ -f "$lookup_temp_dir/${i}.txt" ]; then
+            local result=$(cat "$lookup_temp_dir/${i}.txt")
+            IFS='|' read -r func_name arg_value func_desc <<< "$result"
+
+            # Build context line with function, argument, and description
+            if [ -n "$func_desc" ]; then
+                context="${context}${func_name}('${arg_value}'): ${func_desc}\n"
+            else
+                # Fallback if API lookup fails
+                context="${context}${func_name}('${arg_value}')\n"
+            fi
         fi
     done
+
+    # Cleanup temp dir
+    rm -rf "$lookup_temp_dir" 2>/dev/null
 
     # Add immediate instructions using the detected function
     if [ -n "$first_func" ]; then
@@ -3759,14 +3793,18 @@ fi
 
 # Spawn all analysis jobs in parallel (background)
 # Skip expensive operations for small commits to improve speed
+PARALLEL_JOBS=0
+
 if [ "$LEARN_FROM_HISTORY" = "true" ]; then
     analyze_commit_history > "$TEMP_HISTORY" 2>/dev/null &
     get_best_commit_examples > "$TEMP_EXAMPLES" 2>/dev/null &
+    ((PARALLEL_JOBS+=2))
 fi
 
 # Lightweight analysis (always run)
 extract_file_context "$GIT_STATUS" > "$TEMP_CONTEXTS" 2>/dev/null &
 generate_file_summaries "$GIT_STATUS" > "$TEMP_SUMMARIES" 2>/dev/null &
+((PARALLEL_JOBS+=2))
 
 # Expensive analysis (skip for small commits)
 if [ "$SKIP_EXPENSIVE_ANALYSIS" = false ]; then
@@ -3774,10 +3812,21 @@ if [ "$SKIP_EXPENSIVE_ANALYSIS" = false ]; then
     analyze_change_type "$GIT_DIFF" > "$TEMP_CHANGES" 2>/dev/null &
     detect_file_relationships "$GIT_STATUS" > "$TEMP_RELATIONSHIPS" 2>/dev/null &
     extract_wordpress_function_calls "$GIT_DIFF" > "$TEMP_WP_FUNCTIONS" 2>/dev/null &
+    ((PARALLEL_JOBS+=4))
+fi
+
+# Show simple progress message for parallel analysis
+if [ "$PARALLEL_JOBS" -gt 0 ]; then
+    printf "⚡ Analyzing changes (%d parallel jobs)... " "$PARALLEL_JOBS" >&2
 fi
 
 # Wait for all background jobs to complete
 wait
+
+# Show completion message
+if [ "$PARALLEL_JOBS" -gt 0 ]; then
+    printf "✓\n" >&2
+fi
 
 # Read results from temp files
 HISTORY_INSIGHTS=""
@@ -3840,18 +3889,28 @@ Related file changes: $DETECTED_RELATIONSHIPS"
     fi
 fi
 
-# Extract WordPress function calls and build context (for all WordPress projects)
-# IMPORTANT: Must happen BEFORE cleanup since it reads from TEMP_WP_FUNCTIONS
-WP_CONTEXT=""
+# Extract WordPress function calls and build context in parallel
+# Start building WordPress context in background while we continue
+TEMP_WP_CONTEXT=$(mktemp)
 if [ -f "$TEMP_WP_FUNCTIONS" ]; then
     WP_FUNCTION_CALLS=$(cat "$TEMP_WP_FUNCTIONS")
     if [ -n "$WP_FUNCTION_CALLS" ]; then
-        WP_CONTEXT=$(build_wordpress_context "$WP_FUNCTION_CALLS")
+        # Run build_wordpress_context in background
+        build_wordpress_context "$WP_FUNCTION_CALLS" > "$TEMP_WP_CONTEXT" 2>/dev/null &
+        WP_CONTEXT_PID=$!
     fi
 fi
 
 # Cleanup temp files (after reading WordPress functions)
 rm -f "$TEMP_HISTORY" "$TEMP_EXAMPLES" "$TEMP_CONTEXTS" "$TEMP_FUNCTIONS" "$TEMP_CHANGES" "$TEMP_SUMMARIES" "$TEMP_RELATIONSHIPS" "$TEMP_WP_FUNCTIONS" 2>/dev/null
+
+# Wait for WordPress context to finish building and read result
+WP_CONTEXT=""
+if [ -n "${WP_CONTEXT_PID:-}" ]; then
+    wait "$WP_CONTEXT_PID" 2>/dev/null
+    WP_CONTEXT=$(cat "$TEMP_WP_CONTEXT" 2>/dev/null || echo "")
+    rm -f "$TEMP_WP_CONTEXT" 2>/dev/null
+fi
 
 # Check for WordPress plugin bulk update
 WP_COMPONENT_TYPE=""
@@ -4403,6 +4462,105 @@ enforce_lowercase() {
     done
 
     echo "$temp_message"
+}
+
+# Auto-fix common formatting issues in commit messages
+auto_fix_message() {
+    local message="$1"
+    local fixed="$message"
+
+    # Split into lines for processing
+    local first_line=""
+    local rest_lines=""
+    local line_num=0
+
+    while IFS= read -r line; do
+        if [ $line_num -eq 0 ]; then
+            first_line="$line"
+        else
+            if [ -n "$rest_lines" ]; then
+                rest_lines="$rest_lines"$'\n'"$line"
+            else
+                rest_lines="$line"
+            fi
+        fi
+        ((line_num++))
+    done <<< "$message"
+
+    # Fix summary line (first line)
+    if [ -n "$first_line" ]; then
+        # Remove trailing period from summary line (conventional commits shouldn't have periods)
+        first_line=$(echo "$first_line" | sed 's/\.$//')
+
+        # Fix missing space after colon (e.g., "feat:add" -> "feat: add")
+        first_line=$(echo "$first_line" | sed -E 's/^([a-z]+)(\([^)]+\))?:([^ ])/\1\2: \3/')
+
+        # Remove multiple consecutive spaces
+        first_line=$(echo "$first_line" | sed 's/  \+/ /g')
+
+        # Trim leading/trailing whitespace
+        first_line=$(echo "$first_line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    fi
+
+    # Fix body lines
+    if [ -n "$rest_lines" ]; then
+        local fixed_rest=""
+        local prev_blank=false
+        local in_blank_sequence=false
+
+        while IFS= read -r line; do
+            # Remove trailing whitespace from all lines
+            line=$(echo "$line" | sed 's/[[:space:]]*$//')
+
+            # Check if line is blank
+            if [ -z "$line" ]; then
+                # Only keep one blank line between sections
+                if [ "$prev_blank" = false ]; then
+                    if [ -n "$fixed_rest" ]; then
+                        fixed_rest="$fixed_rest"$'\n'"$line"
+                    else
+                        fixed_rest="$line"
+                    fi
+                    prev_blank=true
+                fi
+                continue
+            fi
+
+            prev_blank=false
+
+            # Fix bullet points
+            if [[ "$line" =~ ^[[:space:]]*-[[:space:]]* ]]; then
+                # Normalize bullet point spacing (ensure single space after dash)
+                line=$(echo "$line" | sed -E 's/^([[:space:]]*)-[[:space:]]+/\1- /')
+
+                # Remove empty bullet points (just "- " with no content)
+                if [[ "$line" =~ ^[[:space:]]*-[[:space:]]*$ ]]; then
+                    continue
+                fi
+
+                # Remove multiple consecutive spaces in bullet content
+                line=$(echo "$line" | sed 's/  \+/ /g')
+            fi
+
+            # Add the fixed line
+            if [ -n "$fixed_rest" ]; then
+                fixed_rest="$fixed_rest"$'\n'"$line"
+            else
+                fixed_rest="$line"
+            fi
+        done <<< "$rest_lines"
+
+        rest_lines="$fixed_rest"
+    fi
+
+    # Reconstruct message
+    if [ -n "$rest_lines" ]; then
+        echo "$first_line"
+        echo ""
+        echo "$rest_lines"
+    else
+        echo "$first_line"
+    fi
 }
 
 # Detect project type based on files present
@@ -5789,6 +5947,17 @@ if [ "$MULTIPLE_OPTIONS" = "true" ]; then
         done
     fi
 
+    # Auto-fix common formatting issues on each option (unless disabled)
+    if [ "$AUTO_FIX" = "true" ]; then
+        for i in $(seq 1 $num_options); do
+            if [ -f "/tmp/option_${i}.txt" ]; then
+                option_content=$(cat "/tmp/option_${i}.txt")
+                fixed=$(auto_fix_message "$option_content")
+                echo "$fixed" > "/tmp/option_${i}.txt"
+            fi
+        done
+    fi
+
     # Apply template to each option if custom template exists
     if [ -f ".gh-commit-ai-template" ]; then
         PROJECT_TYPE=$(detect_project_type)
@@ -5839,6 +6008,11 @@ else
     # Single message mode - enforce lowercase (unless disabled)
     if [ "$NO_LOWERCASE" != "true" ]; then
         COMMIT_MSG=$(enforce_lowercase "$COMMIT_MSG")
+    fi
+
+    # Auto-fix common formatting issues (unless disabled)
+    if [ "$AUTO_FIX" = "true" ]; then
+        COMMIT_MSG=$(auto_fix_message "$COMMIT_MSG")
     fi
 
     # Apply template if custom template exists
@@ -5996,6 +6170,11 @@ EOF
         # Enforce lowercase (unless disabled)
         if [ "$NO_LOWERCASE" != "true" ]; then
             COMMIT_MSG=$(enforce_lowercase "$COMMIT_MSG")
+        fi
+
+        # Auto-fix common formatting issues (unless disabled)
+        if [ "$AUTO_FIX" = "true" ]; then
+            COMMIT_MSG=$(auto_fix_message "$COMMIT_MSG")
         fi
 
         # Apply template if custom template exists

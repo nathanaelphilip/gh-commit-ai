@@ -78,6 +78,20 @@ use_scope: false
 #   🔒 security (security fix)
 use_gitmoji: false
 
+# Auto-Fix Commit Messages
+# Automatically fix common formatting issues in commit messages
+# Default: true
+# Fixes:
+#   - Trailing periods on summary line
+#   - Missing spaces after colons (feat:add → feat: add)
+#   - Multiple consecutive spaces
+#   - Empty bullet points
+#   - Inconsistent bullet spacing
+#   - Multiple blank lines
+#   - Trailing whitespace
+# Note: Case conversion is handled separately by enforce_lowercase()
+auto_fix: true
+
 # Performance Configuration
 # Maximum number of diff lines to send to AI
 # Default: 200
@@ -94,46 +108,6 @@ diff_max_lines: 200
 # - Capitalization preferences
 # - Emoji usage
 learn_from_history: true
-
-# Model Recommendations
-# Auto-select recommended model based on commit size
-# Default: false
-# When enabled, automatically selects:
-# - Small commits (<100 lines): Faster, cheaper models
-# - Medium commits (100-500): Balanced models
-# - Large commits (>500 lines): More capable models
-# When disabled, shows recommendations as tips
-auto_select_model: false
-
-# Auto-Fix Formatting
-# Automatically detect and fix common formatting issues before commit
-# Default: false (prompts user to confirm fixes)
-# When enabled, automatically fixes:
-# - Trailing whitespace
-# - Inconsistent line endings
-# - Missing final newline
-auto_fix_formatting: false
-
-# Auto-Fix Trailing Whitespace
-# Remove trailing whitespace from files (when auto_fix_formatting is enabled)
-# Default: true
-auto_fix_trailing_whitespace: true
-
-# Auto-Fix Line Endings
-# Convert line endings to consistent style (when auto_fix_formatting is enabled)
-# Default: true
-auto_fix_line_endings: true
-
-# Auto-Fix Final Newline
-# Add missing newline at end of files (when auto_fix_formatting is enabled)
-# Default: true
-auto_fix_final_newline: true
-
-# Line Ending Style
-# Preferred line ending style
-# Options: lf (Unix/Linux/macOS), crlf (Windows)
-# Default: lf
-line_ending_style: lf
 
 # Note: API keys (ANTHROPIC_API_KEY, OPENAI_API_KEY, GROQ_API_KEY) cannot be stored in config files
 # Set them as environment variables instead:
