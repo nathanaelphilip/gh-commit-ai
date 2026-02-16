@@ -686,13 +686,22 @@ Common scopes: `auth`, `api`, `ui`, `db`, `cli`, `docs`, `config`, `tests`, `dep
 3. First line must be 50 characters or less
 4. Blank line after first line
 5. All significant changes listed as bullet points
-6. **Each bullet point must be 12 words or less**
-7. **Use bullet list format, NOT paragraphs**
-8. One change per bullet line
-9. Use imperative mood (add, fix, update - not added, fixed, updated)
-10. Use lowercase only (except acronyms and ticket numbers)
+6. **Each bullet point must be 18 words or less**
+7. **Include WHY/impact/details when it adds value** (context-rich descriptions)
+8. **Use bullet list format, NOT paragraphs**
+9. One change per bullet line
+10. Use imperative mood (add, fix, update - not added, fixed, updated)
+11. Use lowercase only (except acronyms and ticket numbers)
 
-**Example (default, without scope):**
+**Bullet Point Quality Guidelines:**
+- ✓ Include WHY or IMPACT: "implement JWT auth to enable secure session management"
+- ✓ Add technical details: "increase timeout from 30s to 120s for large uploads"
+- ✓ Show before/after: "replace oldLogin(username) with login(email, password)"
+- ✓ Mention functions: "add uploadVideo() with format validation"
+- ✓ Note performance: "add Redis caching (reduces DB queries by 60%)"
+- ✓ Include consequences: "remove deprecated API (breaking for v1 clients)"
+
+**Example (basic, minimal context):**
 ```
 feat: add user authentication
 
@@ -702,7 +711,27 @@ feat: add user authentication
 - create user session management
 ```
 
-The summary "add user authentication" captures the overall purpose of all four changes listed below it.
+**Example (improved, with context):**
+```
+feat: add user authentication
+
+- implement JWT token generation for secure session management
+- create login endpoint with email and password validation
+- add bcrypt password hashing to protect user credentials
+- set up session middleware for protected routes
+```
+
+**Example (best, with technical details):**
+```
+fix: resolve video upload timeout for large files
+
+- increase upload timeout from 30s to 120s in config
+- change max file size from 100MB to 500MB
+- replace synchronous upload with chunked streaming for better performance
+- add progress tracking callback for user feedback
+```
+
+The summary captures the overall purpose, while bullets provide context-rich descriptions.
 
 **Example (with scope enabled):**
 ```
@@ -735,7 +764,37 @@ feat: add new icons to library
 - export new icons in index.ts
 ```
 
-The correct format uses short, focused bullet points (max 12 words each), not paragraph-style descriptions.
+The correct format uses focused bullet points (max 18 words) with helpful context, not paragraph-style descriptions.
+
+**Examples showing improvement levels:**
+
+**Level 1 (Minimal - Still acceptable):**
+```
+feat: add video upload feature
+
+- add upload button
+- implement file validation
+- create progress bar
+```
+
+**Level 2 (Better - Adds context):**
+```
+feat: add video upload feature
+
+- add upload button with drag-and-drop support
+- implement file validation for mp4, avi, mov formats
+- create progress bar to show upload status
+```
+
+**Level 3 (Best - Includes WHY/impact/details):**
+```
+feat: add video upload feature
+
+- add upload button with drag-and-drop for better UX
+- implement file validation for mp4, avi, mov (max 500MB)
+- create progress bar with percentage and time remaining display
+- add chunked upload to prevent timeout on large files
+```
 
 **Lowercase Enforcement:** Even if the AI generates uppercase letters, the `enforce_lowercase()` function automatically converts the message to lowercase while intelligently preserving:
 - Ticket number patterns (e.g., ABC-123, JIRA-456, EWQ-789)

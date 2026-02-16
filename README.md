@@ -134,19 +134,26 @@ Without scope (default):
 ```
 <type>: <concise summary>
 
-- <change 1>
-- <change 2>
-- <change 3>
+- <change with context (max 18 words)>
+- <change with context (max 18 words)>
+- <change with context (max 18 words)>
 ```
 
 With scope (`USE_SCOPE=true`):
 ```
 <type>(<scope>): <concise summary>
 
-- <change 1>
-- <change 2>
-- <change 3>
+- <change with context (max 18 words)>
+- <change with context (max 18 words)>
+- <change with context (max 18 words)>
 ```
+
+**Context-Rich Descriptions:**
+The tool generates descriptive bullet points that include WHY, impact, and technical details:
+- ✓ "implement JWT auth **to enable secure session management**"
+- ✓ "increase timeout **from 30s to 120s for large uploads**"
+- ✓ "add Redis caching **(reduces DB queries by 60%)**"
+- ✓ "replace oldLogin(username) **with login(email, password)**"
 
 **Intelligent Type Detection:** The extension automatically suggests the commit type using:
 

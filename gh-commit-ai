@@ -3949,7 +3949,15 @@ CLOSING_INSTRUCTION="CRITICAL: Look at the filenames being changed and describe 
 - If UserProfile.tsx is changed, mention 'user profile'
 - Make your commit message SPECIFIC to what was actually worked on, not generic.
 
-Think: What are all the changes? Then: What's the one-line summary that captures the specific area and all changes?"
+BULLET POINT QUALITY CHECKLIST:
+✓ Can you add WHY this change was made? → 'add JWT auth to enable secure sessions'
+✓ Can you add IMPACT/BENEFIT? → 'add caching to reduce DB queries by 60%'
+✓ Can you add technical details? → 'increase timeout from 30s to 120s'
+✓ Can you show before/after? → 'replace oldLogin() with login() for email support'
+✓ Can you mention specific functions? → 'implement uploadVideo() with validation'
+✓ Are numbers/metrics relevant? → 'increase max file size to 500MB'
+
+Think: What are all the changes? What's the purpose/impact? Then: Write descriptive bullets with context."
 if [ -n "$WP_CONTEXT" ]; then
     CLOSING_INSTRUCTION="$CLOSING_INSTRUCTION
 
@@ -4225,17 +4233,25 @@ YOU MUST FOLLOW THIS EXACT FORMAT:
 
 <type>: <summary max 50 chars>
 
-- bullet 1 (max 12 words)
-- bullet 2 (max 12 words)
-- bullet 3 (max 12 words)
+- bullet 1 with context (max 18 words)
+- bullet 2 with context (max 18 words)
+- bullet 3 with context (max 18 words)
+
+BULLET POINT QUALITY GUIDELINES:
+✓ Include WHY or IMPACT when relevant: \"implement JWT auth to enable secure session management\"
+✓ Add technical details: \"increase timeout from 30s to 120s for large uploads\"
+✓ Show before/after for fixes: \"replace oldLogin(username) with login(email, password)\"
+✓ Mention specific functions/methods: \"add uploadVideo() with format validation\"
+✓ Note performance impacts: \"add Redis caching (reduces DB queries by 60%)\"
+✓ Include consequences: \"remove deprecated API endpoint (breaking change for v1 clients)\"
 
 ABSOLUTELY FORBIDDEN - NEVER DO THIS:
 ❌ NO PARAGRAPHS: \"this commit introduces several new icons to the libs/icons package, including addicon, buildcircleicon, datasaverofficon, datathresholdingicon, lightbulbicon...\"
-❌ NO LONG BULLETS: More than 12 words in one line
+❌ NO LONG BULLETS: More than 18 words in one line
 ❌ NO MULTIPLE SENTENCES: One change per bullet only
-❌ NO EXPLANATORY TEXT: Just list the changes
+❌ NO VAGUE BULLETS: \"update config\" → ✓ \"update API timeout from 30s to 120s in config\"
 
-CORRECT EXAMPLE:
+BASIC EXAMPLE (minimal context):
 feat: add new icons to library
 
 - add addicon component
@@ -4243,11 +4259,24 @@ feat: add new icons to library
 - add datasaverofficon component
 - add datathresholdingicon component
 - add lightbulbicon component
-- create sidebarcontext for state management
-- add usesidebar hook
-- add onmouseleave utility function
 
-COUNT YOUR WORDS - EACH BULLET MUST BE 12 WORDS OR LESS!
+BETTER EXAMPLE (with context):
+feat: add user authentication system
+
+- implement JWT token generation for secure session management
+- create login endpoint with email and password validation
+- add bcrypt password hashing to protect user credentials
+- set up session middleware for protected routes
+
+BEST EXAMPLE (with technical details):
+fix: resolve video upload timeout for large files
+
+- increase upload timeout from 30s to 120s in config
+- change max file size from 100MB to 500MB
+- replace synchronous upload with chunked streaming for better performance
+- add progress tracking callback for user feedback
+
+COUNT YOUR WORDS - EACH BULLET MUST BE 18 WORDS OR LESS!
 
 Now analyze these git changes:
 
@@ -4255,15 +4284,17 @@ $SCOPE_INSTRUCTION
 
 PROCESS:
 1. First, identify all significant changes
-2. List each as a SHORT bullet (max 12 words each!)
-3. Write ONE concise summary line
-4. Choose type: feat, fix, docs, style, refactor, test, or chore
+2. For each change, determine if you can add WHY/impact/technical details
+3. Write descriptive bullets (max 18 words) that include context where helpful
+4. Write ONE concise summary line that captures the overall change
+5. Choose type: feat, fix, docs, style, refactor, test, or chore
 
 RULES:
 - Summary line: max 50 chars
-- EACH BULLET: MAXIMUM 12 WORDS - COUNT THEM
+- EACH BULLET: MAXIMUM 18 WORDS - COUNT THEM
+- Include context (why/impact/details) when it adds value
 - ONE change per bullet line
-- NO paragraphs, NO long sentences
+- NO paragraphs, NO multiple sentences per bullet
 - Use lowercase (except API, HTTP, JSON, JWT, SQL, ticket codes like ABC-123)
 - Ticket codes stay UPPERCASE: ABC-123 not abc-123
 - Use imperative mood: add/fix not added/fixed
