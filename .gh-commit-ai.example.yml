@@ -109,6 +109,28 @@ diff_max_lines: 200
 # - Emoji usage
 learn_from_history: true
 
+# Streaming Configuration
+# Stream AI responses to terminal in real-time
+# Default: auto (enabled for TTY, disabled for pipes/scripts)
+# Options: auto, true, false
+# Note: Automatically disabled for --preview, --dry-run, --options, --verbose modes
+# Use --no-stream flag to disable for a single run
+stream_enabled: auto
+
+# Secret Scanning
+# Scan diffs for potential secrets before sending to cloud AI providers
+# Default: false (disabled)
+# When enabled, warns about API keys, tokens, passwords in your diff
+# Only applies to cloud providers (Anthropic, OpenAI, Groq) - Ollama is local
+# skip_secret_scan: false
+
+# Analytics
+# Track usage statistics locally (opt-in)
+# Default: false (disabled)
+# Data stored in ~/.gh-commit-ai/analytics/ as JSONL files
+# View stats with: gh commit-ai stats
+# analytics_enabled: false
+
 # Note: API keys (ANTHROPIC_API_KEY, OPENAI_API_KEY, GROQ_API_KEY) cannot be stored in config files
 # Set them as environment variables instead:
 #   export ANTHROPIC_API_KEY="sk-ant-..."
