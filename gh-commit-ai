@@ -767,13 +767,15 @@ streaming_api_call() {
     kill "$_STREAM_SPINNER_PID" 2>/dev/null
     wait "$_STREAM_SPINNER_PID" 2>/dev/null
 
-    # Check if we got any output
-    if [ $exit_code -ne 0 ] || [ ! -s "$output_file" ]; then
-        printf "\r%-50s\r" " " >&2
-        return 1
+    # Success if the parser produced output, regardless of curl exit code.
+    # Streaming APIs often close the connection in ways that make curl return
+    # non-zero (e.g., 18/56) even though the full response was received.
+    if [ -s "$output_file" ]; then
+        return 0
     fi
 
-    return 0
+    printf "\r%-${COLUMNS:-80}s\r" " " >&2
+    return 1
 }
 
 # Auto-detect available AI providers and models
@@ -4494,17 +4496,22 @@ if [ "$COMMIT_SIZE_INT" -lt "$ANALYSIS_THRESHOLD" ] && [ "$COMMIT_SIZE_INT" -gt 
     SKIP_EXPENSIVE_ANALYSIS=true
 fi
 
+# Count changed files to gauge commit scope
+NUM_CHANGED_FILES=$(echo "$GIT_STATUS" | grep -c '[^ ]' 2>/dev/null || echo "0")
+
 # Spawn all analysis jobs in parallel (background)
 # Skip expensive operations for small commits to improve speed
 PARALLEL_JOBS=0
 
-if [ "$LEARN_FROM_HISTORY" = "true" ]; then
+# History analysis: skip for small commits (1-2 files under threshold) — these
+# scan 50-100 commits and are the heaviest parallel jobs.
+if [ "$LEARN_FROM_HISTORY" = "true" ] && [ "$SKIP_EXPENSIVE_ANALYSIS" = false ]; then
     analyze_commit_history > "$TEMP_HISTORY" 2>/dev/null &
     get_best_commit_examples > "$TEMP_EXAMPLES" 2>/dev/null &
     ((PARALLEL_JOBS+=2))
 fi
 
-# Lightweight analysis (always run)
+# Lightweight analysis (always run — just string matching)
 extract_file_context "$GIT_STATUS" > "$TEMP_CONTEXTS" 2>/dev/null &
 generate_file_summaries "$GIT_STATUS" > "$TEMP_SUMMARIES" 2>/dev/null &
 ((PARALLEL_JOBS+=2))
@@ -4514,20 +4521,24 @@ if [ "$SKIP_EXPENSIVE_ANALYSIS" = false ]; then
     extract_changed_functions "$GIT_DIFF" > "$TEMP_FUNCTIONS" 2>/dev/null &
     analyze_change_type "$GIT_DIFF" > "$TEMP_CHANGES" 2>/dev/null &
     detect_file_relationships "$GIT_STATUS" > "$TEMP_RELATIONSHIPS" 2>/dev/null &
-    extract_wordpress_function_calls "$GIT_DIFF" > "$TEMP_WP_FUNCTIONS" 2>/dev/null &
-    ((PARALLEL_JOBS+=4))
+    # Only run WordPress extraction if the diff looks like WordPress code
+    if echo "$GIT_STATUS" | grep -qE 'wp-content|wp-admin|wp-includes|functions\.php'; then
+        extract_wordpress_function_calls "$GIT_DIFF" > "$TEMP_WP_FUNCTIONS" 2>/dev/null &
+        ((PARALLEL_JOBS+=1))
+    fi
+    ((PARALLEL_JOBS+=3))
 fi
 
-# Show simple progress message for parallel analysis
-if [ "$PARALLEL_JOBS" -gt 0 ]; then
+# Show progress for parallel analysis (skip message for trivial cases)
+if [ "$PARALLEL_JOBS" -gt 2 ]; then
     printf "⚡ Analyzing changes (%d parallel jobs)... " "$PARALLEL_JOBS" >&2
 fi
 
 # Wait for all background jobs to complete
 wait
 
-# Show completion message
-if [ "$PARALLEL_JOBS" -gt 0 ]; then
+# Show completion message (only if we showed the progress message)
+if [ "$PARALLEL_JOBS" -gt 2 ]; then
     printf "✓\n" >&2
 fi
 
