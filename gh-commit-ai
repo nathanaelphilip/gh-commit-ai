@@ -739,6 +739,20 @@ streaming_api_call() {
     shift 4
     local header_args=("$@")
 
+    # Start a background spinner that animates while waiting for first token.
+    # The parser will kill it once data starts flowing.
+    # Uses global _STREAM_SPINNER_PID so the parser (in a pipe subshell) can access it.
+    (
+        local arrows=("←" "↖" "↑" "↗" "→" "↘" "↓" "↙")
+        local i=0
+        while true; do
+            printf "\r%s Generating" "${arrows[$i]}" >&2
+            i=$(( (i + 1) % 8 ))
+            sleep 0.15
+        done
+    ) &
+    _STREAM_SPINNER_PID=$!
+
     # Use curl with -N (no buffering) for streaming
     curl -sN -X POST "$url" \
         "${header_args[@]}" \
@@ -749,8 +763,13 @@ streaming_api_call() {
 
     local exit_code=${PIPESTATUS[0]}
 
+    # Ensure spinner is stopped
+    kill "$_STREAM_SPINNER_PID" 2>/dev/null
+    wait "$_STREAM_SPINNER_PID" 2>/dev/null
+
     # Check if we got any output
     if [ $exit_code -ne 0 ] || [ ! -s "$output_file" ]; then
+        printf "\r%-50s\r" " " >&2
         return 1
     fi
 
@@ -3069,15 +3088,35 @@ should_stream() {
 STREAM_ARROWS=("←" "↖" "↑" "↗" "→" "↘" "↓" "↙")
 STREAM_ARROW_IDX=0
 
-# Print rotating arrow to stderr (call directly, NOT via $() substitution)
-# Optional argument is printed after the arrow (e.g., "Generating")
-print_stream_arrow() {
-    if [ -n "$1" ]; then
-        printf "\r%s %s" "${STREAM_ARROWS[$STREAM_ARROW_IDX]}" "$1" >&2
-    else
-        printf "\r%s" "${STREAM_ARROWS[$STREAM_ARROW_IDX]}" >&2
-    fi
+# Print rotating arrow with live text preview on a single line.
+# Shows: ← Generating: feat: add video upload with fo...
+# Args: $1 = full accumulated text so far
+print_stream_progress() {
+    local text="$1"
+    local arrow="${STREAM_ARROWS[$STREAM_ARROW_IDX]}"
     STREAM_ARROW_IDX=$(( (STREAM_ARROW_IDX + 1) % 8 ))
+
+    # Get terminal width (default 80)
+    local cols=${COLUMNS:-$(tput cols 2>/dev/null || echo 80)}
+
+    # Build the display line: "← Generating: <preview>"
+    local prefix="$arrow Generating: "
+    local max_preview=$(( cols - ${#prefix} - 3 ))  # 3 for "..."
+
+    if [ -z "$text" ]; then
+        printf "\r%-${cols}s\r%s Generating" " " "$arrow" >&2
+        return
+    fi
+
+    # Take first line only and truncate for preview
+    local preview
+    preview=$(echo "$text" | head -1 | tr -d '\n')
+
+    if [ ${#preview} -gt $max_preview ] && [ $max_preview -gt 0 ]; then
+        preview="${preview:0:$max_preview}..."
+    fi
+
+    printf "\r%-${cols}s\r%s%s" " " "$prefix" "$preview" >&2
 }
 
 # Parse Ollama streaming response
@@ -3086,8 +3125,7 @@ print_stream_arrow() {
 parse_ollama_stream() {
     local accum_file="$1"
     local full_response=""
-
-    print_stream_arrow "Generating"
+    local got_first_token=false
 
     while IFS= read -r line; do
         [ -z "$line" ] && continue
@@ -3120,12 +3158,16 @@ parse_ollama_stream() {
         }')
 
         if [ -n "$token" ]; then
+            if [ "$got_first_token" = false ]; then
+                got_first_token=true
+                kill "$_STREAM_SPINNER_PID" 2>/dev/null
+            fi
             full_response="${full_response}${token}"
-            print_stream_arrow
+            print_stream_progress "$full_response"
         fi
     done
 
-    printf "\r%-50s\r" " " >&2
+    printf "\r%-${COLUMNS:-80}s\r" " " >&2
     echo "$full_response" > "$accum_file"
 }
 
@@ -3137,8 +3179,7 @@ parse_anthropic_stream() {
     local full_response=""
     local input_tokens=0
     local output_tokens=0
-
-    print_stream_arrow "Generating"
+    local got_first_token=false
 
     while IFS= read -r line; do
         [ -z "$line" ] && continue
@@ -3177,8 +3218,12 @@ parse_anthropic_stream() {
                 }')
 
                 if [ -n "$token" ]; then
+                    if [ "$got_first_token" = false ]; then
+                        got_first_token=true
+                        kill "$_STREAM_SPINNER_PID" 2>/dev/null
+                    fi
                     full_response="${full_response}${token}"
-                    print_stream_arrow
+                    print_stream_progress "$full_response"
                 fi
             fi
 
@@ -3188,7 +3233,7 @@ parse_anthropic_stream() {
         fi
     done
 
-    printf "\r%-50s\r" " " >&2
+    printf "\r%-${COLUMNS:-80}s\r" " " >&2
 
     echo "$full_response" > "$accum_file"
     echo "${input_tokens:-0}" > "${accum_file}.input_tokens"
@@ -3203,8 +3248,7 @@ parse_openai_stream() {
     local full_response=""
     local input_tokens=0
     local output_tokens=0
-
-    print_stream_arrow "Generating"
+    local got_first_token=false
 
     while IFS= read -r line; do
         [ -z "$line" ] && continue
@@ -3240,8 +3284,12 @@ parse_openai_stream() {
             }')
 
             if [ -n "$token" ]; then
+                if [ "$got_first_token" = false ]; then
+                    got_first_token=true
+                    kill "$_STREAM_SPINNER_PID" 2>/dev/null
+                fi
                 full_response="${full_response}${token}"
-                print_stream_arrow
+                print_stream_progress "$full_response"
             fi
 
             if echo "$data" | grep -q '"usage"'; then
@@ -3251,7 +3299,7 @@ parse_openai_stream() {
         fi
     done
 
-    printf "\r%-50s\r" " " >&2
+    printf "\r%-${COLUMNS:-80}s\r" " " >&2
 
     echo "$full_response" > "$accum_file"
     # Write token counts to sidecar files
@@ -3313,7 +3361,7 @@ if [ "$AMEND" = true ]; then
     ) &
     ANALYZE_PID=$!
 
-    show_spinner "$ANALYZE_PID" "Analyzing last commit"
+    show_spinner "$ANALYZE_PID" "Reading last commit"
     wait "$ANALYZE_PID"
 
     # Read results from temp files
@@ -3323,7 +3371,7 @@ if [ "$AMEND" = true ]; then
     COMMIT_SIZE=$(cat "$size_file" 2>/dev/null || echo "0")
     rm -f "$status_file" "$stats_file" "$diff_file" "$size_file"
 
-    echo "✓ Commit analyzed"
+    echo "✓ Diff loaded"
 else
     # Check if there are changes to commit (exclude lock files from check)
     if eval "git diff --cached --quiet $GIT_EXCLUDE_PATTERN" && eval "git diff --quiet $GIT_EXCLUDE_PATTERN"; then
@@ -3377,7 +3425,7 @@ else
     ) &
     ANALYZE_PID=$!
 
-    show_spinner "$ANALYZE_PID" "Analyzing changes"
+    show_spinner "$ANALYZE_PID" "Reading diff"
     wait "$ANALYZE_PID"
 
     # Read results from temp files
@@ -3387,7 +3435,7 @@ else
     COMMIT_SIZE=$(cat "$size_file" 2>/dev/null || echo "0")
     rm -f "$status_file" "$stats_file" "$diff_file" "$size_file"
 
-    echo "✓ Changes analyzed"
+    echo "✓ Diff loaded"
 
     # Show auto-detection info if applicable
     if [ "$AUTO_DETECTED" = "true" ]; then
