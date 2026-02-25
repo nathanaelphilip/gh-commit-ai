@@ -3110,9 +3110,11 @@ print_stream_progress() {
         return
     fi
 
+    # Replace literal \n with spaces for clean preview display
+    local clean_text="${text//\\n/ }"
     # Take first line only and truncate for preview
     local preview
-    preview=$(echo "$text" | head -1 | tr -d '\n')
+    preview=$(echo "$clean_text" | head -1 | tr -d '\n')
 
     if [ ${#preview} -gt $max_preview ] && [ $max_preview -gt 0 ]; then
         preview="${preview:0:$max_preview}..."
@@ -3170,7 +3172,7 @@ parse_ollama_stream() {
     done
 
     printf "\r%-${COLUMNS:-80}s\r" " " >&2
-    echo "$full_response" > "$accum_file"
+    printf '%s\n' "$full_response" > "$accum_file"
 }
 
 # Parse Anthropic SSE streaming response
@@ -3237,7 +3239,7 @@ parse_anthropic_stream() {
 
     printf "\r%-${COLUMNS:-80}s\r" " " >&2
 
-    echo "$full_response" > "$accum_file"
+    printf '%s\n' "$full_response" > "$accum_file"
     echo "${input_tokens:-0}" > "${accum_file}.input_tokens"
     echo "${output_tokens:-0}" > "${accum_file}.output_tokens"
 }
@@ -3303,7 +3305,7 @@ parse_openai_stream() {
 
     printf "\r%-${COLUMNS:-80}s\r" " " >&2
 
-    echo "$full_response" > "$accum_file"
+    printf '%s\n' "$full_response" > "$accum_file"
     # Write token counts to sidecar files
     echo "${input_tokens:-0}" > "${accum_file}.input_tokens"
     echo "${output_tokens:-0}" > "${accum_file}.output_tokens"
@@ -5119,7 +5121,7 @@ escape_json() {
     echo "$1" | sed 's/\\/\\\\/g; s/"/\\"/g; s/\n/\\n/g; s/\r/\\r/g; s/\t/\\t/g' | awk '{printf "%s\\n", $0}' | sed '$ s/\\n$//'
 }
 
-# Unescape JSON strings (handle unicode escapes like \u0026)
+# Unescape JSON strings (handle unicode escapes like \u0026, \n, \\, \", etc.)
 unescape_json() {
     local text="$1"
 
@@ -5133,11 +5135,10 @@ unescape_json() {
         text="${text/\\u$hex/$char}"
     done
 
-    # Then handle standard JSON escapes
-    text="${text//\\\\/\\}"    # \\ -> \
-    text="${text//\\\"/\"}"    # \" -> "
-
-    echo "$text"
+    # Handle all standard JSON escapes in one pass using printf %b
+    # This correctly handles: \n → newline, \t → tab, \\ → \, \" → "
+    # And importantly: \\n in JSON → literal \n (not a newline)
+    printf '%b' "$text"
 }
 
 # Enforce lowercase on commit message while preserving acronyms and ticket numbers
