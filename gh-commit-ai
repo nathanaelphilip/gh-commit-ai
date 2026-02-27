@@ -739,20 +739,6 @@ streaming_api_call() {
     shift 4
     local header_args=("$@")
 
-    # Start a background spinner that animates while waiting for first token.
-    # The parser will kill it once data starts flowing.
-    # Uses global _STREAM_SPINNER_PID so the parser (in a pipe subshell) can access it.
-    (
-        local arrows=("←" "↖" "↑" "↗" "→" "↘" "↓" "↙")
-        local i=0
-        while true; do
-            printf "\r%s Generating" "${arrows[$i]}" >&2
-            i=$(( (i + 1) % 8 ))
-            sleep 0.15
-        done
-    ) &
-    _STREAM_SPINNER_PID=$!
-
     # Use curl with -N (no buffering) for streaming
     curl -sN -X POST "$url" \
         "${header_args[@]}" \
@@ -763,19 +749,12 @@ streaming_api_call() {
 
     local exit_code=${PIPESTATUS[0]}
 
-    # Ensure spinner is stopped
-    kill "$_STREAM_SPINNER_PID" 2>/dev/null
-    wait "$_STREAM_SPINNER_PID" 2>/dev/null
-
-    # Success if the parser produced output, regardless of curl exit code.
-    # Streaming APIs often close the connection in ways that make curl return
-    # non-zero (e.g., 18/56) even though the full response was received.
-    if [ -s "$output_file" ]; then
-        return 0
+    # Check if we got any output
+    if [ $exit_code -ne 0 ] || [ ! -s "$output_file" ]; then
+        return 1
     fi
 
-    printf "\r%-${COLUMNS:-80}s\r" " " >&2
-    return 1
+    return 0
 }
 
 # Auto-detect available AI providers and models
@@ -3090,37 +3069,10 @@ should_stream() {
 STREAM_ARROWS=("←" "↖" "↑" "↗" "→" "↘" "↓" "↙")
 STREAM_ARROW_IDX=0
 
-# Print rotating arrow with live text preview on a single line.
-# Shows: ← Generating: feat: add video upload with fo...
-# Args: $1 = full accumulated text so far
-print_stream_progress() {
-    local text="$1"
-    local arrow="${STREAM_ARROWS[$STREAM_ARROW_IDX]}"
+# Get next rotating arrow for streaming output
+next_stream_arrow() {
+    printf "%s" "${STREAM_ARROWS[$STREAM_ARROW_IDX]}"
     STREAM_ARROW_IDX=$(( (STREAM_ARROW_IDX + 1) % 8 ))
-
-    # Get terminal width (default 80)
-    local cols=${COLUMNS:-$(tput cols 2>/dev/null || echo 80)}
-
-    # Build the display line: "← Generating: <preview>"
-    local prefix="$arrow Generating: "
-    local max_preview=$(( cols - ${#prefix} - 3 ))  # 3 for "..."
-
-    if [ -z "$text" ]; then
-        printf "\r%-${cols}s\r%s Generating" " " "$arrow" >&2
-        return
-    fi
-
-    # Replace literal \n with spaces for clean preview display
-    local clean_text="${text//\\n/ }"
-    # Take first line only and truncate for preview
-    local preview
-    preview=$(echo "$clean_text" | head -1 | tr -d '\n')
-
-    if [ ${#preview} -gt $max_preview ] && [ $max_preview -gt 0 ]; then
-        preview="${preview:0:$max_preview}..."
-    fi
-
-    printf "\r%-${cols}s\r%s%s" " " "$prefix" "$preview" >&2
 }
 
 # Parse Ollama streaming response
@@ -3129,7 +3081,8 @@ print_stream_progress() {
 parse_ollama_stream() {
     local accum_file="$1"
     local full_response=""
-    local got_first_token=false
+
+    printf "\r%s Generating" "$(next_stream_arrow)" >&2
 
     while IFS= read -r line; do
         [ -z "$line" ] && continue
@@ -3162,17 +3115,13 @@ parse_ollama_stream() {
         }')
 
         if [ -n "$token" ]; then
-            if [ "$got_first_token" = false ]; then
-                got_first_token=true
-                kill "$_STREAM_SPINNER_PID" 2>/dev/null
-            fi
             full_response="${full_response}${token}"
-            print_stream_progress "$full_response"
+            printf "\r%s" "$(next_stream_arrow)" >&2
         fi
     done
 
-    printf "\r%-${COLUMNS:-80}s\r" " " >&2
-    printf '%s\n' "$full_response" > "$accum_file"
+    printf "\r%-50s\r" " " >&2
+    echo "$full_response" > "$accum_file"
 }
 
 # Parse Anthropic SSE streaming response
@@ -3183,7 +3132,8 @@ parse_anthropic_stream() {
     local full_response=""
     local input_tokens=0
     local output_tokens=0
-    local got_first_token=false
+
+    printf "\r%s Generating" "$(next_stream_arrow)" >&2
 
     while IFS= read -r line; do
         [ -z "$line" ] && continue
@@ -3222,12 +3172,8 @@ parse_anthropic_stream() {
                 }')
 
                 if [ -n "$token" ]; then
-                    if [ "$got_first_token" = false ]; then
-                        got_first_token=true
-                        kill "$_STREAM_SPINNER_PID" 2>/dev/null
-                    fi
                     full_response="${full_response}${token}"
-                    print_stream_progress "$full_response"
+                    printf "\r%s" "$(next_stream_arrow)" >&2
                 fi
             fi
 
@@ -3237,9 +3183,9 @@ parse_anthropic_stream() {
         fi
     done
 
-    printf "\r%-${COLUMNS:-80}s\r" " " >&2
+    printf "\r%-50s\r" " " >&2
 
-    printf '%s\n' "$full_response" > "$accum_file"
+    echo "$full_response" > "$accum_file"
     echo "${input_tokens:-0}" > "${accum_file}.input_tokens"
     echo "${output_tokens:-0}" > "${accum_file}.output_tokens"
 }
@@ -3252,7 +3198,8 @@ parse_openai_stream() {
     local full_response=""
     local input_tokens=0
     local output_tokens=0
-    local got_first_token=false
+
+    printf "\r%s Generating" "$(next_stream_arrow)" >&2
 
     while IFS= read -r line; do
         [ -z "$line" ] && continue
@@ -3288,12 +3235,8 @@ parse_openai_stream() {
             }')
 
             if [ -n "$token" ]; then
-                if [ "$got_first_token" = false ]; then
-                    got_first_token=true
-                    kill "$_STREAM_SPINNER_PID" 2>/dev/null
-                fi
                 full_response="${full_response}${token}"
-                print_stream_progress "$full_response"
+                printf "\r%s" "$(next_stream_arrow)" >&2
             fi
 
             if echo "$data" | grep -q '"usage"'; then
@@ -3303,9 +3246,9 @@ parse_openai_stream() {
         fi
     done
 
-    printf "\r%-${COLUMNS:-80}s\r" " " >&2
+    printf "\r%-50s\r" " " >&2
 
-    printf '%s\n' "$full_response" > "$accum_file"
+    echo "$full_response" > "$accum_file"
     # Write token counts to sidecar files
     echo "${input_tokens:-0}" > "${accum_file}.input_tokens"
     echo "${output_tokens:-0}" > "${accum_file}.output_tokens"
@@ -3365,7 +3308,7 @@ if [ "$AMEND" = true ]; then
     ) &
     ANALYZE_PID=$!
 
-    show_spinner "$ANALYZE_PID" "Reading last commit"
+    show_spinner "$ANALYZE_PID" "Analyzing last commit"
     wait "$ANALYZE_PID"
 
     # Read results from temp files
@@ -3375,7 +3318,7 @@ if [ "$AMEND" = true ]; then
     COMMIT_SIZE=$(cat "$size_file" 2>/dev/null || echo "0")
     rm -f "$status_file" "$stats_file" "$diff_file" "$size_file"
 
-    echo "✓ Diff loaded"
+    echo "✓ Commit analyzed"
 else
     # Check if there are changes to commit (exclude lock files from check)
     if eval "git diff --cached --quiet $GIT_EXCLUDE_PATTERN" && eval "git diff --quiet $GIT_EXCLUDE_PATTERN"; then
@@ -3429,7 +3372,7 @@ else
     ) &
     ANALYZE_PID=$!
 
-    show_spinner "$ANALYZE_PID" "Reading diff"
+    show_spinner "$ANALYZE_PID" "Analyzing changes"
     wait "$ANALYZE_PID"
 
     # Read results from temp files
@@ -3439,7 +3382,7 @@ else
     COMMIT_SIZE=$(cat "$size_file" 2>/dev/null || echo "0")
     rm -f "$status_file" "$stats_file" "$diff_file" "$size_file"
 
-    echo "✓ Diff loaded"
+    echo "✓ Changes analyzed"
 
     # Show auto-detection info if applicable
     if [ "$AUTO_DETECTED" = "true" ]; then
@@ -4498,22 +4441,17 @@ if [ "$COMMIT_SIZE_INT" -lt "$ANALYSIS_THRESHOLD" ] && [ "$COMMIT_SIZE_INT" -gt 
     SKIP_EXPENSIVE_ANALYSIS=true
 fi
 
-# Count changed files to gauge commit scope
-NUM_CHANGED_FILES=$(echo "$GIT_STATUS" | grep -c '[^ ]' 2>/dev/null || echo "0")
-
 # Spawn all analysis jobs in parallel (background)
 # Skip expensive operations for small commits to improve speed
 PARALLEL_JOBS=0
 
-# History analysis: skip for small commits (1-2 files under threshold) — these
-# scan 50-100 commits and are the heaviest parallel jobs.
-if [ "$LEARN_FROM_HISTORY" = "true" ] && [ "$SKIP_EXPENSIVE_ANALYSIS" = false ]; then
+if [ "$LEARN_FROM_HISTORY" = "true" ]; then
     analyze_commit_history > "$TEMP_HISTORY" 2>/dev/null &
     get_best_commit_examples > "$TEMP_EXAMPLES" 2>/dev/null &
     ((PARALLEL_JOBS+=2))
 fi
 
-# Lightweight analysis (always run — just string matching)
+# Lightweight analysis (always run)
 extract_file_context "$GIT_STATUS" > "$TEMP_CONTEXTS" 2>/dev/null &
 generate_file_summaries "$GIT_STATUS" > "$TEMP_SUMMARIES" 2>/dev/null &
 ((PARALLEL_JOBS+=2))
@@ -4523,24 +4461,20 @@ if [ "$SKIP_EXPENSIVE_ANALYSIS" = false ]; then
     extract_changed_functions "$GIT_DIFF" > "$TEMP_FUNCTIONS" 2>/dev/null &
     analyze_change_type "$GIT_DIFF" > "$TEMP_CHANGES" 2>/dev/null &
     detect_file_relationships "$GIT_STATUS" > "$TEMP_RELATIONSHIPS" 2>/dev/null &
-    # Only run WordPress extraction if the diff looks like WordPress code
-    if echo "$GIT_STATUS" | grep -qE 'wp-content|wp-admin|wp-includes|functions\.php'; then
-        extract_wordpress_function_calls "$GIT_DIFF" > "$TEMP_WP_FUNCTIONS" 2>/dev/null &
-        ((PARALLEL_JOBS+=1))
-    fi
-    ((PARALLEL_JOBS+=3))
+    extract_wordpress_function_calls "$GIT_DIFF" > "$TEMP_WP_FUNCTIONS" 2>/dev/null &
+    ((PARALLEL_JOBS+=4))
 fi
 
-# Show progress for parallel analysis (skip message for trivial cases)
-if [ "$PARALLEL_JOBS" -gt 2 ]; then
+# Show simple progress message for parallel analysis
+if [ "$PARALLEL_JOBS" -gt 0 ]; then
     printf "⚡ Analyzing changes (%d parallel jobs)... " "$PARALLEL_JOBS" >&2
 fi
 
 # Wait for all background jobs to complete
 wait
 
-# Show completion message (only if we showed the progress message)
-if [ "$PARALLEL_JOBS" -gt 2 ]; then
+# Show completion message
+if [ "$PARALLEL_JOBS" -gt 0 ]; then
     printf "✓\n" >&2
 fi
 
@@ -5121,7 +5055,7 @@ escape_json() {
     echo "$1" | sed 's/\\/\\\\/g; s/"/\\"/g; s/\n/\\n/g; s/\r/\\r/g; s/\t/\\t/g' | awk '{printf "%s\\n", $0}' | sed '$ s/\\n$//'
 }
 
-# Unescape JSON strings (handle unicode escapes like \u0026, \n, \\, \", etc.)
+# Unescape JSON strings (handle unicode escapes like \u0026)
 unescape_json() {
     local text="$1"
 
@@ -5135,10 +5069,11 @@ unescape_json() {
         text="${text/\\u$hex/$char}"
     done
 
-    # Handle all standard JSON escapes in one pass using printf %b
-    # This correctly handles: \n → newline, \t → tab, \\ → \, \" → "
-    # And importantly: \\n in JSON → literal \n (not a newline)
-    printf '%b' "$text"
+    # Then handle standard JSON escapes
+    text="${text//\\\\/\\}"    # \\ -> \
+    text="${text//\\\"/\"}"    # \" -> "
+
+    echo "$text"
 }
 
 # Enforce lowercase on commit message while preserving acronyms and ticket numbers
@@ -7000,12 +6935,17 @@ while true; do
 
         if [ "$AMEND" = true ]; then
             # Amend the last commit with new message using HEREDOC for proper newline handling
-            git commit --amend -m "$(cat <<EOF
+            if git commit --amend -m "$(cat <<EOF
 $CLEAN_MSG
 EOF
-)"
-            echo "✓ Amended commit successfully!"
-            clear_message_history
+)"; then
+                echo "✓ Amended commit successfully!"
+                clear_message_history
+            else
+                echo -e "\n${RED}Error: Commit failed (pre-commit hook or other error)${NC}"
+                echo "Your message has been saved. Run gh commit-ai again to reuse it."
+                exit 1
+            fi
         else
             # Stage all changes if nothing is staged
             if git diff --cached --quiet; then
@@ -7014,12 +6954,17 @@ EOF
             fi
 
             # Commit with the generated message using HEREDOC for proper newline handling
-            git commit -m "$(cat <<EOF
+            if git commit -m "$(cat <<EOF
 $CLEAN_MSG
 EOF
-)"
-            echo "✓ Committed successfully!"
-            clear_message_history
+)"; then
+                echo "✓ Committed successfully!"
+                clear_message_history
+            else
+                echo -e "\n${RED}Error: Commit failed (pre-commit hook or other error)${NC}"
+                echo "Your message has been saved. Run gh commit-ai again to reuse it."
+                exit 1
+            fi
         fi
         break
     elif [[ $REPLY =~ ^[Ee]$ ]]; then
@@ -7030,19 +6975,29 @@ EOF
 
         # Allow user to edit the message in editor using HEREDOC for proper newline handling
         if [ "$AMEND" = true ]; then
-            git commit --amend -e -m "$(cat <<EOF
+            if git commit --amend -e -m "$(cat <<EOF
 $CLEAN_MSG
 EOF
-)"
-            echo "✓ Amended commit with edited message!"
-            clear_message_history
+)"; then
+                echo "✓ Amended commit with edited message!"
+                clear_message_history
+            else
+                echo -e "\n${RED}Error: Commit failed (pre-commit hook or other error)${NC}"
+                echo "Your message has been saved. Run gh commit-ai again to reuse it."
+                exit 1
+            fi
         else
-            git commit -e -m "$(cat <<EOF
+            if git commit -e -m "$(cat <<EOF
 $CLEAN_MSG
 EOF
-)"
-            echo "✓ Committed with edited message!"
-            clear_message_history
+)"; then
+                echo "✓ Committed with edited message!"
+                clear_message_history
+            else
+                echo -e "\n${RED}Error: Commit failed (pre-commit hook or other error)${NC}"
+                echo "Your message has been saved. Run gh commit-ai again to reuse it."
+                exit 1
+            fi
         fi
         break
     elif [[ $REPLY =~ ^[Rr]$ ]]; then

@@ -361,12 +361,17 @@ while true; do
 
         if [ "$AMEND" = true ]; then
             # Amend the last commit with new message using HEREDOC for proper newline handling
-            git commit --amend -m "$(cat <<EOF
+            if git commit --amend -m "$(cat <<EOF
 $CLEAN_MSG
 EOF
-)"
-            echo "✓ Amended commit successfully!"
-            clear_message_history
+)"; then
+                echo "✓ Amended commit successfully!"
+                clear_message_history
+            else
+                echo -e "\n${RED}Error: Commit failed (pre-commit hook or other error)${NC}"
+                echo "Your message has been saved. Run gh commit-ai again to reuse it."
+                exit 1
+            fi
         else
             # Stage all changes if nothing is staged
             if git diff --cached --quiet; then
@@ -375,12 +380,17 @@ EOF
             fi
 
             # Commit with the generated message using HEREDOC for proper newline handling
-            git commit -m "$(cat <<EOF
+            if git commit -m "$(cat <<EOF
 $CLEAN_MSG
 EOF
-)"
-            echo "✓ Committed successfully!"
-            clear_message_history
+)"; then
+                echo "✓ Committed successfully!"
+                clear_message_history
+            else
+                echo -e "\n${RED}Error: Commit failed (pre-commit hook or other error)${NC}"
+                echo "Your message has been saved. Run gh commit-ai again to reuse it."
+                exit 1
+            fi
         fi
         break
     elif [[ $REPLY =~ ^[Ee]$ ]]; then
@@ -391,19 +401,29 @@ EOF
 
         # Allow user to edit the message in editor using HEREDOC for proper newline handling
         if [ "$AMEND" = true ]; then
-            git commit --amend -e -m "$(cat <<EOF
+            if git commit --amend -e -m "$(cat <<EOF
 $CLEAN_MSG
 EOF
-)"
-            echo "✓ Amended commit with edited message!"
-            clear_message_history
+)"; then
+                echo "✓ Amended commit with edited message!"
+                clear_message_history
+            else
+                echo -e "\n${RED}Error: Commit failed (pre-commit hook or other error)${NC}"
+                echo "Your message has been saved. Run gh commit-ai again to reuse it."
+                exit 1
+            fi
         else
-            git commit -e -m "$(cat <<EOF
+            if git commit -e -m "$(cat <<EOF
 $CLEAN_MSG
 EOF
-)"
-            echo "✓ Committed with edited message!"
-            clear_message_history
+)"; then
+                echo "✓ Committed with edited message!"
+                clear_message_history
+            else
+                echo -e "\n${RED}Error: Commit failed (pre-commit hook or other error)${NC}"
+                echo "Your message has been saved. Run gh commit-ai again to reuse it."
+                exit 1
+            fi
         fi
         break
     elif [[ $REPLY =~ ^[Rr]$ ]]; then
