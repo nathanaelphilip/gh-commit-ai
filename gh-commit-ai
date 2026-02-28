@@ -715,7 +715,13 @@ retry_api_call() {
         local error_msg=""
         case $exit_code in
             0)
-                error_msg="API error (rate limit or invalid response)"
+                # curl succeeded but response contains an error - extract the actual message
+                local api_error=$(grep -o '"error":"[^"]*"' "$output_file" 2>/dev/null | head -1 | sed 's/"error":"//;s/"$//')
+                if [ -n "$api_error" ]; then
+                    error_msg="$provider_name error: $api_error"
+                else
+                    error_msg="API error (invalid response)"
+                fi
                 ;;
             6)
                 error_msg="Could not resolve host"
