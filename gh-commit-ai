@@ -90,6 +90,24 @@ parse_yaml_config() {
             analytics_enabled|ANALYTICS_ENABLED)
                 CONFIG_ANALYTICS_ENABLED="${CONFIG_ANALYTICS_ENABLED:-$value}"
                 ;;
+            pipeline_enabled|PIPELINE_ENABLED)
+                CONFIG_PIPELINE_ENABLED="${CONFIG_PIPELINE_ENABLED:-$value}"
+                ;;
+            analysis_model|ANALYSIS_MODEL)
+                CONFIG_ANALYSIS_MODEL="${CONFIG_ANALYSIS_MODEL:-$value}"
+                ;;
+            analysis_provider|ANALYSIS_PROVIDER)
+                CONFIG_ANALYSIS_PROVIDER="${CONFIG_ANALYSIS_PROVIDER:-$value}"
+                ;;
+            analysis_anthropic_model|ANALYSIS_ANTHROPIC_MODEL)
+                CONFIG_ANALYSIS_ANTHROPIC_MODEL="${CONFIG_ANALYSIS_ANTHROPIC_MODEL:-$value}"
+                ;;
+            analysis_openai_model|ANALYSIS_OPENAI_MODEL)
+                CONFIG_ANALYSIS_OPENAI_MODEL="${CONFIG_ANALYSIS_OPENAI_MODEL:-$value}"
+                ;;
+            analysis_groq_model|ANALYSIS_GROQ_MODEL)
+                CONFIG_ANALYSIS_GROQ_MODEL="${CONFIG_ANALYSIS_GROQ_MODEL:-$value}"
+                ;;
             *)
                 # Track unknown keys for validation warnings
                 CONFIG_UNKNOWN_KEYS+=("$key")
@@ -99,7 +117,7 @@ parse_yaml_config() {
 }
 
 # Known config keys for validation
-KNOWN_CONFIG_KEYS="ai_provider ollama_model ollama_host anthropic_model openai_model groq_model use_scope use_gitmoji diff_max_lines learn_from_history auto_fix analysis_threshold commit_language code_review_model code_review_anthropic_model code_review_openai_model code_review_groq_model stream_enabled skip_secret_scan analytics_enabled"
+KNOWN_CONFIG_KEYS="ai_provider ollama_model ollama_host anthropic_model openai_model groq_model use_scope use_gitmoji diff_max_lines learn_from_history auto_fix analysis_threshold commit_language code_review_model code_review_anthropic_model code_review_openai_model code_review_groq_model stream_enabled skip_secret_scan analytics_enabled pipeline_enabled analysis_model analysis_provider analysis_anthropic_model analysis_openai_model analysis_groq_model"
 
 # Unknown keys collector
 CONFIG_UNKNOWN_KEYS=()
@@ -157,7 +175,7 @@ validate_config() {
     fi
 
     # Validate boolean values
-    for var_name in CONFIG_USE_SCOPE CONFIG_USE_GITMOJI CONFIG_AUTO_FIX CONFIG_LEARN_FROM_HISTORY CONFIG_SKIP_SECRET_SCAN CONFIG_ANALYTICS_ENABLED; do
+    for var_name in CONFIG_USE_SCOPE CONFIG_USE_GITMOJI CONFIG_AUTO_FIX CONFIG_LEARN_FROM_HISTORY CONFIG_SKIP_SECRET_SCAN CONFIG_ANALYTICS_ENABLED CONFIG_PIPELINE_ENABLED; do
         local val="${!var_name}"
         if [ -n "$val" ] && [ "$val" != "true" ] && [ "$val" != "false" ]; then
             local key_name=$(echo "$var_name" | sed 's/^CONFIG_//' | tr '[:upper:]' '[:lower:]')
@@ -248,6 +266,14 @@ SKIP_SECRET_SCAN="${SKIP_SECRET_SCAN:-${CONFIG_SKIP_SECRET_SCAN:-false}}"  # Ski
 
 # Analytics configuration
 ANALYTICS_ENABLED="${ANALYTICS_ENABLED:-${CONFIG_ANALYTICS_ENABLED:-false}}"  # Enable local usage analytics
+
+# Two-model pipeline configuration
+PIPELINE_ENABLED="${PIPELINE_ENABLED:-${CONFIG_PIPELINE_ENABLED:-false}}"  # Enable two-stage pipeline
+ANALYSIS_MODEL="${ANALYSIS_MODEL:-${CONFIG_ANALYSIS_MODEL:-}}"  # Ollama model for Stage 1 analysis
+ANALYSIS_PROVIDER="${ANALYSIS_PROVIDER:-${CONFIG_ANALYSIS_PROVIDER:-}}"  # Provider override for Stage 1
+ANALYSIS_ANTHROPIC_MODEL="${ANALYSIS_ANTHROPIC_MODEL:-${CONFIG_ANALYSIS_ANTHROPIC_MODEL:-}}"  # Anthropic model for analysis
+ANALYSIS_OPENAI_MODEL="${ANALYSIS_OPENAI_MODEL:-${CONFIG_ANALYSIS_OPENAI_MODEL:-}}"  # OpenAI model for analysis
+ANALYSIS_GROQ_MODEL="${ANALYSIS_GROQ_MODEL:-${CONFIG_ANALYSIS_GROQ_MODEL:-}}"  # Groq model for analysis
 
 # Language configuration for commit messages
 COMMIT_LANGUAGE="${COMMIT_LANGUAGE:-${CONFIG_COMMIT_LANGUAGE:-}}"  # Language for commit messages (en, es, fr, de, ja, zh, etc.)
@@ -2840,6 +2866,12 @@ while [[ $# -gt 0 ]]; do
             echo "  DIFF_MAX_LINES      Maximum diff lines to send to AI"
             echo "  GH_COMMIT_AI        Set to 1 to enable hook (opt-in)"
             echo ""
+            echo "Two-Model Pipeline:"
+            echo "  PIPELINE_ENABLED    Enable two-stage pipeline (true/false)"
+            echo "  ANALYSIS_MODEL      Ollama model for Stage 1 analysis"
+            echo "  ANALYSIS_PROVIDER   Provider for Stage 1 (defaults to AI_PROVIDER)"
+            echo "  Stage 2 uses default model (OLLAMA_MODEL, etc.)"
+            echo ""
             echo "Configuration Files:"
             echo "  .gh-commit-ai.yml       Local config (repo root)"
             echo "  ~/.gh-commit-ai.yml     Global config"
@@ -5050,6 +5082,317 @@ $GIT_DIFF
 $CLOSING_INSTRUCTION$MULTIPLE_OPTIONS_INSTRUCTION"
 fi
 
+# Build Stage 1 analysis prompt for two-model pipeline
+# Sends diff and code context to a code-specialized model for structured analysis
+build_analysis_prompt() {
+    cat <<ANALYSIS_PROMPT_EOF
+You are a code analysis tool. Analyze the following git changes and produce a structured summary.
+
+OUTPUT FORMAT (use this exact format, one field per line):
+
+TYPE: <one of: feat, fix, docs, style, refactor, test, chore, perf, ci, build, revert>
+SCOPE: <short noun for area changed, or NONE>
+BREAKING: <true or false>
+BREAKING_REASON: <explanation if breaking, or NONE>
+SUMMARY: <one-line summary of the overall change, max 50 chars, imperative mood, lowercase>
+CHANGES:
+- <change 1, max 18 words, imperative mood>
+- <change 2, max 18 words, imperative mood>
+- <change 3, max 18 words, imperative mood>
+KEY_FUNCTIONS: <comma-separated list of important functions/classes modified, or NONE>
+CONTEXT: <one sentence explaining why this change matters or what it enables>
+
+RULES:
+- TYPE must be exactly one of the listed values
+- SUMMARY must be lowercase, imperative mood ("add" not "added"), max 50 chars
+- Each CHANGE bullet must be max 18 words, imperative mood
+- Include 2-8 CHANGE bullets covering all significant modifications
+- KEY_FUNCTIONS should list actual function/class names from the diff
+- Be specific: mention file areas, function names, and technical details
+- Do NOT include markdown formatting, code fences, or explanations outside the format
+
+$BRANCH_CONTEXT
+
+$WP_CONTEXT
+$FILE_CONTEXT
+$FUNCTION_CONTEXT
+$SEMANTIC_ANALYSIS
+$FILE_RELATIONSHIPS
+
+=== FILES CHANGED ===
+$GIT_STATUS
+
+$FILE_SUMMARIES
+
+Stats:
+$GIT_STATS
+
+Diff:
+$GIT_DIFF
+ANALYSIS_PROMPT_EOF
+}
+
+# Build Stage 2 synthesis prompt for two-model pipeline
+# Takes structured analysis output and formats it into a proper commit message
+build_synthesis_prompt() {
+    local analysis_output="$1"
+
+    cat <<SYNTHESIS_PROMPT_EOF
+You are a commit message writer. Convert the following structured analysis into a properly formatted conventional commit message.
+
+=== ANALYSIS ===
+$analysis_output
+=== END ANALYSIS ===
+
+$SCOPE_INSTRUCTION
+
+RULES:
+- Summary line: max 50 chars, lowercase (except acronyms like API, HTTP, JSON, JWT, SQL)
+- Each bullet: max 18 words, imperative mood
+- Include WHY/impact/technical details when they add value
+- ONE change per bullet line
+- NO paragraphs, NO multiple sentences per bullet
+- Use imperative mood: add/fix not added/fixed
+- Ticket codes stay UPPERCASE: ABC-123 not abc-123
+- Do NOT add ! unless BREAKING is true in the analysis
+- Output ONLY the commit message, NO explanations, NO markdown, NO code fences$LANGUAGE_INSTRUCTION
+
+$SCOPE_EXAMPLES
+
+$FEW_SHOT_EXAMPLES
+$REPO_EXAMPLES
+
+$HISTORY_INSIGHTS
+
+$CLOSING_INSTRUCTION$MULTIPLE_OPTIONS_INSTRUCTION
+SYNTHESIS_PROMPT_EOF
+}
+
+# Normalize analysis output: convert literal \n to actual newlines
+# AI providers often return text with literal \n instead of real newlines
+normalize_analysis_output() {
+    local text="$1"
+    # Convert literal \n to actual newlines using printf %b
+    printf "%b" "$text"
+}
+
+# Parse structured analysis output into components
+# Returns 0 on success, 1 on failure (invalid/empty output)
+parse_analysis_output() {
+    local analysis="$1"
+
+    # Normalize: convert literal \n to real newlines for grep
+    local normalized
+    normalized=$(normalize_analysis_output "$analysis")
+
+    # Verify we got the required TYPE field at minimum
+    if ! echo "$normalized" | grep -q "^TYPE:"; then
+        return 1
+    fi
+
+    # Verify we got SUMMARY field
+    if ! echo "$normalized" | grep -q "^SUMMARY:"; then
+        return 1
+    fi
+
+    return 0
+}
+
+# Two-model pipeline orchestrator
+# Calls Stage 1 (analysis) then Stage 2 (synthesis), accumulates tokens
+# Returns 0 on success, 1 on failure (caller should fall back to single-model)
+call_pipeline() {
+    local original_prompt="$1"
+
+    # Determine analysis provider (defaults to current AI_PROVIDER)
+    local analysis_provider="${ANALYSIS_PROVIDER:-$AI_PROVIDER}"
+
+    # Determine analysis model based on provider
+    local analysis_model=""
+    case "$analysis_provider" in
+        ollama)
+            analysis_model="${ANALYSIS_MODEL:-$OLLAMA_MODEL}"
+            ;;
+        anthropic)
+            analysis_model="${ANALYSIS_ANTHROPIC_MODEL:-$ANTHROPIC_MODEL}"
+            ;;
+        openai)
+            analysis_model="${ANALYSIS_OPENAI_MODEL:-$OPENAI_MODEL}"
+            ;;
+        groq)
+            analysis_model="${ANALYSIS_GROQ_MODEL:-$GROQ_MODEL}"
+            ;;
+        *)
+            echo "Pipeline: unknown analysis provider '$analysis_provider'" >&2
+            return 1
+            ;;
+    esac
+
+    # Determine synthesis provider and model (uses default provider/model)
+    local synthesis_provider="$AI_PROVIDER"
+    local synthesis_model=""
+    case "$synthesis_provider" in
+        ollama) synthesis_model="$OLLAMA_MODEL" ;;
+        anthropic) synthesis_model="$ANTHROPIC_MODEL" ;;
+        openai) synthesis_model="$OPENAI_MODEL" ;;
+        groq) synthesis_model="$GROQ_MODEL" ;;
+    esac
+
+    # Show pipeline info
+    echo "Stage 1: Analyzing changes ($analysis_model)..." >&2
+
+    # --- Stage 1: Analysis ---
+    # Save current state
+    local saved_ollama_model="$OLLAMA_MODEL"
+    local saved_anthropic_model="$ANTHROPIC_MODEL"
+    local saved_openai_model="$OPENAI_MODEL"
+    local saved_groq_model="$GROQ_MODEL"
+    local saved_ai_provider="$AI_PROVIDER"
+    local saved_stream_enabled="$STREAM_ENABLED"
+    local saved_verbose="${VERBOSE:-}"
+
+    # Swap to analysis provider/model, disable streaming and verbose for stage 1
+    # Verbose must be disabled because call_* functions output verbose info to stdout,
+    # which would corrupt the captured analysis_output
+    AI_PROVIDER="$analysis_provider"
+    STREAM_ENABLED="false"
+    VERBOSE="false"
+    case "$analysis_provider" in
+        ollama) OLLAMA_MODEL="$analysis_model" ;;
+        anthropic) ANTHROPIC_MODEL="$analysis_model" ;;
+        openai) OPENAI_MODEL="$analysis_model" ;;
+        groq) GROQ_MODEL="$analysis_model" ;;
+    esac
+
+    # Build analysis prompt
+    local analysis_prompt
+    analysis_prompt=$(build_analysis_prompt)
+
+    # Call provider for Stage 1
+    local analysis_output=""
+    local stage1_exit=0
+    case "$AI_PROVIDER" in
+        ollama)
+            analysis_output=$(call_ollama "$analysis_prompt") || stage1_exit=$?
+            ;;
+        anthropic)
+            analysis_output=$(call_anthropic "$analysis_prompt") || stage1_exit=$?
+            ;;
+        openai)
+            analysis_output=$(call_openai "$analysis_prompt") || stage1_exit=$?
+            ;;
+        groq)
+            analysis_output=$(call_groq "$analysis_prompt") || stage1_exit=$?
+            ;;
+    esac
+
+    # Capture Stage 1 token counts
+    local stage1_input_tokens=0
+    local stage1_output_tokens=0
+    local token_file="/tmp/gh-commit-ai-tokens-$$"
+    if [ -f "${token_file}.input" ]; then
+        stage1_input_tokens=$(cat "${token_file}.input" 2>/dev/null || echo "0")
+        stage1_output_tokens=$(cat "${token_file}.output" 2>/dev/null || echo "0")
+        rm -f "${token_file}.input" "${token_file}.output"
+    fi
+
+    # Restore original state
+    OLLAMA_MODEL="$saved_ollama_model"
+    ANTHROPIC_MODEL="$saved_anthropic_model"
+    OPENAI_MODEL="$saved_openai_model"
+    GROQ_MODEL="$saved_groq_model"
+    AI_PROVIDER="$saved_ai_provider"
+    STREAM_ENABLED="$saved_stream_enabled"
+    VERBOSE="$saved_verbose"
+
+    # Check if Stage 1 failed
+    if [ "$stage1_exit" != "0" ] || [ -z "$analysis_output" ]; then
+        echo "Pipeline Stage 1 failed, falling back to single-model..." >&2
+        return 1
+    fi
+
+    # Normalize analysis output: convert literal \n to real newlines
+    analysis_output=$(normalize_analysis_output "$analysis_output")
+
+    # Validate analysis output has required structure
+    if ! parse_analysis_output "$analysis_output"; then
+        echo "Pipeline: analysis output missing required fields, falling back..." >&2
+        if [ "$VERBOSE" = "true" ]; then
+            echo "[Verbose] Stage 1 raw output:" >&2
+            echo "$analysis_output" >&2
+            echo "" >&2
+        fi
+        return 1
+    fi
+
+    # Show verbose analysis output between stages
+    if [ "$VERBOSE" = "true" ]; then
+        echo "" >&2
+        echo "[Verbose] Stage 1 analysis output:" >&2
+        echo "$analysis_output" >&2
+        echo "" >&2
+    fi
+
+    printf "\r%-80s\r" " " >&2
+    echo "Stage 2: Writing commit message ($synthesis_model)..." >&2
+
+    # --- Stage 2: Synthesis ---
+    # Build synthesis prompt with analysis output
+    local synthesis_prompt
+    synthesis_prompt=$(build_synthesis_prompt "$analysis_output")
+
+    # Call provider for Stage 2 (uses default provider/model, streaming restored)
+    local synthesis_output=""
+    local stage2_exit=0
+    case "$AI_PROVIDER" in
+        ollama)
+            synthesis_output=$(call_ollama "$synthesis_prompt") || stage2_exit=$?
+            ;;
+        anthropic)
+            synthesis_output=$(call_anthropic "$synthesis_prompt") || stage2_exit=$?
+            ;;
+        openai)
+            synthesis_output=$(call_openai "$synthesis_prompt") || stage2_exit=$?
+            ;;
+        groq)
+            synthesis_output=$(call_groq "$synthesis_prompt") || stage2_exit=$?
+            ;;
+    esac
+
+    # Capture Stage 2 token counts
+    local stage2_input_tokens=0
+    local stage2_output_tokens=0
+    if [ -f "${token_file}.input" ]; then
+        stage2_input_tokens=$(cat "${token_file}.input" 2>/dev/null || echo "0")
+        stage2_output_tokens=$(cat "${token_file}.output" 2>/dev/null || echo "0")
+        rm -f "${token_file}.input" "${token_file}.output"
+    fi
+
+    # Accumulate total token counts and write back for cost tracking
+    local total_input=$((stage1_input_tokens + stage2_input_tokens))
+    local total_output=$((stage1_output_tokens + stage2_output_tokens))
+    echo "$total_input" > "${token_file}.input"
+    echo "$total_output" > "${token_file}.output"
+
+    # Show per-stage breakdown in verbose mode
+    if [ "$VERBOSE" = "true" ]; then
+        echo "" >&2
+        echo "[Verbose] Pipeline token usage:" >&2
+        echo "  Stage 1 ($analysis_provider/$analysis_model): ${stage1_input_tokens} input, ${stage1_output_tokens} output" >&2
+        echo "  Stage 2 ($synthesis_provider/$synthesis_model): ${stage2_input_tokens} input, ${stage2_output_tokens} output" >&2
+        echo "  Total: ${total_input} input, ${total_output} output" >&2
+    fi
+
+    # Check if Stage 2 failed
+    if [ "$stage2_exit" != "0" ] || [ -z "$synthesis_output" ]; then
+        echo "Pipeline Stage 2 failed, falling back to single-model..." >&2
+        return 1
+    fi
+
+    echo "$synthesis_output"
+    return 0
+}
+
 # Escape JSON strings (replace backslash, double quote, newline, carriage return, tab)
 escape_json() {
     echo "$1" | sed 's/\\/\\\\/g; s/"/\\"/g; s/\n/\\n/g; s/\r/\\r/g; s/\t/\\t/g' | awk '{printf "%s\\n", $0}' | sed '$ s/\\n$//'
@@ -6686,33 +7029,48 @@ if [ "$RECOVERED_MESSAGE" != "true" ]; then
         # Call AI provider (with timing for analytics)
         ai_start_time=$(date +%s 2>/dev/null || echo "0")
 
-        case "$AI_PROVIDER" in
-            ollama)
-                cache_debug "Calling call_ollama"
-                COMMIT_MSG=$(call_ollama "$PROMPT")
-                cache_debug "call_ollama returned (length: ${#COMMIT_MSG})"
-                ;;
-            anthropic)
-                cache_debug "Calling call_anthropic"
-                COMMIT_MSG=$(call_anthropic "$PROMPT")
-                cache_debug "call_anthropic returned (length: ${#COMMIT_MSG})"
-                ;;
-            openai)
-                cache_debug "Calling call_openai"
-                COMMIT_MSG=$(call_openai "$PROMPT")
-                cache_debug "call_openai returned (length: ${#COMMIT_MSG})"
-                ;;
-            groq)
-                cache_debug "Calling call_groq"
-                COMMIT_MSG=$(call_groq "$PROMPT")
-                cache_debug "call_groq returned (length: ${#COMMIT_MSG})"
-                ;;
-            *)
-                echo -e "${RED}Error: Unknown AI provider '$AI_PROVIDER'"
-                echo "Supported providers: ollama, anthropic, openai, groq"
-                exit 1
-                ;;
-        esac
+        # Try two-model pipeline if enabled
+        PIPELINE_USED=false
+        if [ "$PIPELINE_ENABLED" = "true" ]; then
+            cache_debug "Attempting two-model pipeline"
+            if COMMIT_MSG=$(call_pipeline "$PROMPT"); then
+                cache_debug "Pipeline succeeded (length: ${#COMMIT_MSG})"
+                PIPELINE_USED=true
+            else
+                cache_debug "Pipeline failed, falling back to single-model"
+            fi
+        fi
+
+        # Single-model fallback (or default when pipeline disabled)
+        if [ "$PIPELINE_USED" = "false" ]; then
+            case "$AI_PROVIDER" in
+                ollama)
+                    cache_debug "Calling call_ollama"
+                    COMMIT_MSG=$(call_ollama "$PROMPT")
+                    cache_debug "call_ollama returned (length: ${#COMMIT_MSG})"
+                    ;;
+                anthropic)
+                    cache_debug "Calling call_anthropic"
+                    COMMIT_MSG=$(call_anthropic "$PROMPT")
+                    cache_debug "call_anthropic returned (length: ${#COMMIT_MSG})"
+                    ;;
+                openai)
+                    cache_debug "Calling call_openai"
+                    COMMIT_MSG=$(call_openai "$PROMPT")
+                    cache_debug "call_openai returned (length: ${#COMMIT_MSG})"
+                    ;;
+                groq)
+                    cache_debug "Calling call_groq"
+                    COMMIT_MSG=$(call_groq "$PROMPT")
+                    cache_debug "call_groq returned (length: ${#COMMIT_MSG})"
+                    ;;
+                *)
+                    echo -e "${RED}Error: Unknown AI provider '$AI_PROVIDER'"
+                    echo "Supported providers: ollama, anthropic, openai, groq"
+                    exit 1
+                    ;;
+            esac
+        fi
 
         ai_end_time=$(date +%s 2>/dev/null || echo "0")
         ai_duration_ms=$(( (ai_end_time - ai_start_time) * 1000 ))
@@ -7005,18 +7363,27 @@ EOF
         echo "Regenerating commit message..."
         echo ""
 
-        # Call the AI provider again
-        case "$AI_PROVIDER" in
-            ollama)
-                COMMIT_MSG=$(call_ollama "$PROMPT")
-                ;;
-            anthropic)
-                COMMIT_MSG=$(call_anthropic "$PROMPT")
-                ;;
-            openai)
-                COMMIT_MSG=$(call_openai "$PROMPT")
-                ;;
-        esac
+        # Try two-model pipeline if enabled, otherwise single-model
+        PIPELINE_USED=false
+        if [ "$PIPELINE_ENABLED" = "true" ]; then
+            if COMMIT_MSG=$(call_pipeline "$PROMPT"); then
+                PIPELINE_USED=true
+            fi
+        fi
+
+        if [ "$PIPELINE_USED" = "false" ]; then
+            case "$AI_PROVIDER" in
+                ollama)
+                    COMMIT_MSG=$(call_ollama "$PROMPT")
+                    ;;
+                anthropic)
+                    COMMIT_MSG=$(call_anthropic "$PROMPT")
+                    ;;
+                openai)
+                    COMMIT_MSG=$(call_openai "$PROMPT")
+                    ;;
+            esac
+        fi
 
         # Strip markdown code fences
         COMMIT_MSG=$(echo "$COMMIT_MSG" | awk '

@@ -131,6 +131,36 @@ stream_enabled: auto
 # View stats with: gh commit-ai stats
 # analytics_enabled: false
 
+# Two-Model Pipeline
+# Split commit message generation into two stages using different models:
+#   Stage 1 (Analysis): A code-specialized model analyzes the diff
+#   Stage 2 (Synthesis): A writing-focused model formats the commit message
+# This leverages each model's strengths for better results.
+# Default: false (disabled, uses single model)
+# pipeline_enabled: true
+#
+# Stage 1 analysis model (code-focused model recommended)
+# Falls back to default model if not set
+# analysis_model: devstral
+#
+# Optional: use a different provider for Stage 1
+# Defaults to ai_provider if not set
+# Example: use Ollama for analysis + Groq for writing
+# analysis_provider: ollama
+#
+# Provider-specific analysis models (when analysis_provider differs)
+# analysis_anthropic_model: claude-3-5-sonnet-20241022
+# analysis_openai_model: gpt-4o
+# analysis_groq_model: llama-3.3-70b-versatile
+#
+# Stage 2 (synthesis) always uses your default model
+# (ollama_model, anthropic_model, openai_model, or groq_model)
+#
+# Example configurations:
+#   Ollama only: analysis_model=devstral, ollama_model=gemma3:4b
+#   Cross-provider: analysis_provider=ollama, analysis_model=devstral, ai_provider=groq
+#   Anthropic pipeline: analysis_anthropic_model=claude-3-haiku, anthropic_model=claude-3-5-sonnet
+
 # Note: API keys (ANTHROPIC_API_KEY, OPENAI_API_KEY, GROQ_API_KEY) cannot be stored in config files
 # Set them as environment variables instead:
 #   export ANTHROPIC_API_KEY="sk-ant-..."
