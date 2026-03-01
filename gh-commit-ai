@@ -3103,6 +3103,9 @@ should_stream() {
     return 1
 }
 
+# Spinner/status message (used by show_spinner and streaming parsers)
+SPINNER_MESSAGE="Generating"
+
 # Streaming arrow animation state
 STREAM_ARROWS=("←" "↖" "↑" "↗" "→" "↘" "↓" "↙")
 STREAM_ARROW_IDX=0
@@ -3120,7 +3123,7 @@ parse_ollama_stream() {
     local accum_file="$1"
     local full_response=""
 
-    printf "\r%s Generating" "$(next_stream_arrow)" >&2
+    printf "\r%s %s" "$(next_stream_arrow)" "$SPINNER_MESSAGE" >&2
 
     while IFS= read -r line; do
         [ -z "$line" ] && continue
@@ -3171,7 +3174,7 @@ parse_anthropic_stream() {
     local input_tokens=0
     local output_tokens=0
 
-    printf "\r%s Generating" "$(next_stream_arrow)" >&2
+    printf "\r%s %s" "$(next_stream_arrow)" "$SPINNER_MESSAGE" >&2
 
     while IFS= read -r line; do
         [ -z "$line" ] && continue
@@ -3237,7 +3240,7 @@ parse_openai_stream() {
     local input_tokens=0
     local output_tokens=0
 
-    printf "\r%s Generating" "$(next_stream_arrow)" >&2
+    printf "\r%s %s" "$(next_stream_arrow)" "$SPINNER_MESSAGE" >&2
 
     while IFS= read -r line; do
         [ -z "$line" ] && continue
@@ -5244,10 +5247,8 @@ call_pipeline() {
         groq) synthesis_model="$GROQ_MODEL" ;;
     esac
 
-    # Show pipeline info
-    echo "Stage 1: Analyzing changes ($analysis_model)..." >&2
-
     # --- Stage 1: Analysis ---
+    SPINNER_MESSAGE="Analyzing changes"
     # Save current state
     local saved_ollama_model="$OLLAMA_MODEL"
     local saved_anthropic_model="$ANTHROPIC_MODEL"
@@ -5339,10 +5340,8 @@ call_pipeline() {
         echo "" >&2
     fi
 
-    printf "\r%-80s\r" " " >&2
-    echo "Stage 2: Writing commit message ($synthesis_model)..." >&2
-
     # --- Stage 2: Synthesis ---
+    SPINNER_MESSAGE="Generating"
     # Build synthesis prompt with analysis output
     local synthesis_prompt
     synthesis_prompt=$(build_synthesis_prompt "$analysis_output")
@@ -6148,7 +6147,7 @@ call_ollama() {
     ) &
     local api_pid=$!
 
-    show_spinner "$api_pid" "Thinking"
+    show_spinner "$api_pid" "$SPINNER_MESSAGE"
     wait "$api_pid"
 
     exit_code=$(cat "${temp_response}.exit" 2>/dev/null || echo "1")
@@ -6370,7 +6369,7 @@ call_anthropic() {
     ) &
     local api_pid=$!
 
-    show_spinner "$api_pid" "Thinking"
+    show_spinner "$api_pid" "$SPINNER_MESSAGE"
     wait "$api_pid"
 
     # Read exit code
@@ -6581,7 +6580,7 @@ call_openai() {
     ) &
     local api_pid=$!
 
-    show_spinner "$api_pid" "Thinking"
+    show_spinner "$api_pid" "$SPINNER_MESSAGE"
     wait "$api_pid"
 
     # Read exit code
@@ -6802,7 +6801,7 @@ call_groq() {
     ) &
     local api_pid=$!
 
-    show_spinner "$api_pid" "Thinking"
+    show_spinner "$api_pid" "$SPINNER_MESSAGE"
     wait "$api_pid"
 
     # Read exit code
