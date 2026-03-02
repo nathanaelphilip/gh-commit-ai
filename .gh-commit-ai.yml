@@ -1,0 +1,27 @@
+# gh-commit-ai configuration
+# This file configures the two-model pipeline for optimal commit message generation
+
+# AI Provider
+ai_provider: auto
+
+# Two-Model Pipeline Configuration
+# Stage 1: Code analysis (devstral - code-specialized model)
+# Stage 2: Commit writing (gemma3:12b - fast writing model)
+pipeline_enabled: true
+analysis_model: devstral
+ollama_model: gemma3:12b
+
+# Code Review (optional separate command)
+code_review_model: qwen2.5-coder:14b
+
+# Commit Format
+use_scope: false
+use_gitmoji: false
+
+# Performance
+diff_max_lines: 200
+
+# Features
+learn_from_history: true
+auto_fix: true
+stream_enabled: auto
