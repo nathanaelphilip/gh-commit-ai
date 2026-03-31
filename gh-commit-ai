@@ -3866,8 +3866,6 @@ detect_wordpress_plugin_update() {
     local total_files=0
     local plugin_files=0
     local theme_files=0
-    local single_plugin_threshold=80  # 80% threshold for bulk update detection
-
     # Parse each filename and check if it's in a plugin/theme directory
     while IFS= read -r line; do
         # Skip empty lines
@@ -3906,20 +3904,15 @@ detect_wordpress_plugin_update() {
         fi
     done <<< "$files"
 
-    # Check for single plugin bulk update (80%+ of files in one plugin)
-    if [ ${#plugin_names[@]} -eq 1 ] && [ $total_files -gt 0 ]; then
-        local plugin_name="${plugin_names[0]}"
-        local percentage=$((plugin_files * 100 / total_files))
-
-        if [ $percentage -ge $single_plugin_threshold ]; then
-            echo "plugin-bulk:${plugin_name}"
-            return 0
-        fi
+    # If ALL files are in plugin directories, use simple bulk format
+    if [ ${#plugin_names[@]} -ge 1 ] && [ $plugin_files -eq $total_files ] && [ $total_files -gt 0 ]; then
+        local plugin_list=$(IFS=,; echo "${plugin_names[*]}")
+        echo "plugin-bulk:${plugin_list}"
+        return 0
     fi
 
-    # If any plugin files found, return plugin names (comma-separated if multiple)
+    # If some plugin files found but mixed with non-plugin files, return for detailed analysis
     if [ ${#plugin_names[@]} -gt 0 ]; then
-        # Join plugin names with commas
         local plugin_list=$(IFS=,; echo "${plugin_names[*]}")
         echo "plugin:${plugin_list}"
         return 0
@@ -5317,23 +5310,71 @@ fi
 if [ -n "$WP_COMPONENT_NAME" ]; then
     # Check if this is a bulk plugin update
     if [ "$WP_COMPONENT_TYPE" = "plugin-bulk" ]; then
-        # Very simple prompt for bulk plugin updates
-        PROMPT="Create a simple commit message for a WordPress plugin update.
+        # Simple format for plugin-only changes
+        # Detect add vs update for each plugin using git history
+        if [[ "$WP_COMPONENT_NAME" == *,* ]]; then
+            # Multiple plugins - generate bullets with add/update per plugin
+            plugin_bullets=""
+            has_add=false
+            has_update=false
+            IFS=',' read -ra WP_PLUGIN_ARRAY <<< "$WP_COMPONENT_NAME"
+            for pname in "${WP_PLUGIN_ARRAY[@]}"; do
+                if git ls-tree -r HEAD --name-only "wp-content/plugins/${pname}/" 2>/dev/null | head -1 | grep -q .; then
+                    plugin_bullets="${plugin_bullets}\n- update ${pname} plugin"
+                    has_update=true
+                else
+                    plugin_bullets="${plugin_bullets}\n- add ${pname} plugin"
+                    has_add=true
+                fi
+            done
+            # Build summary verb
+            summary_verb="update"
+            if [ "$has_add" = "true" ] && [ "$has_update" = "true" ]; then
+                summary_verb="add and update"
+            elif [ "$has_add" = "true" ]; then
+                summary_verb="add"
+            fi
+            PROMPT="Create a simple commit message for multiple WordPress plugins.
+
+Plugin names: $WP_COMPONENT_NAME
+
+Generate a commit message with one bullet per plugin.
+
+Format:
+chore: ${summary_verb} wordpress plugins
+$(echo -e "$plugin_bullets")
+
+RULES:
+- Type must be 'chore'
+- Summary line: '${summary_verb} wordpress plugins'
+- One bullet point per plugin using 'add' or 'update' as shown above
+- NO detailed changes or explanations
+- Use lowercase for all text
+- Use the exact plugin names provided
+- Output ONLY the commit message, NO explanations, NO markdown, NO code fences$LANGUAGE_INSTRUCTION"
+        else
+            # Single plugin - determine add vs update
+            wp_action="update"
+            if ! git ls-tree -r HEAD --name-only "wp-content/plugins/${WP_COMPONENT_NAME}/" 2>/dev/null | head -1 | grep -q .; then
+                wp_action="add"
+            fi
+            PROMPT="Create a simple commit message for a WordPress plugin.
 
 Plugin name: $WP_COMPONENT_NAME
 
 Generate a minimal commit message with NO detailed bullets.
 
 Format:
-chore: update $WP_COMPONENT_NAME plugin
+chore: ${wp_action} $WP_COMPONENT_NAME plugin
 
 RULES:
 - Type must be 'chore'
-- Summary line: 'update $WP_COMPONENT_NAME plugin' (use the exact plugin name)
+- Summary line: '${wp_action} $WP_COMPONENT_NAME plugin' (use the exact plugin name)
 - NO bullet points
 - NO detailed changes
 - Use lowercase for all text
 - Output ONLY the commit message, NO explanations, NO markdown, NO code fences$LANGUAGE_INSTRUCTION"
+        fi
     else
         # Capitalize first letter for display (portable method)
         if [ "$WP_COMPONENT_TYPE" = "plugin" ]; then
