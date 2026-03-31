@@ -246,7 +246,7 @@ OPENAI_MODEL="${OPENAI_MODEL:-${CONFIG_OPENAI_MODEL:-gpt-4o-mini}}"
 OPENAI_API_KEY="${OPENAI_API_KEY:-}"
 GROQ_MODEL="${GROQ_MODEL:-${CONFIG_GROQ_MODEL:-llama-3.3-70b-versatile}}"
 GROQ_API_KEY="${GROQ_API_KEY:-}"
-DIFF_MAX_LINES="${DIFF_MAX_LINES:-${CONFIG_DIFF_MAX_LINES:-auto}}"  # Limit diff lines: auto, or a number (e.g., 200)
+DIFF_MAX_LINES="${DIFF_MAX_LINES:-${CONFIG_DIFF_MAX_LINES:-200}}"  # Limit diff lines for faster processing
 USE_SCOPE="${USE_SCOPE:-${CONFIG_USE_SCOPE:-false}}"  # Enable/disable conventional commit scopes
 USE_GITMOJI="${USE_GITMOJI:-${CONFIG_USE_GITMOJI:-false}}"  # Enable/disable gitmoji prefixes
 LEARN_FROM_HISTORY="${LEARN_FROM_HISTORY:-${CONFIG_LEARN_FROM_HISTORY:-true}}"  # Enable/disable learning from commit history
@@ -268,7 +268,7 @@ SKIP_SECRET_SCAN="${SKIP_SECRET_SCAN:-${CONFIG_SKIP_SECRET_SCAN:-false}}"  # Ski
 ANALYTICS_ENABLED="${ANALYTICS_ENABLED:-${CONFIG_ANALYTICS_ENABLED:-false}}"  # Enable local usage analytics
 
 # Two-model pipeline configuration
-PIPELINE_ENABLED="${PIPELINE_ENABLED:-${CONFIG_PIPELINE_ENABLED:-true}}"  # Enable two-stage analysis→synthesis pipeline
+PIPELINE_ENABLED="${PIPELINE_ENABLED:-${CONFIG_PIPELINE_ENABLED:-false}}"  # Enable two-stage pipeline
 ANALYSIS_MODEL="${ANALYSIS_MODEL:-${CONFIG_ANALYSIS_MODEL:-}}"  # Ollama model for Stage 1 analysis
 ANALYSIS_PROVIDER="${ANALYSIS_PROVIDER:-${CONFIG_ANALYSIS_PROVIDER:-}}"  # Provider override for Stage 1
 ANALYSIS_ANTHROPIC_MODEL="${ANALYSIS_ANTHROPIC_MODEL:-${CONFIG_ANALYSIS_ANTHROPIC_MODEL:-}}"  # Anthropic model for analysis
@@ -2899,11 +2899,11 @@ while [[ $# -gt 0 ]]; do
             echo "  USE_GITMOJI         Enable/disable gitmoji prefixes (true/false)"
             echo "  AUTO_FIX            Auto-fix common formatting issues (true/false)"
             echo "                      Default: true"
-            echo "  DIFF_MAX_LINES      Max diff lines (default: auto, or a number)"
+            echo "  DIFF_MAX_LINES      Max diff lines to send to AI (default: 200)"
             echo "  GH_COMMIT_AI        Set to 1 to enable hook (opt-in)"
             echo ""
             echo "Two-Model Pipeline:"
-            echo "  PIPELINE_ENABLED    Two-stage pipeline (default: true)"
+            echo "  PIPELINE_ENABLED    Enable two-stage pipeline (default: false)"
             echo "  ANALYSIS_MODEL      Ollama model for Stage 1 analysis"
             echo "  ANALYSIS_PROVIDER   Provider for Stage 1 (defaults to AI_PROVIDER)"
             echo "  Stage 2 uses default model (OLLAMA_MODEL, etc.)"
@@ -4698,335 +4698,8 @@ if [ "$AI_PROVIDER" != "ollama" ] && [ "$SKIP_SECRET_SCAN" != "true" ] && [ -n "
     fi
 fi
 
-# Detect project type based on files present
-# Detect specific project framework for context-aware few-shot examples
-detect_project_framework() {
-    # React / Vue / Angular / Svelte
-    if [ -f "package.json" ]; then
-        local pkg=$(cat "package.json" 2>/dev/null || echo "")
-        if echo "$pkg" | grep -qE '"react"'; then
-            echo "react"; return
-        fi
-        if echo "$pkg" | grep -qE '"vue"'; then
-            echo "vue"; return
-        fi
-        if echo "$pkg" | grep -qE '"angular"'; then
-            echo "angular"; return
-        fi
-        if echo "$pkg" | grep -qE '"svelte"'; then
-            echo "svelte"; return
-        fi
-        if echo "$pkg" | grep -qE '"express"|"fastify"|"koa"|"hapi"|"nest"'; then
-            echo "node-api"; return
-        fi
-    fi
-
-    # Laravel
-    if [ -f "artisan" ] && [ -f "composer.json" ]; then
-        echo "laravel"; return
-    fi
-
-    # Django / Flask
-    if [ -f "manage.py" ]; then
-        if grep -rq "django" requirements.txt pyproject.toml setup.py 2>/dev/null; then
-            echo "django"; return
-        fi
-    fi
-    if grep -q "flask" requirements.txt 2>/dev/null || grep -q "flask" pyproject.toml 2>/dev/null; then
-        echo "flask"; return
-    fi
-
-    # Rails
-    if [ -f "Gemfile" ] && grep -q "rails" Gemfile 2>/dev/null; then
-        echo "rails"; return
-    fi
-
-    # Go
-    if [ -f "go.mod" ]; then
-        echo "go"; return
-    fi
-
-    # Rust
-    if [ -f "Cargo.toml" ]; then
-        echo "rust"; return
-    fi
-
-    # WordPress
-    if [ -d "wp-content" ] || [ -f "wp-config.php" ]; then
-        echo "wordpress"; return
-    fi
-
-    # Python generic
-    if [ -f "setup.py" ] || [ -f "pyproject.toml" ]; then
-        echo "python"; return
-    fi
-
-    echo "general"
-}
-
-# Generate framework-specific few-shot examples for better AI learning
-get_few_shot_examples() {
-    local framework="$1"
-
-    case "$framework" in
-        react|vue|angular|svelte)
-            cat <<'EXAMPLES_EOF'
-EXAMPLES OF GOOD COMMIT MESSAGES (BE SPECIFIC LIKE THESE):
-
-Example 1 - Component feature:
-Input: Changed UserProfile.tsx, added useAuth hook
-Output:
-feat: add user profile with auth integration
-
-- implement UserProfile component with avatar display
-- add useAuth hook for session management
-- create responsive layout with CSS modules
-
-Example 2 - State management fix:
-Input: Modified store/cart.ts, updated CartProvider
-Output:
-fix: resolve cart state loss on page reload
-
-- fix useCart hook losing state on navigation
-- add localStorage sync in CartProvider
-- update cart reducer to handle empty state
-
-Example 3 - API integration:
-Input: Changed hooks/useApi.ts, services/api.ts
-Output:
-feat: add data fetching with error boundaries
-
-- implement useApi hook with retry logic
-- add error boundary component for API failures
-- create loading skeleton components
-EXAMPLES_EOF
-            ;;
-        django|flask)
-            cat <<'EXAMPLES_EOF'
-EXAMPLES OF GOOD COMMIT MESSAGES (BE SPECIFIC LIKE THESE):
-
-Example 1 - Model and migration:
-Input: Changed models.py, added migration file
-Output:
-feat: add article model with slug field
-
-- create Article model with title and slug fields
-- add database migration for articles table
-- implement get_absolute_url for article routing
-
-Example 2 - View fix:
-Input: Modified views.py, updated serializers.py
-Output:
-fix: resolve pagination in article list API
-
-- fix ArticleListView queryset ordering
-- update ArticleSerializer to include author field
-- add pagination class with page size limit
-
-Example 3 - Permissions:
-Input: Changed urls.py, views.py, permissions.py
-Output:
-feat: add role-based access control to API
-
-- implement IsArticleOwner permission class
-- add permission checks to ArticleViewSet
-- update URL patterns for auth endpoints
-EXAMPLES_EOF
-            ;;
-        rails)
-            cat <<'EXAMPLES_EOF'
-EXAMPLES OF GOOD COMMIT MESSAGES (BE SPECIFIC LIKE THESE):
-
-Example 1 - Controller and model:
-Input: Changed posts_controller.rb, post.rb, migration
-Output:
-feat: add post publishing workflow
-
-- create Post model with status and published_at
-- add publish action to PostsController
-- implement before_action for authorization
-
-Example 2 - Session fix:
-Input: Modified user.rb, sessions_controller.rb
-Output:
-fix: resolve session expiry for remember me
-
-- fix User#remember_token regeneration logic
-- update SessionsController to extend cookie TTL
-- add session cleanup in after_action callback
-
-Example 3 - Background job:
-Input: Changed mailers/, jobs/, config/sidekiq.yml
-Output:
-feat: add async email notifications for orders
-
-- implement OrderMailer with confirmation template
-- create SendOrderConfirmationJob for Sidekiq
-- configure queue priority for mailer jobs
-EXAMPLES_EOF
-            ;;
-        laravel)
-            cat <<'EXAMPLES_EOF'
-EXAMPLES OF GOOD COMMIT MESSAGES (BE SPECIFIC LIKE THESE):
-
-Example 1 - Controller and model:
-Input: Changed ProductController.php, Product.php, migration
-Output:
-feat: add product inventory management
-
-- create Product model with stock tracking fields
-- implement ProductController@updateStock endpoint
-- add database migration for inventory columns
-
-Example 2 - Middleware fix:
-Input: Modified AuthMiddleware.php, routes/api.php
-Output:
-fix: resolve API auth for token refresh
-
-- fix AuthMiddleware to handle expired tokens
-- add token refresh logic in authenticate method
-- update API routes with proper middleware groups
-
-Example 3 - Event system:
-Input: Changed Jobs/, Events/, Listeners/
-Output:
-feat: add order notification event system
-
-- create OrderPlaced event with order data
-- implement SendOrderNotification listener
-- dispatch notification job to queue
-EXAMPLES_EOF
-            ;;
-        go)
-            cat <<'EXAMPLES_EOF'
-EXAMPLES OF GOOD COMMIT MESSAGES (BE SPECIFIC LIKE THESE):
-
-Example 1 - Handler:
-Input: Changed handler.go, service.go, router.go
-Output:
-feat: add user registration endpoint
-
-- implement HandleRegister with input validation
-- add UserService.Create with password hashing
-- register POST /api/users route in router
-
-Example 2 - Connection fix:
-Input: Modified db.go, repository.go
-Output:
-fix: resolve connection pool exhaustion
-
-- increase max idle connections from 5 to 25
-- add context timeout to repository queries
-- implement connection health check in pool
-
-Example 3 - Middleware:
-Input: Changed middleware/, cmd/server/main.go
-Output:
-feat: add rate limiting middleware
-
-- implement RateLimiter with token bucket algorithm
-- add per-IP tracking with sync.Map
-- configure rate limit in server startup
-EXAMPLES_EOF
-            ;;
-        rust)
-            cat <<'EXAMPLES_EOF'
-EXAMPLES OF GOOD COMMIT MESSAGES (BE SPECIFIC LIKE THESE):
-
-Example 1 - Module:
-Input: Changed src/parser.rs, src/lib.rs
-Output:
-feat: add TOML config file parser
-
-- implement Parser::parse_config with error handling
-- add ConfigValue enum for typed config values
-- expose parse_config in public API
-
-Example 2 - Concurrency fix:
-Input: Modified src/cache.rs, src/store.rs
-Output:
-fix: resolve cache invalidation race condition
-
-- add RwLock to CacheStore for thread safety
-- fix eviction logic in Cache::cleanup
-- add unit tests for concurrent cache operations
-
-Example 3 - CLI:
-Input: Changed src/cli.rs, src/main.rs
-Output:
-feat: add verbose output flag to CLI
-
-- implement --verbose flag with clap derive
-- add structured logging with tracing crate
-- update main to configure log level from flag
-EXAMPLES_EOF
-            ;;
-        node-api)
-            cat <<'EXAMPLES_EOF'
-EXAMPLES OF GOOD COMMIT MESSAGES (BE SPECIFIC LIKE THESE):
-
-Example 1 - Route:
-Input: Changed routes/users.js, middleware/auth.js
-Output:
-feat: add user profile update endpoint
-
-- implement PUT /api/users/:id route handler
-- add validateProfileUpdate middleware
-- create updateUser service with field validation
-
-Example 2 - Database fix:
-Input: Modified db/connection.js, models/user.js
-Output:
-fix: resolve database timeout on large queries
-
-- increase connection pool timeout from 5s to 30s
-- add query optimization for User.findAll
-- implement connection retry logic with backoff
-
-Example 3 - Auth:
-Input: Changed auth/, middleware/, config/
-Output:
-feat: add OAuth2 social login support
-
-- implement passport strategy for Google OAuth
-- add /auth/google callback route
-- store OAuth tokens in session middleware
-EXAMPLES_EOF
-            ;;
-        python)
-            cat <<'EXAMPLES_EOF'
-EXAMPLES OF GOOD COMMIT MESSAGES (BE SPECIFIC LIKE THESE):
-
-Example 1 - Module:
-Input: Changed src/processor.py, src/__init__.py
-Output:
-feat: add CSV data processor module
-
-- implement DataProcessor class with validation
-- add parse_csv() with configurable delimiters
-- expose public API in __init__.py
-
-Example 2 - Bug fix:
-Input: Modified utils/cache.py, tests/test_cache.py
-Output:
-fix: resolve cache expiry not clearing old entries
-
-- fix TTLCache._evict() to check all expired keys
-- add thread lock around cache dictionary access
-- add regression test for concurrent cache expiry
-
-Example 3 - CLI tool:
-Input: Changed cli.py, config.py
-Output:
-feat: add JSON output format to CLI
-
-- implement --format json flag with argparse
-- add JSONFormatter class for structured output
-- update config loader to support format setting
-EXAMPLES_EOF
-            ;;
-        *)
-            cat <<'EXAMPLES_EOF'
+# Define few-shot examples for better AI learning
+FEW_SHOT_EXAMPLES="
 EXAMPLES OF GOOD COMMIT MESSAGES (BE SPECIFIC LIKE THESE):
 
 Example 1 - Feature:
@@ -5055,12 +4728,6 @@ fix: correct tax calculation in payment flow
 - fix rounding error in calculateTax()
 - update invoice generation logic
 - add currency conversion handling
-EXAMPLES_EOF
-            ;;
-    esac
-
-    # Always append anti-patterns
-    cat <<'ANTIPATTERNS_EOF'
 
 BAD EXAMPLES (AVOID THESE - TOO GENERIC):
 ❌ 'fix: resolve bug'
@@ -5090,12 +4757,7 @@ REMEMBER:
 - Keep each bullet to 18 words MAXIMUM (count the words!)
 - Use bullet list format with SHORT lines, NOT paragraphs
 - If you have many similar items, list each one separately
-ANTIPATTERNS_EOF
-}
-
-# Generate project-aware few-shot examples
-DETECTED_FRAMEWORK=$(detect_project_framework)
-FEW_SHOT_EXAMPLES=$(get_few_shot_examples "$DETECTED_FRAMEWORK")
+"
 
 # Prepare branch context
 BRANCH_CONTEXT="Branch context:
@@ -5719,14 +5381,14 @@ call_pipeline() {
     local saved_openai_model="$OPENAI_MODEL"
     local saved_groq_model="$GROQ_MODEL"
     local saved_ai_provider="$AI_PROVIDER"
-    local saved_stream_enabled="$STREAM_ENABLED"
     local saved_verbose="${VERBOSE:-}"
 
-    # Swap to analysis provider/model, disable streaming and verbose for stage 1
+    # Swap to analysis provider/model for stage 1
     # Verbose must be disabled because call_* functions output verbose info to stdout,
     # which would corrupt the captured analysis_output
+    # Streaming stays enabled: the stream parser only shows a spinner (no raw tokens),
+    # and streaming prevents curl timeout during slow model loading for large models
     AI_PROVIDER="$analysis_provider"
-    STREAM_ENABLED="false"
     VERBOSE="false"
     case "$analysis_provider" in
         ollama) OLLAMA_MODEL="$analysis_model" ;;
@@ -5773,7 +5435,6 @@ call_pipeline() {
     OPENAI_MODEL="$saved_openai_model"
     GROQ_MODEL="$saved_groq_model"
     AI_PROVIDER="$saved_ai_provider"
-    STREAM_ENABLED="$saved_stream_enabled"
     VERBOSE="$saved_verbose"
 
     # Check if Stage 1 failed
