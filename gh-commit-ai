@@ -238,9 +238,9 @@ validate_config
 
 # Configuration (priority: env vars > local config > global config > defaults)
 AI_PROVIDER="${AI_PROVIDER:-${CONFIG_AI_PROVIDER:-auto}}"  # Options: auto, ollama, anthropic, openai, groq
-OLLAMA_MODEL="${OLLAMA_MODEL:-${CONFIG_OLLAMA_MODEL:-gemma3:12b}}"
+OLLAMA_MODEL="${OLLAMA_MODEL:-${CONFIG_OLLAMA_MODEL:-qwen3:8b}}"
 OLLAMA_HOST="${OLLAMA_HOST:-${CONFIG_OLLAMA_HOST:-http://localhost:11434}}"
-ANTHROPIC_MODEL="${ANTHROPIC_MODEL:-${CONFIG_ANTHROPIC_MODEL:-claude-3-5-sonnet-20241022}}"
+ANTHROPIC_MODEL="${ANTHROPIC_MODEL:-${CONFIG_ANTHROPIC_MODEL:-claude-sonnet-4-6}}"
 ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"
 OPENAI_MODEL="${OPENAI_MODEL:-${CONFIG_OPENAI_MODEL:-gpt-4o-mini}}"
 OPENAI_API_KEY="${OPENAI_API_KEY:-}"
@@ -664,7 +664,7 @@ show_api_key_error() {
     echo "" >&2
     echo "Alternative: Use Ollama (local, no API key needed):" >&2
     echo "  brew install ollama  # or download from https://ollama.ai" >&2
-    echo "  ollama run gemma2:2b" >&2
+    echo "  ollama run qwen3:8b  # strong instruction following, fast" >&2
     echo "  export AI_PROVIDER=ollama" >&2
 }
 
@@ -914,7 +914,7 @@ if [ "$AI_PROVIDER" = "auto" ]; then
         echo ""
         echo "Available options:"
         echo "  1. Install Ollama (free, local): https://ollama.ai"
-        echo "     Then run: ollama pull qwen2.5-coder:7b"
+        echo "     Then run: ollama pull qwen3:8b"
         echo ""
         echo "  2. Set up Groq API (ultra-fast, generous free tier):"
         echo "     export GROQ_API_KEY=\"gsk-...\""
@@ -1640,10 +1640,10 @@ Provide your review:"
                 echo -e "${BLUE}Using $AI_PROVIDER model: $current_model${NC}" >&2
 
                 # Recommend better models for code review if using a small/weak model
-                if [[ "$current_model" =~ (gemma2:2b|gemma3:4b|llama3.2:1b|llama3.2:3b|phi3:mini) ]]; then
+                if [[ "$current_model" =~ (gemma2:2b|gemma3:1b|gemma3:4b|gemma3n:1b|gemma3n:4b|llama3.2:1b|llama3.2:3b|phi3:mini|qwen2.5:1b|qwen2.5:3b|qwen2.5-coder:1.5b|qwen2.5-coder:3b|qwen3:0.6b|qwen3:1.7b|qwen3:4b) ]]; then
                     echo -e "${YELLOW}💡 Tip: For better code reviews, consider using a larger model:${NC}" >&2
-                    echo -e "${YELLOW}   CODE_REVIEW_MODEL=\"qwen2.5-coder:14b\" or \"deepseek-coder:6.7b\"${NC}" >&2
-                    echo -e "${YELLOW}   Or add to .gh-commit-ai.yml: code_review_model: qwen2.5-coder:14b${NC}" >&2
+                    echo -e "${YELLOW}   CODE_REVIEW_MODEL=\"qwen3:14b\" or \"qwen2.5-coder:14b\"${NC}" >&2
+                    echo -e "${YELLOW}   Or add to .gh-commit-ai.yml: code_review_model: qwen3:14b${NC}" >&2
                     echo "" >&2
                 fi
                 ;;
@@ -1654,7 +1654,7 @@ Provide your review:"
                 # Recommend Opus or Sonnet for code review if using Haiku
                 if [[ "$current_model" =~ haiku ]]; then
                     echo -e "${YELLOW}💡 Tip: For more thorough code reviews, consider using Claude Sonnet or Opus${NC}" >&2
-                    echo -e "${YELLOW}   CODE_REVIEW_ANTHROPIC_MODEL=\"claude-3-5-sonnet-20241022\"${NC}" >&2
+                    echo -e "${YELLOW}   CODE_REVIEW_ANTHROPIC_MODEL=\"claude-sonnet-4-6\"${NC}" >&2
                     echo "" >&2
                 fi
                 ;;
@@ -1674,7 +1674,7 @@ Provide your review:"
                 echo -e "${BLUE}Using $AI_PROVIDER model: $current_model${NC}" >&2
 
                 # Recommend larger models for code review if using smaller models
-                if [[ "$current_model" =~ (llama-3.1-8b|gemma2-9b|mixtral-8x7b) ]]; then
+                if [[ "$current_model" =~ (llama-3.1-8b-instant|llama-3.2-1b|llama-3.2-3b|gemma2-9b|mixtral-8x7b) ]]; then
                     echo -e "${YELLOW}💡 Tip: For more thorough code reviews, consider using llama-3.3-70b-versatile${NC}" >&2
                     echo -e "${YELLOW}   CODE_REVIEW_GROQ_MODEL=\"llama-3.3-70b-versatile\"${NC}" >&2
                     echo "" >&2
@@ -5941,10 +5941,22 @@ calculate_cost() {
     local output_cost=0
     local currency="USD"
 
-    # Pricing per 1M tokens (as of early 2025)
+    # Pricing per 1M tokens (as of 2025)
     case "$provider" in
         anthropic)
             case "$model" in
+                claude-sonnet-4-6|claude-sonnet-4-5*)
+                    input_cost=3.00    # $3 per MTok
+                    output_cost=15.00  # $15 per MTok
+                    ;;
+                claude-opus-4-6|claude-opus-4*)
+                    input_cost=15.00   # $15 per MTok
+                    output_cost=75.00  # $75 per MTok
+                    ;;
+                claude-haiku-4-5*|claude-haiku-4*)
+                    input_cost=0.80    # $0.80 per MTok
+                    output_cost=4.00   # $4 per MTok
+                    ;;
                 claude-3-5-sonnet-20241022|claude-3-5-sonnet-latest)
                     input_cost=3.00    # $3 per MTok
                     output_cost=15.00  # $15 per MTok
@@ -5966,6 +5978,14 @@ calculate_cost() {
             ;;
         openai)
             case "$model" in
+                gpt-4.1)
+                    input_cost=2.00    # $2 per MTok
+                    output_cost=8.00   # $8 per MTok
+                    ;;
+                gpt-4.1-mini)
+                    input_cost=0.40    # $0.40 per MTok
+                    output_cost=1.60   # $1.60 per MTok
+                    ;;
                 gpt-4o)
                     input_cost=2.50    # $2.50 per MTok
                     output_cost=10.00  # $10 per MTok
@@ -6301,7 +6321,7 @@ call_ollama() {
         echo "  • Pull model if needed: ollama pull $OLLAMA_MODEL" >&2
         echo "  • Verify service: curl $OLLAMA_HOST/api/tags" >&2
         echo "  • Check service status: ps aux | grep ollama" >&2
-        echo "  • Try smaller model: OLLAMA_MODEL=gemma2:2b gh commit-ai" >&2
+        echo "  • Try smaller model: OLLAMA_MODEL=qwen3:4b gh commit-ai" >&2
         echo "  • Run with verbose mode: gh commit-ai --verbose" >&2
 
         rm -f "$temp_response" "$temp_error" "${temp_response}.exit"

@@ -231,7 +231,7 @@ Environment variables take precedence over config files (defined at lines 69-78)
 - `CODE_REVIEW_ANTHROPIC_MODEL`: Dedicated Anthropic model for code reviews (falls back to `ANTHROPIC_MODEL` if not set)
 - `CODE_REVIEW_OPENAI_MODEL`: Dedicated OpenAI model for code reviews (falls back to `OPENAI_MODEL` if not set)
 - These allow using larger, more capable models for reviews while using faster models for commit messages
-- Recommended: `qwen2.5-coder:14b`, `deepseek-coder:6.7b`, `claude-3-5-sonnet`, `gpt-4o`
+- Recommended: `qwen3:14b`, `qwen2.5-coder:14b`, `claude-sonnet-4-6`, `gpt-4o`
 
 ## Command-Line Options
 
@@ -568,9 +568,14 @@ The extension automatically tracks and displays costs when using Anthropic or Op
 
 | Provider | Model | Input (per MTok) | Output (per MTok) |
 |----------|-------|------------------|-------------------|
+| Anthropic | Claude Sonnet 4.6 | $3.00 | $15.00 |
+| Anthropic | Claude Opus 4.6 | $15.00 | $75.00 |
+| Anthropic | Claude Haiku 4.5 | $0.80 | $4.00 |
 | Anthropic | Claude 3.5 Sonnet | $3.00 | $15.00 |
 | Anthropic | Claude 3 Opus | $15.00 | $75.00 |
 | Anthropic | Claude 3 Haiku | $0.25 | $1.25 |
+| OpenAI | GPT-4.1 | $2.00 | $8.00 |
+| OpenAI | GPT-4.1-mini | $0.40 | $1.60 |
 | OpenAI | GPT-4o | $2.50 | $10.00 |
 | OpenAI | GPT-4o-mini | $0.15 | $0.60 |
 | OpenAI | GPT-4 Turbo | $10.00 | $30.00 |
@@ -638,7 +643,7 @@ gh extension remove commit-ai
 ```bash
 # Test with Ollama (default)
 ./gh-commit-ai
-OLLAMA_MODEL="codellama" ./gh-commit-ai
+OLLAMA_MODEL="qwen3:8b" ./gh-commit-ai
 
 # Test with Anthropic
 AI_PROVIDER="anthropic" ANTHROPIC_API_KEY="sk-ant-..." ./gh-commit-ai
@@ -2113,19 +2118,19 @@ Code review requires deeper analysis than commit message generation, so you can 
 ```bash
 # Environment variables
 export CODE_REVIEW_MODEL="qwen2.5-coder:14b"  # For Ollama
-export CODE_REVIEW_ANTHROPIC_MODEL="claude-3-opus-20240229"  # For Anthropic
+export CODE_REVIEW_ANTHROPIC_MODEL="claude-sonnet-4-6"  # For Anthropic
 export CODE_REVIEW_OPENAI_MODEL="gpt-4o"  # For OpenAI
 
 # Or in .gh-commit-ai.yml
 code_review_model: qwen2.5-coder:14b
-code_review_anthropic_model: claude-3-opus-20240229
+code_review_anthropic_model: claude-sonnet-4-6
 code_review_openai_model: gpt-4o
 ```
 
 **Recommended Models for Code Review:**
-- **Ollama**: `qwen2.5-coder:14b`, `deepseek-coder:6.7b`, `codellama:13b`
-- **Anthropic**: `claude-3-5-sonnet-20241022`, `claude-3-opus-20240229`
-- **OpenAI**: `gpt-4o`, `gpt-4-turbo`
+- **Ollama**: `qwen3:14b`, `qwen2.5-coder:14b`, `gemma3:27b`
+- **Anthropic**: `claude-sonnet-4-6`, `claude-opus-4-6`
+- **OpenAI**: `gpt-4o`, `gpt-4.1`
 
 If no dedicated model is configured, the tool falls back to the regular model and shows a helpful tip if you're using a small model.
 
