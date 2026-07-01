@@ -39,6 +39,15 @@ parse_yaml_config() {
             ollama_host|OLLAMA_HOST)
                 CONFIG_OLLAMA_HOST="${CONFIG_OLLAMA_HOST:-$value}"
                 ;;
+            ollama_num_ctx|OLLAMA_NUM_CTX)
+                CONFIG_OLLAMA_NUM_CTX="${CONFIG_OLLAMA_NUM_CTX:-$value}"
+                ;;
+            temperature|AI_TEMPERATURE)
+                CONFIG_AI_TEMPERATURE="${CONFIG_AI_TEMPERATURE:-$value}"
+                ;;
+            prompt_style|PROMPT_STYLE)
+                CONFIG_PROMPT_STYLE="${CONFIG_PROMPT_STYLE:-$value}"
+                ;;
             anthropic_model|ANTHROPIC_MODEL)
                 CONFIG_ANTHROPIC_MODEL="${CONFIG_ANTHROPIC_MODEL:-$value}"
                 ;;
@@ -117,7 +126,7 @@ parse_yaml_config() {
 }
 
 # Known config keys for validation
-KNOWN_CONFIG_KEYS="ai_provider ollama_model ollama_host anthropic_model openai_model groq_model use_scope use_gitmoji diff_max_lines learn_from_history auto_fix analysis_threshold commit_language code_review_model code_review_anthropic_model code_review_openai_model code_review_groq_model stream_enabled skip_secret_scan analytics_enabled pipeline_enabled analysis_model analysis_provider analysis_anthropic_model analysis_openai_model analysis_groq_model"
+KNOWN_CONFIG_KEYS="ai_provider ollama_model ollama_host ollama_num_ctx temperature prompt_style anthropic_model openai_model groq_model use_scope use_gitmoji diff_max_lines learn_from_history auto_fix analysis_threshold commit_language code_review_model code_review_anthropic_model code_review_openai_model code_review_groq_model stream_enabled skip_secret_scan analytics_enabled pipeline_enabled analysis_model analysis_provider analysis_anthropic_model analysis_openai_model analysis_groq_model"
 
 # Unknown keys collector
 CONFIG_UNKNOWN_KEYS=()
@@ -240,6 +249,20 @@ validate_config
 AI_PROVIDER="${AI_PROVIDER:-${CONFIG_AI_PROVIDER:-auto}}"  # Options: auto, ollama, anthropic, openai, groq
 OLLAMA_MODEL="${OLLAMA_MODEL:-${CONFIG_OLLAMA_MODEL:-qwen3:8b}}"
 OLLAMA_HOST="${OLLAMA_HOST:-${CONFIG_OLLAMA_HOST:-http://localhost:11434}}"
+# Context window for Ollama. Ollama defaults to only 4096 tokens and SILENTLY
+# truncates prompts that exceed it — with our large diff+instruction prompt this
+# drops the diff or the format rules and wrecks commit quality on big commits.
+# Sized to comfortably fit the instruction prompt plus diff_max_lines: auto,
+# which can send up to ~1000 diff lines.
+OLLAMA_NUM_CTX="${OLLAMA_NUM_CTX:-${CONFIG_OLLAMA_NUM_CTX:-16384}}"
+# Sampling temperature. Commit generation is a structured, low-creativity task;
+# high temperature is the main source of run-to-run inconsistency ("great on some
+# commits, vague on others"). Low values keep output faithful to the diff.
+AI_TEMPERATURE="${AI_TEMPERATURE:-${CONFIG_AI_TEMPERATURE:-0.3}}"
+# Prompt style: "full" (default, all context layers + few-shot walls) or "slim"
+# (lean, diff-focused prompt). Slim reduces instruction overload on smaller models
+# and anchors the model on the actual diff. Set to A/B which yields better messages.
+PROMPT_STYLE="${PROMPT_STYLE:-${CONFIG_PROMPT_STYLE:-full}}"
 ANTHROPIC_MODEL="${ANTHROPIC_MODEL:-${CONFIG_ANTHROPIC_MODEL:-claude-sonnet-4-6}}"
 ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"
 OPENAI_MODEL="${OPENAI_MODEL:-${CONFIG_OPENAI_MODEL:-gpt-4o-mini}}"
@@ -5110,6 +5133,45 @@ RULES:
 - Output ONLY the commit message, NO explanations, NO markdown, NO code fences$LANGUAGE_INSTRUCTION"
         fi
     fi
+elif [ "$PROMPT_STYLE" = "slim" ]; then
+    # Lean, diff-focused prompt (prototype for A/B testing against the full prompt).
+    # Drops the heavy context layers and few-shot walls; keeps real repo examples
+    # and the closing/breaking/language instructions so features still work.
+    PROMPT="You are an expert developer writing a git commit message. Study the diff below and describe what actually changed — be specific and grounded in the diff.
+
+$BRANCH_CONTEXT
+
+=== FILES CHANGED ===
+$GIT_STATUS
+
+Stats:
+$GIT_STATS
+
+Diff:
+$GIT_DIFF
+
+$SCOPE_INSTRUCTION
+
+Write a conventional commit message in EXACTLY this format:
+
+<type>: <summary in imperative mood, max 60 chars>
+
+- <specific change grounded in the diff>
+- <specific change grounded in the diff>
+
+RULES:
+- type is one of: feat, fix, docs, style, refactor, test, chore, perf
+- summary states the overall purpose; bullets state concrete changes
+- each bullet: one change, imperative mood, max 18 words, based on what the diff shows
+- name specific functions/files/values when the diff shows them
+- do NOT invent changes that are not present in the diff
+- lowercase except acronyms (API, HTTP, JSON, JWT, SQL) and ticket codes (ABC-123)
+- do NOT add ! unless the change breaks existing functionality
+- output ONLY the commit message — no preamble, no explanations, no markdown fences$LANGUAGE_INSTRUCTION
+
+$REPO_EXAMPLES
+
+$CLOSING_INSTRUCTION$MULTIPLE_OPTIONS_INSTRUCTION"
 else
     PROMPT="You are a commit message generator. Analyze the git changes below, then generate a conventional commit message.
 
@@ -5307,7 +5369,9 @@ SYNTHESIS_PROMPT_EOF
 # AI providers often return text with literal \n instead of real newlines
 normalize_analysis_output() {
     local text="$1"
-    # Convert literal \n to actual newlines using printf %b
+    # Strip reasoning blocks first (analysis model may be a reasoning model),
+    # then convert literal \n to actual newlines using printf %b
+    text=$(strip_think_blocks "$text")
     printf "%b" "$text"
 }
 
@@ -6078,6 +6142,31 @@ convert_newlines() {
     printf "%b" "$text"
 }
 
+# Strip <think>...</think> reasoning blocks emitted by reasoning models
+# (qwen3, devstral, etc.). Without this, reasoning can leak into the commit
+# summary line. Pure-awk state machine (no deps) that handles inline,
+# multi-line, and split blocks.
+strip_think_blocks() {
+    local text="$1"
+    printf '%s' "$text" | awk '
+        {
+            line = $0
+            # Remove any fully-inline <think>...</think> on this line
+            gsub(/<think>[^<]*<\/think>/, "", line)
+            if (skip) {
+                if (line ~ /<\/think>/) { sub(/.*<\/think>/, "", line); skip=0 }
+                else next
+            }
+            if (line ~ /<think>/) { sub(/<think>.*/, "", line); skip=1 }
+            # Drop leading blank lines left behind by a stripped block —
+            # a commit message must start with its summary line.
+            if (!started && line ~ /^[[:space:]]*$/) next
+            started=1
+            print line
+        }
+    '
+}
+
 # Parse multiple commit message options from AI response
 parse_multiple_options() {
     local response="$1"
@@ -6236,7 +6325,7 @@ call_ollama() {
 
     # Try streaming first
     if should_stream; then
-        local stream_payload=$(printf '{"model":"%s","prompt":"%s","stream":true}' "$model_escaped" "$prompt_escaped")
+        local stream_payload=$(printf '{"model":"%s","prompt":"%s","stream":true,"options":{"num_ctx":%s,"temperature":%s}}' "$model_escaped" "$prompt_escaped" "$OLLAMA_NUM_CTX" "$AI_TEMPERATURE")
         local stream_output
         stream_output=$(create_secure_temp_file "gh-commit-ai-stream") || return 1
 
@@ -6262,7 +6351,7 @@ call_ollama() {
     fi
 
     # Non-streaming path (original behavior)
-    local json_payload=$(printf '{"model":"%s","prompt":"%s","stream":false}' "$model_escaped" "$prompt_escaped")
+    local json_payload=$(printf '{"model":"%s","prompt":"%s","stream":false,"options":{"num_ctx":%s,"temperature":%s}}' "$model_escaped" "$prompt_escaped" "$OLLAMA_NUM_CTX" "$AI_TEMPERATURE")
 
     if [ "$VERBOSE" = "true" ]; then
         echo "[Verbose] Request payload:"
@@ -6448,7 +6537,7 @@ call_anthropic() {
 
     # Try streaming first
     if should_stream; then
-        local stream_payload=$(printf '{"model":"%s","max_tokens":1024,"stream":true,"messages":[{"role":"user","content":"%s"}]}' "$ANTHROPIC_MODEL" "$prompt_escaped")
+        local stream_payload=$(printf '{"model":"%s","max_tokens":1024,"temperature":%s,"stream":true,"messages":[{"role":"user","content":"%s"}]}' "$ANTHROPIC_MODEL" "$AI_TEMPERATURE" "$prompt_escaped")
         local stream_output
         stream_output=$(create_secure_temp_file "gh-commit-ai-stream") || return 1
 
@@ -6482,7 +6571,7 @@ call_anthropic() {
     fi
 
     # Non-streaming path (original behavior)
-    local json_payload=$(printf '{"model":"%s","max_tokens":1024,"messages":[{"role":"user","content":"%s"}]}' "$ANTHROPIC_MODEL" "$prompt_escaped")
+    local json_payload=$(printf '{"model":"%s","max_tokens":1024,"temperature":%s,"messages":[{"role":"user","content":"%s"}]}' "$ANTHROPIC_MODEL" "$AI_TEMPERATURE" "$prompt_escaped")
 
     if [ "$VERBOSE" = "true" ]; then
         echo "[Verbose] Request payload:"
@@ -6664,7 +6753,7 @@ call_openai() {
 
     # Try streaming first
     if should_stream; then
-        local stream_payload=$(printf '{"model":"%s","messages":[{"role":"user","content":"%s"}],"temperature":0.7,"stream":true,"stream_options":{"include_usage":true}}' "$OPENAI_MODEL" "$prompt_escaped")
+        local stream_payload=$(printf '{"model":"%s","messages":[{"role":"user","content":"%s"}],"temperature":%s,"stream":true,"stream_options":{"include_usage":true}}' "$OPENAI_MODEL" "$prompt_escaped" "$AI_TEMPERATURE")
         local stream_output
         stream_output=$(create_secure_temp_file "gh-commit-ai-stream") || return 1
 
@@ -6694,7 +6783,7 @@ call_openai() {
     fi
 
     # Non-streaming path
-    local json_payload=$(printf '{"model":"%s","messages":[{"role":"user","content":"%s"}],"temperature":0.7}' "$OPENAI_MODEL" "$prompt_escaped")
+    local json_payload=$(printf '{"model":"%s","messages":[{"role":"user","content":"%s"}],"temperature":%s}' "$OPENAI_MODEL" "$prompt_escaped" "$AI_TEMPERATURE")
 
     if [ "$VERBOSE" = "true" ]; then
         echo "[Verbose] Request payload:"
@@ -6885,7 +6974,7 @@ call_groq() {
 
     # Try streaming first (Groq uses OpenAI-compatible format)
     if should_stream; then
-        local stream_payload=$(printf '{"model":"%s","messages":[{"role":"user","content":"%s"}],"temperature":0.7,"stream":true,"stream_options":{"include_usage":true}}' "$GROQ_MODEL" "$prompt_escaped")
+        local stream_payload=$(printf '{"model":"%s","messages":[{"role":"user","content":"%s"}],"temperature":%s,"stream":true,"stream_options":{"include_usage":true}}' "$GROQ_MODEL" "$prompt_escaped" "$AI_TEMPERATURE")
         local stream_output
         stream_output=$(create_secure_temp_file "gh-commit-ai-stream") || return 1
 
@@ -6915,7 +7004,7 @@ call_groq() {
     fi
 
     # Non-streaming path
-    local json_payload=$(printf '{"model":"%s","messages":[{"role":"user","content":"%s"}],"temperature":0.7}' "$GROQ_MODEL" "$prompt_escaped")
+    local json_payload=$(printf '{"model":"%s","messages":[{"role":"user","content":"%s"}],"temperature":%s}' "$GROQ_MODEL" "$prompt_escaped" "$AI_TEMPERATURE")
 
     if [ "$VERBOSE" = "true" ]; then
         echo "[Verbose] Request payload:"
@@ -7257,6 +7346,9 @@ if [ "$RECOVERED_MESSAGE" != "true" ]; then
     cache_debug "AI provider section complete"
 fi
 
+# Strip reasoning blocks (qwen3/devstral etc.) before any other cleanup
+COMMIT_MSG=$(strip_think_blocks "$COMMIT_MSG")
+
 # Strip markdown code fences and explanations if AI added them
 # Remove lines that are just code fences and any explanatory text after the commit
 COMMIT_MSG=$(echo "$COMMIT_MSG" | awk '
@@ -7533,6 +7625,9 @@ EOF
                     ;;
             esac
         fi
+
+        # Strip reasoning blocks (qwen3/devstral etc.) before other cleanup
+        COMMIT_MSG=$(strip_think_blocks "$COMMIT_MSG")
 
         # Strip markdown code fences
         COMMIT_MSG=$(echo "$COMMIT_MSG" | awk '

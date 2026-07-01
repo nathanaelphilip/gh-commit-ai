@@ -25,6 +25,27 @@ ollama_model: gemma3:12b
 # Default: http://localhost:11434
 ollama_host: http://localhost:11434
 
+# Ollama context window (num_ctx), in tokens.
+# IMPORTANT: Ollama defaults to only ~4096 tokens and SILENTLY truncates prompts
+# that exceed it. Our prompt (instructions + diff) is large, so a small window
+# drops the diff or the format rules and produces poor messages on big commits.
+# Default: 16384
+ollama_num_ctx: 16384
+
+# Sampling temperature (applies to all providers: Ollama, Anthropic, OpenAI, Groq).
+# Commit generation is a structured task — low temperature keeps output faithful to
+# the diff and consistent run-to-run. Higher values add variance/creativity.
+# Default: 0.3
+temperature: 0.3
+
+# Prompt style: "full" (all context layers + examples) or "slim" (lean, diff-focused).
+# Slim reduces instruction overload on smaller local models. A/B test to see which
+# gives better messages for your models/repo.
+# NOTE: prompt_style only affects the single-model path. If pipeline_enabled: true,
+# set pipeline_enabled: false to A/B the slim prompt.
+# Default: full
+prompt_style: full
+
 # Anthropic Configuration
 # Model to use when ai_provider is anthropic
 # Default: claude-3-5-sonnet-20241022
@@ -97,7 +118,7 @@ auto_fix: true
 # Default: 200
 # Lower values = faster, less context
 # Higher values = slower, more context
-diff_max_lines: 200
+diff_max_lines: auto
 
 # History Learning
 # Learn from repository's commit history to match style

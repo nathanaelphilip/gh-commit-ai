@@ -19,7 +19,16 @@ use_scope: false
 use_gitmoji: false
 
 # Performance
-diff_max_lines: 200
+# 'auto' adapts the diff size to the commit (full diff for small commits, sampled
+# for large ones) instead of a flat 200-line cap that starved big commits.
+diff_max_lines: auto
+
+# Ollama context window. Must be large enough to hold the instruction prompt plus
+# the diff, or Ollama silently truncates and commit quality drops on big commits.
+ollama_num_ctx: 16384
+
+# Low temperature keeps commit messages faithful to the diff and consistent.
+temperature: 0.3
 
 # Features
 learn_from_history: true
