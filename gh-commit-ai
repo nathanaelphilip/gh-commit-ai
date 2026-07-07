@@ -509,7 +509,7 @@ detect_secrets_in_diff() {
     fi
 
     # Private keys
-    if echo "$added_lines" | grep -qE '-----BEGIN (RSA|EC|OPENSSH) PRIVATE KEY-----'; then
+    if echo "$added_lines" | grep -qE -e '-----BEGIN (RSA|EC|OPENSSH) PRIVATE KEY-----'; then
         DETECTED_SECRETS+=("Private key")
         found=true
     fi
