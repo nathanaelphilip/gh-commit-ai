@@ -691,6 +691,35 @@ show_api_key_error() {
     echo "  export AI_PROVIDER=ollama" >&2
 }
 
+# Actionable guidance when a request exceeds the model's token/rate limit.
+# This is NOT a transient rate limit — the prompt itself is too big to accept,
+# so waiting and retrying will never help. The user must send fewer tokens.
+show_token_limit_tip() {
+    local provider="$1"
+    echo "" >&2
+    echo -e "${YELLOW}This request is larger than the model's token limit for your tier.${NC}" >&2
+    echo "The prompt (diff + analysis context) exceeded what the API will accept" >&2
+    echo "in a single request, so retrying the same request will not help." >&2
+    echo "" >&2
+    echo "To fix:" >&2
+    echo "  • Send less of the diff: DIFF_MAX_LINES=50 gh commit-ai (or lower)" >&2
+    echo "  • Stage fewer files and commit in smaller batches" >&2
+    case "$provider" in
+        "Groq")
+            echo "  • Groq's free tier caps tokens-per-minute (e.g. 12000 TPM); one large" >&2
+            echo "    request can exceed it. Upgrade: https://console.groq.com/settings/billing" >&2
+            echo "  • Check your per-model limits: https://console.groq.com/settings/limits" >&2
+            ;;
+        "OpenAI")
+            echo "  • Use a model with a larger context window, or raise your usage tier" >&2
+            ;;
+        "Anthropic")
+            echo "  • Reduce input tokens, or raise your rate limit in the Anthropic console" >&2
+            ;;
+    esac
+    echo "  • Or switch provider: export AI_PROVIDER=ollama (local, no token limits)" >&2
+}
+
 # ============================================================================
 # Retry Logic
 # ============================================================================
@@ -727,10 +756,25 @@ retry_api_call() {
             if ! grep -q '"error"' "$output_file" 2>/dev/null; then
                 return 0  # Success!
             fi
+
+            # The server returned an error body. Some errors are permanent:
+            # retrying the identical request cannot fix them (the request exceeds
+            # the model's token/rate limit, the API key is invalid, or the model
+            # does not exist). Stop now and let the caller surface the real
+            # message instead of burning retries. The error body is preserved in
+            # "$output_file"; return 2 to signal "API error body available".
+            if grep -qiE 'too large|too long|reduce your message size|context.?length|maximum context length|invalid_?api_?key|invalid api key|authentication_error|model_not_found|does not exist|decommissioned' "$output_file" 2>/dev/null; then
+                return 2
+            fi
         fi
 
         # If this was the last attempt, fail
         if [ $attempt -eq "$MAX_RETRIES" ]; then
+            # Distinguish a real error body from a pure network failure so the
+            # caller can show the actual API error rather than a generic message.
+            if [ $exit_code -eq 0 ] && [ -s "$output_file" ] && grep -q '"error"' "$output_file" 2>/dev/null; then
+                return 2
+            fi
             return 1
         fi
 
@@ -6389,7 +6433,7 @@ call_ollama() {
     local response=$(cat "$temp_response" 2>/dev/null)
 
     # Check for final failure after all retries
-    if [ "$exit_code" != "0" ] || [ -z "$response" ]; then
+    if [ -z "$response" ]; then
         echo -e "${RED}Error: Failed to get response from Ollama after $MAX_RETRIES attempts${NC}" >&2
         echo "" >&2
         echo "All retry attempts exhausted. Possible causes:" >&2
@@ -6612,7 +6656,7 @@ call_anthropic() {
     local response=$(cat "$temp_response" 2>/dev/null)
 
     # Check for final failure after all retries
-    if [ "$exit_code" != "0" ]; then
+    if [ -z "$response" ]; then
         echo -e "${RED}Error: Failed to get response from Anthropic after $MAX_RETRIES attempts${NC}" >&2
         echo "" >&2
         echo "All retry attempts exhausted. This could be due to:" >&2
@@ -6661,7 +6705,9 @@ call_anthropic() {
         local error_msg=$(echo "$response" | grep -o '"message":"[^"]*"' | head -1 | sed 's/"message":"//;s/"$//')
         echo -e "${RED}Error from Anthropic ($error_type): $error_msg" >&2
 
-        if [[ "$error_type" == *"authentication"* ]] || [[ "$error_msg" == *"API key"* ]]; then
+        if [[ "$error_msg" == *"too long"* ]] || [[ "$error_msg" == *"too large"* ]] || [[ "$error_msg" == *"maximum"* ]]; then
+            show_token_limit_tip "Anthropic"
+        elif [[ "$error_type" == *"authentication"* ]] || [[ "$error_msg" == *"API key"* ]]; then
             echo "Tip: Check your API key is valid and has credits" >&2
         elif [[ "$error_type" == *"rate_limit"* ]]; then
             echo "Tip: You've hit the rate limit. Wait a moment and try again" >&2
@@ -6823,7 +6869,7 @@ call_openai() {
     local response=$(cat "$temp_response" 2>/dev/null)
 
     # Check for final failure after all retries
-    if [ "$exit_code" != "0" ] || [ -z "$response" ]; then
+    if [ -z "$response" ]; then
         echo -e "${RED}Error: Failed to get response from OpenAI after $MAX_RETRIES attempts${NC}" >&2
         echo "" >&2
         echo "All retry attempts exhausted. Possible causes:" >&2
@@ -6881,7 +6927,9 @@ call_openai() {
         [ -n "$error_type" ] && echo -e "${RED}Type: $error_type" >&2
         [ -n "$error_msg" ] && echo -e "${RED}Message: $error_msg" >&2
 
-        if [[ "$error_code" == *"invalid_api_key"* ]] || [[ "$error_msg" == *"API key"* ]]; then
+        if [[ "$error_code" == *"context_length"* ]] || [[ "$error_msg" == *"too large"* ]] || [[ "$error_msg" == *"maximum context"* ]] || [[ "$error_msg" == *"reduce"* ]]; then
+            show_token_limit_tip "OpenAI"
+        elif [[ "$error_code" == *"invalid_api_key"* ]] || [[ "$error_msg" == *"API key"* ]]; then
             echo "Tip: Check your API key is valid and has credits" >&2
         elif [[ "$error_code" == *"rate_limit"* ]]; then
             echo "Tip: You've hit the rate limit. Wait a moment and try again" >&2
@@ -7044,7 +7092,7 @@ call_groq() {
     local response=$(cat "$temp_response" 2>/dev/null)
 
     # Check for final failure after all retries
-    if [ "$exit_code" != "0" ] || [ -z "$response" ]; then
+    if [ -z "$response" ]; then
         echo -e "${RED}Error: Failed to get response from Groq after $MAX_RETRIES attempts${NC}" >&2
         echo "" >&2
         echo "All retry attempts exhausted. Possible causes:" >&2
@@ -7102,7 +7150,9 @@ call_groq() {
         [ -n "$error_type" ] && echo -e "${RED}Type: $error_type" >&2
         [ -n "$error_msg" ] && echo -e "${RED}Message: $error_msg" >&2
 
-        if [[ "$error_code" == *"invalid_api_key"* ]] || [[ "$error_msg" == *"API key"* ]]; then
+        if [[ "$error_msg" == *"too large"* ]] || [[ "$error_msg" == *"reduce your message size"* ]] || [[ "$error_type" == *"tokens"* ]]; then
+            show_token_limit_tip "Groq"
+        elif [[ "$error_code" == *"invalid_api_key"* ]] || [[ "$error_msg" == *"API key"* ]]; then
             echo "Tip: Check your API key is valid" >&2
         elif [[ "$error_code" == *"rate_limit"* ]]; then
             echo "Tip: You've hit the rate limit. Wait a moment and try again" >&2
