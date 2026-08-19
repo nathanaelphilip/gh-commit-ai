@@ -1,9 +1,3 @@
-# Handle version suggestion mode
-if [ "$VERSION_MODE" = true ]; then
-    suggest_next_version "$CREATE_TAG" "$TAG_PREFIX"
-    exit 0
-fi
-
 # Handle code review mode (needs AI functions defined above)
 if [ "$CODE_REVIEW_MODE" = true ]; then
     generate_code_review "$REVIEW_STAGED_ONLY"
@@ -108,6 +102,8 @@ if [ "$RECOVERED_MESSAGE" != "true" ]; then
         COMMIT_MSG="$CACHED_MSG"
     else
         cache_debug "No cache hit, calling AI provider: $AI_PROVIDER"
+
+        require_ai_provider
 
         # Call AI provider (with timing for analytics)
         ai_start_time=$(date +%s 2>/dev/null || echo "0")
@@ -428,6 +424,7 @@ EOF
         break
     elif [[ $REPLY =~ ^[Rr]$ ]]; then
         # Regenerate the commit message
+        require_ai_provider
         echo "Regenerating commit message..."
         echo ""
 

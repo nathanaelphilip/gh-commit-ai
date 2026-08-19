@@ -31,7 +31,7 @@ teardown() {
 EOF
 
     # Extract the response field using grep/sed (same method as in script)
-    result=$(grep -o '"response":"[^"]*"' /tmp/ollama_response.json | sed 's/"response":"//; s/"$//' | sed 's/\\n/\n/g')
+    result=$(grep -o '"response": *"[^"]*"' /tmp/ollama_response.json | sed 's/"response": *"//; s/"$//' | sed 's/\\n/\n/g')
 
     # Verify extraction
     [[ "$result" == *"feat: add user authentication"* ]]
@@ -63,7 +63,7 @@ EOF
 EOF
 
     # Extract content using grep/sed
-    result=$(grep -o '"text":"[^"]*"' /tmp/anthropic_response.json | head -1 | sed 's/"text":"//; s/"$//' | sed 's/\\n/\n/g')
+    result=$(grep -o '"text": *"[^"]*"' /tmp/anthropic_response.json | head -1 | sed 's/"text": *"//; s/"$//' | sed 's/\\n/\n/g')
 
     # Verify extraction
     [[ "$result" == *"fix: resolve database connection timeout"* ]]
@@ -106,7 +106,7 @@ EOF
 EOF
 
     # Extract content using grep/sed
-    result=$(grep -o '"content":"[^"]*"' /tmp/openai_response.json | sed 's/"content":"//; s/"$//' | sed 's/\\n/\n/g')
+    result=$(grep -o '"content": *"[^"]*"' /tmp/openai_response.json | sed 's/"content": *"//; s/"$//' | sed 's/\\n/\n/g')
 
     # Verify extraction
     [[ "$result" == *"docs: update API documentation"* ]]

@@ -41,7 +41,7 @@ enforce_lowercase() {
     while IFS= read -r ticket; do
         if [ -n "$ticket" ]; then
             temp_message=$(echo "$temp_message" | sed "s/$ticket/__TICKET${ticket_counter}__/g")
-            ((ticket_counter++))
+            ticket_counter=$((ticket_counter + 1))
         fi
     done < "$tickets_file"
 
@@ -53,7 +53,7 @@ enforce_lowercase() {
     while IFS= read -r ticket; do
         if [ -n "$ticket" ]; then
             temp_message=$(echo "$temp_message" | sed "s/__ticket${ticket_counter}__/$ticket/g")
-            ((ticket_counter++))
+            ticket_counter=$((ticket_counter + 1))
         fi
     done < "$tickets_file"
 
@@ -107,7 +107,7 @@ auto_fix_message() {
                 rest_lines="$line"
             fi
         fi
-        ((line_num++))
+        line_num=$((line_num + 1))
     done <<< "$message"
 
     # Fix summary line (first line)

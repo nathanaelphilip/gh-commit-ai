@@ -11,6 +11,17 @@ if [ "$SPLIT_MODE" = true ]; then
     exit 0
 fi
 
+# Handle version suggestion mode. This has to sit above the staged-changes check
+# below: `version` reads git history, not the working tree, so it is perfectly
+# valid with a clean tree, and running it there used to print "No changes to
+# commit" and exit before the subcommand was ever reached. suggest_next_version
+# uses no AI, so it is safe this early - the provider functions are defined
+# further down the concatenated script.
+if [ "$VERSION_MODE" = true ]; then
+    suggest_next_version "$CREATE_TAG" "$TAG_PREFIX"
+    exit 0
+fi
+
 # Handle amend mode differently
 if [ "$AMEND" = true ]; then
     # Check if there's at least one commit
@@ -75,6 +86,10 @@ else
         echo "No changes to commit"
         exit 0
     fi
+
+    # There is work to summarise, so a provider will definitely be needed. Fail
+    # here rather than after the analysis passes have already burned time.
+    require_ai_provider
 
     # Create secure temp files for inter-process communication
     status_file=$(create_secure_temp_file "gh-commit-ai-status") || exit 1

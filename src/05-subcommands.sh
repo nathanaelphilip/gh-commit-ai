@@ -246,7 +246,7 @@ suggest_next_version() {
     if [ -z "$last_tag" ]; then
         echo -e "${YELLOW}No tags found in repository${NC}"
         echo ""
-        echo "Suggested first version: ${GREEN}${tag_prefix}0.1.0${NC}"
+        echo -e "Suggested first version: ${GREEN}${tag_prefix}0.1.0${NC}"
         echo ""
         echo "Reasoning:"
         echo "  • No previous tags exist"
@@ -306,15 +306,15 @@ suggest_next_version() {
     while IFS= read -r commit_msg; do
         # Check for breaking changes (! after type or BREAKING CHANGE in message)
         if [[ "$commit_msg" =~ ^[a-z]+(\([a-z0-9_-]+\))?!: ]] || [[ "$commit_msg" =~ BREAKING[[:space:]]CHANGE ]]; then
-            ((breaking_count++))
+            breaking_count=$((breaking_count + 1))
         # Check for features
         elif [[ "$commit_msg" =~ ^feat(\([a-z0-9_-]+\))?: ]]; then
-            ((feat_count++))
+            feat_count=$((feat_count + 1))
         # Check for fixes
         elif [[ "$commit_msg" =~ ^fix(\([a-z0-9_-]+\))?: ]]; then
-            ((fix_count++))
+            fix_count=$((fix_count + 1))
         else
-            ((other_count++))
+            other_count=$((other_count + 1))
         fi
     done <<< "$commits"
 
@@ -327,22 +327,22 @@ suggest_next_version() {
     if [ $breaking_count -gt 0 ]; then
         # Breaking changes → Major bump
         bump_type="major"
-        ((new_major++))
+        new_major=$((new_major + 1))
         new_minor=0
         new_patch=0
     elif [ $feat_count -gt 0 ]; then
         # New features → Minor bump
         bump_type="minor"
-        ((new_minor++))
+        new_minor=$((new_minor + 1))
         new_patch=0
     elif [ $fix_count -gt 0 ]; then
         # Bug fixes → Patch bump
         bump_type="patch"
-        ((new_patch++))
+        new_patch=$((new_patch + 1))
     else
         # Only other commits (docs, chore, etc.) → Patch bump
         bump_type="patch"
-        ((new_patch++))
+        new_patch=$((new_patch + 1))
     fi
 
     local suggested_version="${tag_prefix}${new_major}.${new_minor}.${new_patch}"
@@ -541,6 +541,8 @@ Be specific and practical."
 call_ai_for_split() {
     local prompt="$1"
 
+    require_ai_provider
+
     # Detect and use available AI provider
     if [ "$AI_PROVIDER" = "auto" ]; then
         detect_available_providers > /dev/null
@@ -738,6 +740,8 @@ Provide your review:"
         esac
     fi
 
+    require_ai_provider
+
     # Call AI provider for review
     local review_result
     case "$AI_PROVIDER" in
@@ -927,6 +931,8 @@ FORMAT:
     echo "→ Analyzing $num_commits commits on branch: $current_branch" >&2
     echo "→ Comparing against: $base_branch" >&2
     echo "" >&2
+
+    require_ai_provider
 
     # Call AI to generate PR description
     local pr_description=""

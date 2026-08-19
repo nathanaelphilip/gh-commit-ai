@@ -988,6 +988,31 @@ get_best_ollama_model() {
     echo "$models" | head -1 | tee "$cache_file"
 }
 
+# Fail only when a provider is actually about to be used. See the comment in the
+# auto-detection block below.
+AI_PROVIDER_UNAVAILABLE=false
+
+require_ai_provider() {
+    [ "$AI_PROVIDER_UNAVAILABLE" = "true" ] || return 0
+
+    echo -e "${RED}Error: No AI providers available${NC}" >&2
+    echo "" >&2
+    echo "Available options:" >&2
+    echo "  1. Install Ollama (free, local): https://ollama.ai" >&2
+    echo "     Then run: ollama pull qwen3:8b" >&2
+    echo "" >&2
+    echo "  2. Set up Groq API (ultra-fast, generous free tier):" >&2
+    echo "     export GROQ_API_KEY=\"gsk-...\"" >&2
+    echo "     Get your key from: https://console.groq.com/keys" >&2
+    echo "" >&2
+    echo "  3. Set up Anthropic API:" >&2
+    echo "     export ANTHROPIC_API_KEY=\"sk-ant-...\"" >&2
+    echo "" >&2
+    echo "  4. Set up OpenAI API:" >&2
+    echo "     export OPENAI_API_KEY=\"sk-proj-...\"" >&2
+    exit 1
+}
+
 # Auto-select provider if set to "auto"
 AUTO_DETECTED=false
 if [ "$AI_PROVIDER" = "auto" ]; then
@@ -995,22 +1020,13 @@ if [ "$AI_PROVIDER" = "auto" ]; then
     available_providers=$(detect_available_providers)
 
     if [ -z "$available_providers" ]; then
-        echo -e "${RED}Error: No AI providers available${NC}"
-        echo ""
-        echo "Available options:"
-        echo "  1. Install Ollama (free, local): https://ollama.ai"
-        echo "     Then run: ollama pull qwen3:8b"
-        echo ""
-        echo "  2. Set up Groq API (ultra-fast, generous free tier):"
-        echo "     export GROQ_API_KEY=\"gsk-...\""
-        echo "     Get your key from: https://console.groq.com/keys"
-        echo ""
-        echo "  3. Set up Anthropic API:"
-        echo "     export ANTHROPIC_API_KEY=\"sk-ant-...\""
-        echo ""
-        echo "  4. Set up OpenAI API:"
-        echo "     export OPENAI_API_KEY=\"sk-proj-...\""
-        exit 1
+        # Deliberately not fatal here. This block runs before argument parsing,
+        # so exiting would make --help, --version, "Not a git repository" and
+        # "No changes to commit" all unreachable on a machine that has no
+        # provider configured yet - exactly the machine whose user needs to read
+        # --help. Record it instead and let require_ai_provider fail at the point
+        # where a provider is genuinely needed.
+        AI_PROVIDER_UNAVAILABLE=true
     fi
 
     # Pick the best available provider (prefer local/free first, then fast/free APIs, then paid APIs)
@@ -1282,7 +1298,7 @@ suggest_next_version() {
     if [ -z "$last_tag" ]; then
         echo -e "${YELLOW}No tags found in repository${NC}"
         echo ""
-        echo "Suggested first version: ${GREEN}${tag_prefix}0.1.0${NC}"
+        echo -e "Suggested first version: ${GREEN}${tag_prefix}0.1.0${NC}"
         echo ""
         echo "Reasoning:"
         echo "  • No previous tags exist"
@@ -1342,15 +1358,15 @@ suggest_next_version() {
     while IFS= read -r commit_msg; do
         # Check for breaking changes (! after type or BREAKING CHANGE in message)
         if [[ "$commit_msg" =~ ^[a-z]+(\([a-z0-9_-]+\))?!: ]] || [[ "$commit_msg" =~ BREAKING[[:space:]]CHANGE ]]; then
-            ((breaking_count++))
+            breaking_count=$((breaking_count + 1))
         # Check for features
         elif [[ "$commit_msg" =~ ^feat(\([a-z0-9_-]+\))?: ]]; then
-            ((feat_count++))
+            feat_count=$((feat_count + 1))
         # Check for fixes
         elif [[ "$commit_msg" =~ ^fix(\([a-z0-9_-]+\))?: ]]; then
-            ((fix_count++))
+            fix_count=$((fix_count + 1))
         else
-            ((other_count++))
+            other_count=$((other_count + 1))
         fi
     done <<< "$commits"
 
@@ -1363,22 +1379,22 @@ suggest_next_version() {
     if [ $breaking_count -gt 0 ]; then
         # Breaking changes → Major bump
         bump_type="major"
-        ((new_major++))
+        new_major=$((new_major + 1))
         new_minor=0
         new_patch=0
     elif [ $feat_count -gt 0 ]; then
         # New features → Minor bump
         bump_type="minor"
-        ((new_minor++))
+        new_minor=$((new_minor + 1))
         new_patch=0
     elif [ $fix_count -gt 0 ]; then
         # Bug fixes → Patch bump
         bump_type="patch"
-        ((new_patch++))
+        new_patch=$((new_patch + 1))
     else
         # Only other commits (docs, chore, etc.) → Patch bump
         bump_type="patch"
-        ((new_patch++))
+        new_patch=$((new_patch + 1))
     fi
 
     local suggested_version="${tag_prefix}${new_major}.${new_minor}.${new_patch}"
@@ -1577,6 +1593,8 @@ Be specific and practical."
 call_ai_for_split() {
     local prompt="$1"
 
+    require_ai_provider
+
     # Detect and use available AI provider
     if [ "$AI_PROVIDER" = "auto" ]; then
         detect_available_providers > /dev/null
@@ -1774,6 +1792,8 @@ Provide your review:"
         esac
     fi
 
+    require_ai_provider
+
     # Call AI provider for review
     local review_result
     case "$AI_PROVIDER" in
@@ -1963,6 +1983,8 @@ FORMAT:
     echo "→ Analyzing $num_commits commits on branch: $current_branch" >&2
     echo "→ Comparing against: $base_branch" >&2
     echo "" >&2
+
+    require_ai_provider
 
     # Call AI to generate PR description
     local pr_description=""
@@ -3478,6 +3500,17 @@ if [ "$SPLIT_MODE" = true ]; then
     exit 0
 fi
 
+# Handle version suggestion mode. This has to sit above the staged-changes check
+# below: `version` reads git history, not the working tree, so it is perfectly
+# valid with a clean tree, and running it there used to print "No changes to
+# commit" and exit before the subcommand was ever reached. suggest_next_version
+# uses no AI, so it is safe this early - the provider functions are defined
+# further down the concatenated script.
+if [ "$VERSION_MODE" = true ]; then
+    suggest_next_version "$CREATE_TAG" "$TAG_PREFIX"
+    exit 0
+fi
+
 # Handle amend mode differently
 if [ "$AMEND" = true ]; then
     # Check if there's at least one commit
@@ -3542,6 +3575,10 @@ else
         echo "No changes to commit"
         exit 0
     fi
+
+    # There is work to summarise, so a provider will definitely be needed. Fail
+    # here rather than after the analysis passes have already burned time.
+    require_ai_provider
 
     # Create secure temp files for inter-process communication
     status_file=$(create_secure_temp_file "gh-commit-ai-status") || exit 1
@@ -4335,7 +4372,7 @@ build_wordpress_context() {
         ) &
         lookup_pids+=($!)
 
-        ((call_index++))
+        call_index=$((call_index + 1))
     done
 
     # Wait for all parallel lookups to complete
@@ -5706,7 +5743,7 @@ enforce_lowercase() {
     while IFS= read -r ticket; do
         if [ -n "$ticket" ]; then
             temp_message=$(echo "$temp_message" | sed "s/$ticket/__TICKET${ticket_counter}__/g")
-            ((ticket_counter++))
+            ticket_counter=$((ticket_counter + 1))
         fi
     done < "$tickets_file"
 
@@ -5718,7 +5755,7 @@ enforce_lowercase() {
     while IFS= read -r ticket; do
         if [ -n "$ticket" ]; then
             temp_message=$(echo "$temp_message" | sed "s/__ticket${ticket_counter}__/$ticket/g")
-            ((ticket_counter++))
+            ticket_counter=$((ticket_counter + 1))
         fi
     done < "$tickets_file"
 
@@ -5772,7 +5809,7 @@ auto_fix_message() {
                 rest_lines="$line"
             fi
         fi
-        ((line_num++))
+        line_num=$((line_num + 1))
     done <<< "$message"
 
     # Fix summary line (first line)
@@ -7404,12 +7441,6 @@ call_provider_with_fallback() {
     return 1
 }
 
-# Handle version suggestion mode
-if [ "$VERSION_MODE" = true ]; then
-    suggest_next_version "$CREATE_TAG" "$TAG_PREFIX"
-    exit 0
-fi
-
 # Handle code review mode (needs AI functions defined above)
 if [ "$CODE_REVIEW_MODE" = true ]; then
     generate_code_review "$REVIEW_STAGED_ONLY"
@@ -7514,6 +7545,8 @@ if [ "$RECOVERED_MESSAGE" != "true" ]; then
         COMMIT_MSG="$CACHED_MSG"
     else
         cache_debug "No cache hit, calling AI provider: $AI_PROVIDER"
+
+        require_ai_provider
 
         # Call AI provider (with timing for analytics)
         ai_start_time=$(date +%s 2>/dev/null || echo "0")
@@ -7834,6 +7867,7 @@ EOF
         break
     elif [[ $REPLY =~ ^[Rr]$ ]]; then
         # Regenerate the commit message
+        require_ai_provider
         echo "Regenerating commit message..."
         echo ""
 
