@@ -1358,15 +1358,15 @@ suggest_next_version() {
     while IFS= read -r commit_msg; do
         # Check for breaking changes (! after type or BREAKING CHANGE in message)
         if [[ "$commit_msg" =~ ^[a-z]+(\([a-z0-9_-]+\))?!: ]] || [[ "$commit_msg" =~ BREAKING[[:space:]]CHANGE ]]; then
-            ((breaking_count++))
+            breaking_count=$((breaking_count + 1))
         # Check for features
         elif [[ "$commit_msg" =~ ^feat(\([a-z0-9_-]+\))?: ]]; then
-            ((feat_count++))
+            feat_count=$((feat_count + 1))
         # Check for fixes
         elif [[ "$commit_msg" =~ ^fix(\([a-z0-9_-]+\))?: ]]; then
-            ((fix_count++))
+            fix_count=$((fix_count + 1))
         else
-            ((other_count++))
+            other_count=$((other_count + 1))
         fi
     done <<< "$commits"
 
@@ -1379,22 +1379,22 @@ suggest_next_version() {
     if [ $breaking_count -gt 0 ]; then
         # Breaking changes → Major bump
         bump_type="major"
-        ((new_major++))
+        new_major=$((new_major + 1))
         new_minor=0
         new_patch=0
     elif [ $feat_count -gt 0 ]; then
         # New features → Minor bump
         bump_type="minor"
-        ((new_minor++))
+        new_minor=$((new_minor + 1))
         new_patch=0
     elif [ $fix_count -gt 0 ]; then
         # Bug fixes → Patch bump
         bump_type="patch"
-        ((new_patch++))
+        new_patch=$((new_patch + 1))
     else
         # Only other commits (docs, chore, etc.) → Patch bump
         bump_type="patch"
-        ((new_patch++))
+        new_patch=$((new_patch + 1))
     fi
 
     local suggested_version="${tag_prefix}${new_major}.${new_minor}.${new_patch}"
@@ -4372,7 +4372,7 @@ build_wordpress_context() {
         ) &
         lookup_pids+=($!)
 
-        ((call_index++))
+        call_index=$((call_index + 1))
     done
 
     # Wait for all parallel lookups to complete
@@ -5743,7 +5743,7 @@ enforce_lowercase() {
     while IFS= read -r ticket; do
         if [ -n "$ticket" ]; then
             temp_message=$(echo "$temp_message" | sed "s/$ticket/__TICKET${ticket_counter}__/g")
-            ((ticket_counter++))
+            ticket_counter=$((ticket_counter + 1))
         fi
     done < "$tickets_file"
 
@@ -5755,7 +5755,7 @@ enforce_lowercase() {
     while IFS= read -r ticket; do
         if [ -n "$ticket" ]; then
             temp_message=$(echo "$temp_message" | sed "s/__ticket${ticket_counter}__/$ticket/g")
-            ((ticket_counter++))
+            ticket_counter=$((ticket_counter + 1))
         fi
     done < "$tickets_file"
 
@@ -5809,7 +5809,7 @@ auto_fix_message() {
                 rest_lines="$line"
             fi
         fi
-        ((line_num++))
+        line_num=$((line_num + 1))
     done <<< "$message"
 
     # Fix summary line (first line)

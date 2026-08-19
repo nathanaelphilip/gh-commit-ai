@@ -305,7 +305,7 @@ build_wordpress_context() {
         ) &
         lookup_pids+=($!)
 
-        ((call_index++))
+        call_index=$((call_index + 1))
     done
 
     # Wait for all parallel lookups to complete
