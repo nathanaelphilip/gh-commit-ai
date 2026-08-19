@@ -1,7 +1,3 @@
-# ============================================================================
-# Security Functions
-# ============================================================================
-
 # Create a secure temporary file with restricted permissions (600)
 # Returns the path to the created file
 create_secure_temp_file() {
@@ -140,7 +136,7 @@ detect_secrets_in_diff() {
     fi
 
     # Private keys
-    if echo "$added_lines" | grep -qE '-----BEGIN (RSA|EC|OPENSSH) PRIVATE KEY-----'; then
+    if echo "$added_lines" | grep -qE -e '-----BEGIN (RSA|EC|OPENSSH) PRIVATE KEY-----'; then
         DETECTED_SECRETS+=("Private key")
         found=true
     fi
@@ -318,7 +314,40 @@ show_api_key_error() {
     echo "" >&2
     echo "Alternative: Use Ollama (local, no API key needed):" >&2
     echo "  brew install ollama  # or download from https://ollama.ai" >&2
-    echo "  ollama run gemma2:2b" >&2
+    echo "  ollama run qwen3:8b  # strong instruction following, fast" >&2
     echo "  export AI_PROVIDER=ollama" >&2
 }
+
+# Actionable guidance when a request exceeds the model's token/rate limit.
+# This is NOT a transient rate limit — the prompt itself is too big to accept,
+# so waiting and retrying will never help. The user must send fewer tokens.
+show_token_limit_tip() {
+    local provider="$1"
+    echo "" >&2
+    echo -e "${YELLOW}This request is larger than the model's token limit for your tier.${NC}" >&2
+    echo "The prompt (diff + analysis context) exceeded what the API will accept" >&2
+    echo "in a single request, so retrying the same request will not help." >&2
+    echo "" >&2
+    echo "To fix:" >&2
+    echo "  • Send less of the diff: DIFF_MAX_LINES=50 gh commit-ai (or lower)" >&2
+    echo "  • Stage fewer files and commit in smaller batches" >&2
+    case "$provider" in
+        "Groq")
+            echo "  • Groq's free tier caps tokens-per-minute (e.g. 12000 TPM); one large" >&2
+            echo "    request can exceed it. Upgrade: https://console.groq.com/settings/billing" >&2
+            echo "  • Check your per-model limits: https://console.groq.com/settings/limits" >&2
+            ;;
+        "OpenAI")
+            echo "  • Use a model with a larger context window, or raise your usage tier" >&2
+            ;;
+        "Anthropic")
+            echo "  • Reduce input tokens, or raise your rate limit in the Anthropic console" >&2
+            ;;
+    esac
+    echo "  • Or switch provider: export AI_PROVIDER=ollama (local, no token limits)" >&2
+}
+
+# ============================================================================
+# Retry Logic
+# ============================================================================
 

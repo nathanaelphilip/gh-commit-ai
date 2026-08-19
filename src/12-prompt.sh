@@ -11,7 +11,7 @@ fi
 FEW_SHOT_EXAMPLES="
 EXAMPLES OF GOOD COMMIT MESSAGES (BE SPECIFIC LIKE THESE):
 
-Example 1 - Video feature:
+Example 1 - Feature:
 Input: Changed video.php, added uploadVideo() function
 Output:
 feat: add video upload with format validation
@@ -20,7 +20,7 @@ feat: add video upload with format validation
 - add support for mp4, avi, mov formats
 - validate file size and duration
 
-Example 2 - Authentication:
+Example 2 - Bug fix:
 Input: Modified auth/login.php, updated validateUser()
 Output:
 fix: resolve session timeout in user login
@@ -29,7 +29,7 @@ fix: resolve session timeout in user login
 - add automatic token refresh
 - fix validateUser() edge case
 
-Example 3 - Payment processing:
+Example 3 - Refactoring:
 Input: Changed payment.php and invoice.php
 Output:
 fix: correct tax calculation in payment flow
@@ -62,10 +62,11 @@ feat: add new icons to library
 - export new icons in index.ts
 
 REMEMBER:
-- Mention the SPECIFIC AREA (video, auth, payment, etc.) and WHAT changed (function names, features)
-- Keep each bullet to 12 words MAXIMUM (count the words!)
+- Mention the SPECIFIC AREA and WHAT changed (function names, features)
+- Keep each bullet to 18 words MAXIMUM (count the words!)
 - Use bullet list format with SHORT lines, NOT paragraphs
-- If you have many similar items, list each one separately"
+- If you have many similar items, list each one separately
+"
 
 # Prepare branch context
 BRANCH_CONTEXT="Branch context:
@@ -280,23 +281,71 @@ fi
 if [ -n "$WP_COMPONENT_NAME" ]; then
     # Check if this is a bulk plugin update
     if [ "$WP_COMPONENT_TYPE" = "plugin-bulk" ]; then
-        # Very simple prompt for bulk plugin updates
-        PROMPT="Create a simple commit message for a WordPress plugin update.
+        # Simple format for plugin-only changes
+        # Detect add vs update for each plugin using git history
+        if [[ "$WP_COMPONENT_NAME" == *,* ]]; then
+            # Multiple plugins - generate bullets with add/update per plugin
+            plugin_bullets=""
+            has_add=false
+            has_update=false
+            IFS=',' read -ra WP_PLUGIN_ARRAY <<< "$WP_COMPONENT_NAME"
+            for pname in "${WP_PLUGIN_ARRAY[@]}"; do
+                if git ls-tree -r HEAD --name-only "wp-content/plugins/${pname}/" 2>/dev/null | head -1 | grep -q .; then
+                    plugin_bullets="${plugin_bullets}\n- update ${pname} plugin"
+                    has_update=true
+                else
+                    plugin_bullets="${plugin_bullets}\n- add ${pname} plugin"
+                    has_add=true
+                fi
+            done
+            # Build summary verb
+            summary_verb="update"
+            if [ "$has_add" = "true" ] && [ "$has_update" = "true" ]; then
+                summary_verb="add and update"
+            elif [ "$has_add" = "true" ]; then
+                summary_verb="add"
+            fi
+            PROMPT="Create a simple commit message for multiple WordPress plugins.
+
+Plugin names: $WP_COMPONENT_NAME
+
+Generate a commit message with one bullet per plugin.
+
+Format:
+chore: ${summary_verb} wordpress plugins
+$(echo -e "$plugin_bullets")
+
+RULES:
+- Type must be 'chore'
+- Summary line: '${summary_verb} wordpress plugins'
+- One bullet point per plugin using 'add' or 'update' as shown above
+- NO detailed changes or explanations
+- Use lowercase for all text
+- Use the exact plugin names provided
+- Output ONLY the commit message, NO explanations, NO markdown, NO code fences$LANGUAGE_INSTRUCTION"
+        else
+            # Single plugin - determine add vs update
+            wp_action="update"
+            if ! git ls-tree -r HEAD --name-only "wp-content/plugins/${WP_COMPONENT_NAME}/" 2>/dev/null | head -1 | grep -q .; then
+                wp_action="add"
+            fi
+            PROMPT="Create a simple commit message for a WordPress plugin.
 
 Plugin name: $WP_COMPONENT_NAME
 
 Generate a minimal commit message with NO detailed bullets.
 
 Format:
-chore: update $WP_COMPONENT_NAME plugin
+chore: ${wp_action} $WP_COMPONENT_NAME plugin
 
 RULES:
 - Type must be 'chore'
-- Summary line: 'update $WP_COMPONENT_NAME plugin' (use the exact plugin name)
+- Summary line: '${wp_action} $WP_COMPONENT_NAME plugin' (use the exact plugin name)
 - NO bullet points
 - NO detailed changes
 - Use lowercase for all text
 - Output ONLY the commit message, NO explanations, NO markdown, NO code fences$LANGUAGE_INSTRUCTION"
+        fi
     else
         # Capitalize first letter for display (portable method)
         if [ "$WP_COMPONENT_TYPE" = "plugin" ]; then
@@ -370,8 +419,73 @@ RULES:
 - Output ONLY the commit message, NO explanations, NO markdown, NO code fences$LANGUAGE_INSTRUCTION"
         fi
     fi
+elif [ "$PROMPT_STYLE" = "slim" ]; then
+    # Lean, diff-focused prompt (prototype for A/B testing against the full prompt).
+    # Drops the heavy context layers and few-shot walls; keeps real repo examples
+    # and the closing/breaking/language instructions so features still work.
+    PROMPT="You are an expert developer writing a git commit message. Study the diff below and describe what actually changed — be specific and grounded in the diff.
+
+$BRANCH_CONTEXT
+
+=== FILES CHANGED ===
+$GIT_STATUS
+
+Stats:
+$GIT_STATS
+
+Diff:
+$GIT_DIFF
+
+$SCOPE_INSTRUCTION
+
+Write a conventional commit message in EXACTLY this format:
+
+<type>: <summary in imperative mood, max 60 chars>
+
+- <specific change grounded in the diff>
+- <specific change grounded in the diff>
+
+RULES:
+- type is one of: feat, fix, docs, style, refactor, test, chore, perf
+- summary states the overall purpose; bullets state concrete changes
+- each bullet: one change, imperative mood, max 18 words, based on what the diff shows
+- name specific functions/files/values when the diff shows them
+- do NOT invent changes that are not present in the diff
+- lowercase except acronyms (API, HTTP, JSON, JWT, SQL) and ticket codes (ABC-123)
+- do NOT add ! unless the change breaks existing functionality
+- output ONLY the commit message — no preamble, no explanations, no markdown fences$LANGUAGE_INSTRUCTION
+
+$REPO_EXAMPLES
+
+$CLOSING_INSTRUCTION$MULTIPLE_OPTIONS_INSTRUCTION"
 else
-    PROMPT="!!!CRITICAL FORMATTING RULES - READ FIRST!!!
+    PROMPT="You are a commit message generator. Analyze the git changes below, then generate a conventional commit message.
+
+=== GIT CHANGES ===
+
+$BRANCH_CONTEXT
+
+$HISTORY_INSIGHTS
+$WP_CONTEXT
+$FILE_CONTEXT
+$FUNCTION_CONTEXT
+$SEMANTIC_ANALYSIS
+$FILE_RELATIONSHIPS
+
+=== FILES CHANGED ===
+$GIT_STATUS
+
+$FILE_SUMMARIES
+
+Stats:
+$GIT_STATS
+
+Diff:
+$GIT_DIFF
+
+=== INSTRUCTIONS ===
+
+$SCOPE_INSTRUCTION
 
 YOU MUST FOLLOW THIS EXACT FORMAT:
 
@@ -420,14 +534,13 @@ fix: resolve video upload timeout for large files
 - replace synchronous upload with chunked streaming for better performance
 - add progress tracking callback for user feedback
 
-COUNT YOUR WORDS - EACH BULLET MUST BE 18 WORDS OR LESS!
+$SCOPE_EXAMPLES
 
-Now analyze these git changes:
-
-$SCOPE_INSTRUCTION
+$FEW_SHOT_EXAMPLES
+$REPO_EXAMPLES
 
 PROCESS:
-1. First, identify all significant changes
+1. First, review the diff above and identify all significant changes
 2. For each change, determine if you can add WHY/impact/technical details
 3. Write descriptive bullets (max 18 words) that include context where helpful
 4. Write ONE concise summary line that captures the overall change
@@ -444,34 +557,6 @@ RULES:
 - Use imperative mood: add/fix not added/fixed
 - Do NOT use ! unless it breaks existing functionality
 - Output ONLY the commit message, NO explanations, NO markdown, NO code fences$LANGUAGE_INSTRUCTION
-
-$SCOPE_EXAMPLES
-
-$FEW_SHOT_EXAMPLES
-$REPO_EXAMPLES
-
-$BRANCH_CONTEXT
-
-$HISTORY_INSIGHTS
-$WP_CONTEXT
-$FILE_CONTEXT
-$FUNCTION_CONTEXT
-$SEMANTIC_ANALYSIS
-$FILE_RELATIONSHIPS
-
-=== KEY FILES MODIFIED ===
-Pay special attention to these filenames when writing your commit message.
-Your summary line MUST reflect WHAT PART of the application was changed.
-
-$GIT_STATUS
-
-$FILE_SUMMARIES
-
-Stats:
-$GIT_STATS
-
-Diff sample:
-$GIT_DIFF
 
 $CLOSING_INSTRUCTION$MULTIPLE_OPTIONS_INSTRUCTION"
 fi

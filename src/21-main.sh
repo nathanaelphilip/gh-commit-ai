@@ -112,33 +112,30 @@ if [ "$RECOVERED_MESSAGE" != "true" ]; then
         # Call AI provider (with timing for analytics)
         ai_start_time=$(date +%s 2>/dev/null || echo "0")
 
-        case "$AI_PROVIDER" in
-            ollama)
-                cache_debug "Calling call_ollama"
-                COMMIT_MSG=$(call_ollama "$PROMPT")
-                cache_debug "call_ollama returned (length: ${#COMMIT_MSG})"
-                ;;
-            anthropic)
-                cache_debug "Calling call_anthropic"
-                COMMIT_MSG=$(call_anthropic "$PROMPT")
-                cache_debug "call_anthropic returned (length: ${#COMMIT_MSG})"
-                ;;
-            openai)
-                cache_debug "Calling call_openai"
-                COMMIT_MSG=$(call_openai "$PROMPT")
-                cache_debug "call_openai returned (length: ${#COMMIT_MSG})"
-                ;;
-            groq)
-                cache_debug "Calling call_groq"
-                COMMIT_MSG=$(call_groq "$PROMPT")
-                cache_debug "call_groq returned (length: ${#COMMIT_MSG})"
-                ;;
-            *)
-                echo -e "${RED}Error: Unknown AI provider '$AI_PROVIDER'"
-                echo "Supported providers: ollama, anthropic, openai, groq"
-                exit 1
-                ;;
-        esac
+        # Try two-model pipeline if enabled
+        PIPELINE_USED=false
+        if [ "$PIPELINE_ENABLED" = "true" ]; then
+            cache_debug "Attempting two-model pipeline"
+            if COMMIT_MSG=$(call_pipeline "$PROMPT"); then
+                cache_debug "Pipeline succeeded (length: ${#COMMIT_MSG})"
+                PIPELINE_USED=true
+            else
+                cache_debug "Pipeline failed, falling back to single-model"
+            fi
+        fi
+
+        # Single-model generation (or default when pipeline disabled), with
+        # automatic fallback to a local model if the configured provider fails.
+        if [ "$PIPELINE_USED" = "false" ]; then
+            cache_debug "Calling provider $AI_PROVIDER (fallback: $FALLBACK_PROVIDER, enabled: $ENABLE_FALLBACK)"
+            COMMIT_MSG=$(call_provider_with_fallback "$PROMPT") || COMMIT_MSG=""
+            cache_debug "provider returned (length: ${#COMMIT_MSG})"
+            # If a fallback occurred, retarget analytics/cost at the model that ran.
+            if [ -f "$EFFECTIVE_PROVIDER_FILE" ]; then
+                AI_PROVIDER=$(cat "$EFFECTIVE_PROVIDER_FILE" 2>/dev/null || echo "$AI_PROVIDER")
+                rm -f "$EFFECTIVE_PROVIDER_FILE"
+            fi
+        fi
 
         ai_end_time=$(date +%s 2>/dev/null || echo "0")
         ai_duration_ms=$(( (ai_end_time - ai_start_time) * 1000 ))
@@ -175,6 +172,9 @@ if [ "$RECOVERED_MESSAGE" != "true" ]; then
 
     cache_debug "AI provider section complete"
 fi
+
+# Strip reasoning blocks (qwen3/devstral etc.) before any other cleanup
+COMMIT_MSG=$(strip_think_blocks "$COMMIT_MSG")
 
 # Strip markdown code fences and explanations if AI added them
 # Remove lines that are just code fences and any explanatory text after the commit
@@ -431,18 +431,30 @@ EOF
         echo "Regenerating commit message..."
         echo ""
 
-        # Call the AI provider again
-        case "$AI_PROVIDER" in
-            ollama)
-                COMMIT_MSG=$(call_ollama "$PROMPT")
-                ;;
-            anthropic)
-                COMMIT_MSG=$(call_anthropic "$PROMPT")
-                ;;
-            openai)
-                COMMIT_MSG=$(call_openai "$PROMPT")
-                ;;
-        esac
+        # Try two-model pipeline if enabled, otherwise single-model
+        PIPELINE_USED=false
+        if [ "$PIPELINE_ENABLED" = "true" ]; then
+            if COMMIT_MSG=$(call_pipeline "$PROMPT"); then
+                PIPELINE_USED=true
+            fi
+        fi
+
+        if [ "$PIPELINE_USED" = "false" ]; then
+            case "$AI_PROVIDER" in
+                ollama)
+                    COMMIT_MSG=$(call_ollama "$PROMPT")
+                    ;;
+                anthropic)
+                    COMMIT_MSG=$(call_anthropic "$PROMPT")
+                    ;;
+                openai)
+                    COMMIT_MSG=$(call_openai "$PROMPT")
+                    ;;
+            esac
+        fi
+
+        # Strip reasoning blocks (qwen3/devstral etc.) before other cleanup
+        COMMIT_MSG=$(strip_think_blocks "$COMMIT_MSG")
 
         # Strip markdown code fences
         COMMIT_MSG=$(echo "$COMMIT_MSG" | awk '

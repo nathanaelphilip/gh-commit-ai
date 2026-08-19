@@ -98,7 +98,7 @@ if [ "$AI_PROVIDER" = "auto" ]; then
         echo ""
         echo "Available options:"
         echo "  1. Install Ollama (free, local): https://ollama.ai"
-        echo "     Then run: ollama pull qwen2.5-coder:7b"
+        echo "     Then run: ollama pull qwen3:8b"
         echo ""
         echo "  2. Set up Groq API (ultra-fast, generous free tier):"
         echo "     export GROQ_API_KEY=\"gsk-...\""

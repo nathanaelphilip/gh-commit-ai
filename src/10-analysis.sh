@@ -253,3 +253,7 @@ detect_file_relationships() {
     fi
 }
 
+# ============================================================================
+# PARALLEL ANALYSIS - Run all analysis functions simultaneously for speed
+# ============================================================================
+
