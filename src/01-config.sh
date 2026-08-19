@@ -86,6 +86,21 @@ parse_yaml_config() {
             auto_fix|AUTO_FIX)
                 CONFIG_AUTO_FIX="${CONFIG_AUTO_FIX:-$value}"
                 ;;
+            auto_fix_formatting|AUTO_FIX_FORMATTING)
+                CONFIG_AUTO_FIX_FORMATTING="${CONFIG_AUTO_FIX_FORMATTING:-$value}"
+                ;;
+            auto_fix_trailing_whitespace|AUTO_FIX_TRAILING_WHITESPACE)
+                CONFIG_AUTO_FIX_TRAILING_WHITESPACE="${CONFIG_AUTO_FIX_TRAILING_WHITESPACE:-$value}"
+                ;;
+            auto_fix_line_endings|AUTO_FIX_LINE_ENDINGS)
+                CONFIG_AUTO_FIX_LINE_ENDINGS="${CONFIG_AUTO_FIX_LINE_ENDINGS:-$value}"
+                ;;
+            auto_fix_final_newline|AUTO_FIX_FINAL_NEWLINE)
+                CONFIG_AUTO_FIX_FINAL_NEWLINE="${CONFIG_AUTO_FIX_FINAL_NEWLINE:-$value}"
+                ;;
+            line_ending_style|LINE_ENDING_STYLE)
+                CONFIG_LINE_ENDING_STYLE="${CONFIG_LINE_ENDING_STYLE:-$value}"
+                ;;
             stream_enabled|STREAM_ENABLED)
                 CONFIG_STREAM_ENABLED="${CONFIG_STREAM_ENABLED:-$value}"
                 ;;
@@ -270,6 +285,14 @@ USE_SCOPE="${USE_SCOPE:-${CONFIG_USE_SCOPE:-false}}"  # Enable/disable conventio
 USE_GITMOJI="${USE_GITMOJI:-${CONFIG_USE_GITMOJI:-false}}"  # Enable/disable gitmoji prefixes
 LEARN_FROM_HISTORY="${LEARN_FROM_HISTORY:-${CONFIG_LEARN_FROM_HISTORY:-true}}"  # Enable/disable learning from commit history
 AUTO_FIX="${AUTO_FIX:-${CONFIG_AUTO_FIX:-true}}"  # Enable/disable automatic fixing of common formatting issues
+# Staged-file formatting auto-fix (see src/02b-autofix-formatting.sh). Defaults
+# preserved from before the accidental removal in aeef1e3: opt-in overall, and
+# when enabled it prompts rather than rewriting files silently.
+AUTO_FIX_FORMATTING="${AUTO_FIX_FORMATTING:-${CONFIG_AUTO_FIX_FORMATTING:-false}}"  # Fix without asking
+AUTO_FIX_TRAILING_WHITESPACE="${AUTO_FIX_TRAILING_WHITESPACE:-${CONFIG_AUTO_FIX_TRAILING_WHITESPACE:-false}}"  # Detect trailing whitespace
+AUTO_FIX_LINE_ENDINGS="${AUTO_FIX_LINE_ENDINGS:-${CONFIG_AUTO_FIX_LINE_ENDINGS:-true}}"  # Detect inconsistent line endings
+AUTO_FIX_FINAL_NEWLINE="${AUTO_FIX_FINAL_NEWLINE:-${CONFIG_AUTO_FIX_FINAL_NEWLINE:-true}}"  # Detect missing final newline
+LINE_ENDING_STYLE="${LINE_ENDING_STYLE:-${CONFIG_LINE_ENDING_STYLE:-lf}}"  # Preferred line ending: "lf" (Unix) or "crlf" (Windows)
 ANALYSIS_THRESHOLD="${ANALYSIS_THRESHOLD:-${CONFIG_ANALYSIS_THRESHOLD:-15}}"  # Skip expensive analysis for commits smaller than this (lines changed)
 # Code review specific models (optional - falls back to regular models if not set)
 CODE_REVIEW_MODEL="${CODE_REVIEW_MODEL:-${CONFIG_CODE_REVIEW_MODEL:-}}"  # Dedicated model for code reviews (Ollama)

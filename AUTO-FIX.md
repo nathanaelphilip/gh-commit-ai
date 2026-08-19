@@ -1,4 +1,20 @@
-# Auto-Fix Feature Implementation Summary
+# Auto-Fix
+
+There are two separate auto-fix features with confusingly similar names. This
+document covers both.
+
+| Feature | Function | Fixes | Setting |
+|---|---|---|---|
+| Message auto-fix | `auto_fix_message()` | The generated commit message: trailing periods, missing space after the colon, doubled spaces | `AUTO_FIX` (default: `true`) |
+| Formatting auto-fix | `check_and_fix_formatting()` | The staged **files**: trailing whitespace, line endings, missing final newline | `AUTO_FIX_FORMATTING` (default: `false`, prompts first) |
+
+The formatting auto-fix lives in `src/02b-autofix-formatting.sh` and runs before
+the message is generated, so any files it repairs and re-stages are part of the
+diff the message describes. It is controlled by `AUTO_FIX_FORMATTING`,
+`AUTO_FIX_TRAILING_WHITESPACE`, `AUTO_FIX_LINE_ENDINGS`,
+`AUTO_FIX_FINAL_NEWLINE` and `LINE_ENDING_STYLE`.
+
+The rest of this document describes the message auto-fix.
 
 ## Overview
 
