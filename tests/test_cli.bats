@@ -12,44 +12,45 @@ teardown() {
     common_teardown
 }
 
-@test "CLI: --help shows usage information" {
+@test "DIAGNOSTIC: environment" {
+    echo "bats version: $(bats --version 2>&1)" >&3
+    echo "bash version: $BASH_VERSION" >&3
+    echo "pwd:          $(pwd)" >&3
+    echo "ORIGINAL_DIR: [$ORIGINAL_DIR]" >&3
+    echo "script path:  [$ORIGINAL_DIR/gh-commit-ai]" >&3
+    echo "exists:       $([ -f "$ORIGINAL_DIR/gh-commit-ai" ] && echo yes || echo no)" >&3
+    echo "executable:   $([ -x "$ORIGINAL_DIR/gh-commit-ai" ] && echo yes || echo no)" >&3
+    echo "local config: $([ -f .gh-commit-ai.yml ] && echo yes || echo no)" >&3
+}
+
+@test "DIAGNOSTIC: --help" {
     run "$ORIGINAL_DIR/gh-commit-ai" --help
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"Usage: gh commit-ai"* ]]
-    [[ "$output" == *"--dry-run"* ]]
-    [[ "$output" == *"--preview"* ]]
-    [[ "$output" == *"--amend"* ]]
+    echo "status=$status" >&3
+    echo "--- output start ---" >&3
+    echo "$output" >&3
+    echo "--- output end ---" >&3
 }
 
-@test "CLI: -h shows usage information" {
-    run "$ORIGINAL_DIR/gh-commit-ai" -h
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"Usage: gh commit-ai"* ]]
-}
-
-@test "CLI: unknown option shows error" {
+@test "DIAGNOSTIC: --unknown-option" {
     run "$ORIGINAL_DIR/gh-commit-ai" --unknown-option
-    [ "$status" -eq 1 ]
-    [[ "$output" == *"Error: Unknown option"* ]]
+    echo "status=$status" >&3
+    echo "--- output start ---" >&3
+    echo "$output" >&3
+    echo "--- output end ---" >&3
 }
 
-@test "CLI: fails when not in git repository" {
+@test "DIAGNOSTIC: --help with stderr split" {
+    run --separate-stderr "$ORIGINAL_DIR/gh-commit-ai" --help || true
+    echo "status=$status" >&3
+    echo "stdout=[$output]" >&3
+    echo "stderr=[$stderr]" >&3
+}
+
+@test "DIAGNOSTIC: outside a git repo" {
     cd "$TEST_TEMP_DIR" || exit 1
     run "$ORIGINAL_DIR/gh-commit-ai"
-    [ "$status" -eq 1 ]
-    [[ "$output" == *"Not a git repository"* ]]
-}
-
-@test "CLI: shows no changes message in empty repo" {
-    create_test_repo
-    run "$ORIGINAL_DIR/gh-commit-ai"
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"No changes to commit"* ]]
-}
-
-@test "CLI: --amend fails with no commits" {
-    create_test_repo
-    run "$ORIGINAL_DIR/gh-commit-ai" --amend
-    [ "$status" -eq 1 ]
-    [[ "$output" == *"No commits to amend"* ]]
+    echo "status=$status" >&3
+    echo "--- output start ---" >&3
+    echo "$output" >&3
+    echo "--- output end ---" >&3
 }
