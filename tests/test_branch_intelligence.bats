@@ -5,12 +5,16 @@
 load test_helper
 
 setup() {
-    setup
+    common_setup
     create_test_repo
+
+    # An unborn HEAD makes `git rev-parse --abbrev-ref HEAD` fail on current git,
+    # so give the fixture repo a commit before checking out branches.
+    git commit -q --allow-empty -m "initial"
 }
 
 teardown() {
-    teardown
+    common_teardown
 }
 
 @test "Branch Intelligence: extracts ticket number from feature/ABC-123-description" {

@@ -2,8 +2,9 @@
 
 # Test helper functions for gh-commit-ai tests
 
-# Setup function - runs before each test
-setup() {
+# Shared setup - call from a test file's own setup(). Must NOT be named setup():
+# a test file that defines setup() and calls `setup` would recurse into itself.
+common_setup() {
     # Create a temporary directory for test fixtures
     TEST_TEMP_DIR="$(mktemp -d)"
     export TEST_TEMP_DIR
@@ -13,8 +14,8 @@ setup() {
     export ORIGINAL_DIR
 }
 
-# Teardown function - runs after each test
-teardown() {
+# Shared teardown - call from a test file's own teardown(). See common_setup above.
+common_teardown() {
     # Clean up temporary directory
     if [ -n "$TEST_TEMP_DIR" ] && [ -d "$TEST_TEMP_DIR" ]; then
         rm -rf "$TEST_TEMP_DIR"
@@ -45,8 +46,13 @@ create_test_file() {
 # This extracts and sources only the functions we need without executing the script
 source_script_functions() {
     # Extract the escape_json function
-    eval "$(sed -n '/^escape_json() {/,/^}/p' "$ORIGINAL_DIR/gh-commit-ai")"
+    local script="${BATS_TEST_DIRNAME}/../gh-commit-ai"
+
+    eval "$(sed -n '/^escape_json() {/,/^}/p' "$script")"
 
     # Extract the enforce_lowercase function
-    eval "$(sed -n '/^enforce_lowercase() {/,/^}$/p' "$ORIGINAL_DIR/gh-commit-ai")"
+    eval "$(sed -n '/^enforce_lowercase() {/,/^}$/p' "$script")"
+
+    # Extract the convert_newlines function
+    eval "$(sed -n '/^convert_newlines() {/,/^}$/p' "$script")"
 }
