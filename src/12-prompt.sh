@@ -32,43 +32,11 @@ fix: resolve session timeout in user login
 - add automatic token refresh
 - fix validateUser() edge case
 
-Example 3 - Refactoring:
-Input: Changed payment.php and invoice.php
-Output:
-fix: correct tax calculation in payment flow
-
-- fix rounding error in calculateTax()
-- update invoice generation logic
-- add currency conversion handling
-
 BAD EXAMPLES (AVOID THESE - TOO GENERIC):
 ❌ 'fix: resolve bug'
 ❌ 'update: change files'
 ❌ 'feat: add feature'
 ❌ 'chore: update code'
-
-BAD FORMAT (NEVER DO THIS - PARAGRAPH STYLE):
-❌ WRONG:
-feat: add new icons to library
-
-- this commit expands the icons library by adding new icons for data saving, data thresholding, light bulb, profile, storage, and videocam. it also exports these new icons and updates the index.ts file to include them, making them accessible for use in the application.
-
-✓ CORRECT:
-feat: add new icons to library
-
-- add data saving icon
-- add data thresholding icon
-- add light bulb icon
-- add profile icon
-- add storage icon
-- add videocam icon
-- export new icons in index.ts
-
-REMEMBER:
-- Mention the SPECIFIC AREA and WHAT changed (function names, features)
-- Keep each bullet to 18 words MAXIMUM (count the words!)
-- Use bullet list format with SHORT lines, NOT paragraphs
-- If you have many similar items, list each one separately
 "
 
 # Prepare branch context
@@ -512,24 +480,7 @@ ABSOLUTELY FORBIDDEN - NEVER DO THIS:
 ❌ NO MULTIPLE SENTENCES: One change per bullet only
 ❌ NO VAGUE BULLETS: \"update config\" → ✓ \"update API timeout from 30s to 120s in config\"
 
-BASIC EXAMPLE (minimal context):
-feat: add new icons to library
-
-- add addicon component
-- add buildcircleicon component
-- add datasaverofficon component
-- add datathresholdingicon component
-- add lightbulbicon component
-
-BETTER EXAMPLE (with context):
-feat: add user authentication system
-
-- implement JWT token generation for secure session management
-- create login endpoint with email and password validation
-- add bcrypt password hashing to protect user credentials
-- set up session middleware for protected routes
-
-BEST EXAMPLE (with technical details):
+TARGET QUALITY - aim for this level of specificity:
 fix: resolve video upload timeout for large files
 
 - increase upload timeout from 30s to 120s in config

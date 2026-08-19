@@ -6060,43 +6060,11 @@ fix: resolve session timeout in user login
 - add automatic token refresh
 - fix validateUser() edge case
 
-Example 3 - Refactoring:
-Input: Changed payment.php and invoice.php
-Output:
-fix: correct tax calculation in payment flow
-
-- fix rounding error in calculateTax()
-- update invoice generation logic
-- add currency conversion handling
-
 BAD EXAMPLES (AVOID THESE - TOO GENERIC):
 ❌ 'fix: resolve bug'
 ❌ 'update: change files'
 ❌ 'feat: add feature'
 ❌ 'chore: update code'
-
-BAD FORMAT (NEVER DO THIS - PARAGRAPH STYLE):
-❌ WRONG:
-feat: add new icons to library
-
-- this commit expands the icons library by adding new icons for data saving, data thresholding, light bulb, profile, storage, and videocam. it also exports these new icons and updates the index.ts file to include them, making them accessible for use in the application.
-
-✓ CORRECT:
-feat: add new icons to library
-
-- add data saving icon
-- add data thresholding icon
-- add light bulb icon
-- add profile icon
-- add storage icon
-- add videocam icon
-- export new icons in index.ts
-
-REMEMBER:
-- Mention the SPECIFIC AREA and WHAT changed (function names, features)
-- Keep each bullet to 18 words MAXIMUM (count the words!)
-- Use bullet list format with SHORT lines, NOT paragraphs
-- If you have many similar items, list each one separately
 "
 
 # Prepare branch context
@@ -6540,24 +6508,7 @@ ABSOLUTELY FORBIDDEN - NEVER DO THIS:
 ❌ NO MULTIPLE SENTENCES: One change per bullet only
 ❌ NO VAGUE BULLETS: \"update config\" → ✓ \"update API timeout from 30s to 120s in config\"
 
-BASIC EXAMPLE (minimal context):
-feat: add new icons to library
-
-- add addicon component
-- add buildcircleicon component
-- add datasaverofficon component
-- add datathresholdingicon component
-- add lightbulbicon component
-
-BETTER EXAMPLE (with context):
-feat: add user authentication system
-
-- implement JWT token generation for secure session management
-- create login endpoint with email and password validation
-- add bcrypt password hashing to protect user credentials
-- set up session middleware for protected routes
-
-BEST EXAMPLE (with technical details):
+TARGET QUALITY - aim for this level of specificity:
 fix: resolve video upload timeout for large files
 
 - increase upload timeout from 30s to 120s in config
@@ -7046,8 +6997,11 @@ auto_fix_message() {
         # Remove trailing period from summary line (conventional commits shouldn't have periods)
         first_line=$(echo "$first_line" | sed 's/\.$//')
 
-        # Fix missing space after colon (e.g., "feat:add" -> "feat: add")
-        first_line=$(echo "$first_line" | sed -E 's/^([a-z]+)(\([^)]+\))?:([^ ])/\1\2: \3/')
+        # Fix missing space after colon (e.g., "feat:add" -> "feat: add").
+        # The leading (.*[^[:alnum:]:])? allows an optional gitmoji prefix: the
+        # pattern used to anchor on ^[a-z]+, so with USE_GITMOJI=true the line
+        # started with an emoji and a missing space was never fixed.
+        first_line=$(echo "$first_line" | sed -E 's/^(.*[[:space:]])?([a-z]+)(\([^)]+\))?:([^ ])/\1\2\3: \4/')
 
         # Remove multiple consecutive spaces
         first_line=$(echo "$first_line" | sed 's/  \+/ /g')
@@ -7166,54 +7120,17 @@ detect_project_type() {
     echo "general"
 }
 
-# Load template from file or return built-in template
+# Load the repo-local commit template, if there is one
 load_template() {
-    local project_type="$1"
-
-    # Check for local template file
+    # Only a repo-local .gh-commit-ai-template does anything. There used to be
+    # a case statement of per-project-type built-in templates below this, but it
+    # was unreachable: every call site already guards on the file existing, and
+    # this function returns the file's contents immediately when it does. The
+    # four built-ins were also byte-identical bar one extra line, so nothing is
+    # lost by dropping them.
     if [ -f ".gh-commit-ai-template" ]; then
         cat ".gh-commit-ai-template"
-        return
     fi
-
-    # Return built-in template based on project type
-    case "$project_type" in
-        web-app)
-            cat <<'EOF'
-{{emoji}} {{type}}{{scope}}: {{message}}
-
-{{bullets}}
-{{breaking}}
-EOF
-            ;;
-        library)
-            cat <<'EOF'
-{{emoji}} {{type}}{{scope}}: {{message}}
-
-{{bullets}}
-{{breaking}}
-
-Changes: {{files_changed}} files changed
-EOF
-            ;;
-        cli)
-            cat <<'EOF'
-{{emoji}} {{type}}{{scope}}: {{message}}
-
-{{bullets}}
-{{breaking}}
-EOF
-            ;;
-        *)
-            # General/default template - same as current format
-            cat <<'EOF'
-{{emoji}} {{type}}{{scope}}: {{message}}
-
-{{bullets}}
-{{breaking}}
-EOF
-            ;;
-    esac
 }
 
 # Parse commit message components from AI-generated message
@@ -7313,6 +7230,12 @@ apply_template() {
     # Apply template substitutions
     local result="$template"
 
+    # An empty {{emoji}} would otherwise leave the summary line starting with a
+    # stray space, so consume the separator with it.
+    if [ -z "$EMOJI" ]; then
+        result="${result//\{\{emoji\}\} /}"
+    fi
+
     # Simple variable substitution
     result="${result//\{\{emoji\}\}/$EMOJI}"
     result="${result//\{\{type\}\}/$TYPE}"
@@ -7327,20 +7250,22 @@ apply_template() {
     result="${result//\{\{date\}\}/$DATE}"
     result="${result//\{\{files_changed\}\}/$FILES_CHANGED}"
 
-    # Clean up: remove lines that only contain empty template variables
-    result=$(echo "$result" | sed '/^[[:space:]]*$/d')
-
-    # Remove trailing blank lines
-    result=$(echo "$result" | awk '
-        { lines[NR] = $0 }
-        END {
-            for (i = 1; i <= NR; i++) {
-                if (i == NR) {
-                    if (lines[i] != "") print lines[i]
-                } else if (lines[i] != "" || lines[i+1] != "") {
-                    print lines[i]
-                }
-            }
+    # Clean up the gaps left by placeholders that resolved to nothing.
+    #
+    # This used to be `sed '/^[[:space:]]*$/d'`, which deleted EVERY blank line -
+    # including the one every template puts between the summary and the body. So
+    # any repo with a custom .gh-commit-ai-template got its subject line and
+    # bullets squashed together, breaking the exact git convention the tool
+    # enforces everywhere else. Collapse runs of blank lines to a single
+    # separator instead, and trim them from both ends.
+    result=$(printf '%s\n' "$result" | awk '
+        { sub(/[[:space:]]+$/, "") }
+        NF == 0 { blank = 1; next }
+        {
+            if (seen && blank) print ""
+            blank = 0
+            seen = 1
+            print
         }
     ')
 
@@ -7363,21 +7288,33 @@ calculate_cost() {
     local output_cost=0
     local currency="USD"
 
-    # Pricing per 1M tokens (as of 2025)
+    # Pricing per 1M tokens. Anthropic rates verified 2026-08.
+    #
+    # The Opus and Haiku rows below were wrong for years: Opus 4.x carried the
+    # old Claude-3-Opus $15/$75, overstating every Opus run by 3x, and Haiku 4.5
+    # was ~20% under. There were also no rows for the current Opus 5 / Sonnet 5,
+    # so those fell through to the Sonnet default - right for Sonnet 5, wrong
+    # for Opus 5.
+    PRICING_MATCHED=false
     case "$provider" in
         anthropic)
+            PRICING_MATCHED=true
             case "$model" in
-                claude-sonnet-4-6|claude-sonnet-4-5*)
+                claude-sonnet-5*|claude-sonnet-4-6|claude-sonnet-4-5*)
                     input_cost=3.00    # $3 per MTok
                     output_cost=15.00  # $15 per MTok
                     ;;
-                claude-opus-4-6|claude-opus-4*)
-                    input_cost=15.00   # $15 per MTok
-                    output_cost=75.00  # $75 per MTok
+                claude-opus-5*|claude-opus-4-8*|claude-opus-4-7*|claude-opus-4-6|claude-opus-4*)
+                    input_cost=5.00    # $5 per MTok
+                    output_cost=25.00  # $25 per MTok
+                    ;;
+                claude-fable-5*|claude-mythos-5*)
+                    input_cost=10.00   # $10 per MTok
+                    output_cost=50.00  # $50 per MTok
                     ;;
                 claude-haiku-4-5*|claude-haiku-4*)
-                    input_cost=0.80    # $0.80 per MTok
-                    output_cost=4.00   # $4 per MTok
+                    input_cost=1.00    # $1 per MTok
+                    output_cost=5.00   # $5 per MTok
                     ;;
                 claude-3-5-sonnet-20241022|claude-3-5-sonnet-latest)
                     input_cost=3.00    # $3 per MTok
@@ -7392,13 +7329,17 @@ calculate_cost() {
                     output_cost=1.25   # $1.25 per MTok
                     ;;
                 *)
-                    # Default to Sonnet pricing
+                    # Default to Sonnet pricing, but flag it - a silent
+                    # fall-through here is how the stale Opus rate went
+                    # unnoticed, and it under-reports any pricier model.
                     input_cost=3.00
                     output_cost=15.00
+                    PRICING_MATCHED=false
                     ;;
             esac
             ;;
         openai)
+            PRICING_MATCHED=true
             case "$model" in
                 gpt-4.1)
                     input_cost=2.00    # $2 per MTok
@@ -7428,6 +7369,35 @@ calculate_cost() {
                     # Default to gpt-4o-mini pricing
                     input_cost=0.15
                     output_cost=0.60
+                    PRICING_MATCHED=false
+                    ;;
+            esac
+            ;;
+        groq)
+            # There was no groq arm at all, so every Groq run reported $0.00 -
+            # which reads as "free" rather than "unpriced". Rates per MTok.
+            PRICING_MATCHED=true
+            case "$model" in
+                openai/gpt-oss-120b)
+                    input_cost=0.15
+                    output_cost=0.75
+                    ;;
+                openai/gpt-oss-20b)
+                    input_cost=0.10
+                    output_cost=0.50
+                    ;;
+                llama-3.3-70b-versatile)
+                    input_cost=0.59
+                    output_cost=0.79
+                    ;;
+                llama-3.1-8b-instant)
+                    input_cost=0.05
+                    output_cost=0.08
+                    ;;
+                *)
+                    input_cost=0.15
+                    output_cost=0.75
+                    PRICING_MATCHED=false
                     ;;
             esac
             ;;
@@ -7460,6 +7430,9 @@ calculate_cost() {
     local total_tokens=$((input_tokens + output_tokens))
     echo "💰 Token usage: ${total_tokens} tokens (${input_tokens} input + ${output_tokens} output)"
     echo "💰 Estimated cost: \$$total_cost_display $currency"
+    if [ "$PRICING_MATCHED" != "true" ]; then
+        echo "   (no pricing entry for $provider/$model - figure above is a fallback estimate)"
+    fi
 
     # Track cumulative cost
     track_cumulative_cost "$total_cost"
@@ -7930,6 +7903,9 @@ if [ "$MULTIPLE_OPTIONS" = "true" ]; then
     elif [ "$AI_PROVIDER" = "openai" ]; then
         calculate_cost "openai" "$OPENAI_MODEL" "$INPUT_TOKENS" "$OUTPUT_TOKENS"
         echo ""
+    elif [ "$AI_PROVIDER" = "groq" ]; then
+        calculate_cost "groq" "$GROQ_MODEL" "$INPUT_TOKENS" "$OUTPUT_TOKENS"
+        echo ""
     fi
 
     # Get user selection
@@ -7984,6 +7960,9 @@ else
         echo ""
     elif [ "$AI_PROVIDER" = "openai" ]; then
         calculate_cost "openai" "$OPENAI_MODEL" "$INPUT_TOKENS" "$OUTPUT_TOKENS"
+        echo ""
+    elif [ "$AI_PROVIDER" = "groq" ]; then
+        calculate_cost "groq" "$GROQ_MODEL" "$INPUT_TOKENS" "$OUTPUT_TOKENS"
         echo ""
     fi
 fi
@@ -8182,6 +8161,9 @@ EOF
             echo ""
         elif [ "$AI_PROVIDER" = "openai" ]; then
             calculate_cost "openai" "$OPENAI_MODEL" "$INPUT_TOKENS" "$OUTPUT_TOKENS"
+            echo ""
+        elif [ "$AI_PROVIDER" = "groq" ]; then
+            calculate_cost "groq" "$GROQ_MODEL" "$INPUT_TOKENS" "$OUTPUT_TOKENS"
             echo ""
         fi
 

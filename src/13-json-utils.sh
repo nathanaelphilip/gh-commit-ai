@@ -140,8 +140,11 @@ auto_fix_message() {
         # Remove trailing period from summary line (conventional commits shouldn't have periods)
         first_line=$(echo "$first_line" | sed 's/\.$//')
 
-        # Fix missing space after colon (e.g., "feat:add" -> "feat: add")
-        first_line=$(echo "$first_line" | sed -E 's/^([a-z]+)(\([^)]+\))?:([^ ])/\1\2: \3/')
+        # Fix missing space after colon (e.g., "feat:add" -> "feat: add").
+        # The leading (.*[^[:alnum:]:])? allows an optional gitmoji prefix: the
+        # pattern used to anchor on ^[a-z]+, so with USE_GITMOJI=true the line
+        # started with an emoji and a missing space was never fixed.
+        first_line=$(echo "$first_line" | sed -E 's/^(.*[[:space:]])?([a-z]+)(\([^)]+\))?:([^ ])/\1\2\3: \4/')
 
         # Remove multiple consecutive spaces
         first_line=$(echo "$first_line" | sed 's/  \+/ /g')
