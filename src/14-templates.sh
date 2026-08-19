@@ -1,4 +1,3 @@
-# Detect project type based on files present
 detect_project_type() {
     # Web application indicators
     if [ -f "package.json" ]; then

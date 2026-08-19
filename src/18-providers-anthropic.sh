@@ -41,7 +41,7 @@ call_anthropic() {
 
     # Try streaming first
     if should_stream; then
-        local stream_payload=$(printf '{"model":"%s","max_tokens":1024,"stream":true,"messages":[{"role":"user","content":"%s"}]}' "$ANTHROPIC_MODEL" "$prompt_escaped")
+        local stream_payload=$(printf '{"model":"%s","max_tokens":1024,"temperature":%s,"stream":true,"messages":[{"role":"user","content":"%s"}]}' "$ANTHROPIC_MODEL" "$AI_TEMPERATURE" "$prompt_escaped")
         local stream_output
         stream_output=$(create_secure_temp_file "gh-commit-ai-stream") || return 1
 
@@ -70,12 +70,12 @@ call_anthropic() {
 
         # Streaming failed, fall back
         rm -f "$stream_output" "${stream_output}.input_tokens" "${stream_output}.output_tokens"
-        printf "\r%-80s\r" " " >&2
+        printf "\r%-80s\r" " " >&3
         echo "Streaming failed, retrying..." >&2
     fi
 
     # Non-streaming path (original behavior)
-    local json_payload=$(printf '{"model":"%s","max_tokens":1024,"messages":[{"role":"user","content":"%s"}]}' "$ANTHROPIC_MODEL" "$prompt_escaped")
+    local json_payload=$(printf '{"model":"%s","max_tokens":1024,"temperature":%s,"messages":[{"role":"user","content":"%s"}]}' "$ANTHROPIC_MODEL" "$AI_TEMPERATURE" "$prompt_escaped")
 
     if [ "$VERBOSE" = "true" ]; then
         echo "[Verbose] Request payload:"
@@ -106,7 +106,7 @@ call_anthropic() {
     ) &
     local api_pid=$!
 
-    show_spinner "$api_pid" "Thinking"
+    show_spinner "$api_pid" "$SPINNER_MESSAGE"
     wait "$api_pid"
 
     # Read exit code
@@ -116,7 +116,7 @@ call_anthropic() {
     local response=$(cat "$temp_response" 2>/dev/null)
 
     # Check for final failure after all retries
-    if [ "$exit_code" != "0" ]; then
+    if [ -z "$response" ]; then
         echo -e "${RED}Error: Failed to get response from Anthropic after $MAX_RETRIES attempts${NC}" >&2
         echo "" >&2
         echo "All retry attempts exhausted. This could be due to:" >&2
@@ -165,7 +165,9 @@ call_anthropic() {
         local error_msg=$(echo "$response" | grep -o '"message":"[^"]*"' | head -1 | sed 's/"message":"//;s/"$//')
         echo -e "${RED}Error from Anthropic ($error_type): $error_msg" >&2
 
-        if [[ "$error_type" == *"authentication"* ]] || [[ "$error_msg" == *"API key"* ]]; then
+        if [[ "$error_msg" == *"too long"* ]] || [[ "$error_msg" == *"too large"* ]] || [[ "$error_msg" == *"maximum"* ]]; then
+            show_token_limit_tip "Anthropic"
+        elif [[ "$error_type" == *"authentication"* ]] || [[ "$error_msg" == *"API key"* ]]; then
             echo "Tip: Check your API key is valid and has credits" >&2
         elif [[ "$error_type" == *"rate_limit"* ]]; then
             echo "Tip: You've hit the rate limit. Wait a moment and try again" >&2

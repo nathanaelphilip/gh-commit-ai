@@ -7,11 +7,31 @@ show_spinner() {
     local i=0
 
     while kill -0 "$pid" 2>/dev/null; do
-        printf "\r${arrows[$i]} ${message}" >&2
+        printf "\r${arrows[$i]} ${message}" >&3
         i=$(( (i + 1) % 8 ))
         sleep $delay
     done
-    printf "\r%-50s\r" " " >&2  # Clear the line
+    printf "\r%-80s\r" " " >&3  # Clear the line
+}
+
+# Calculate adaptive max lines based on actual diff size
+# Small/medium diffs get sent in full, large diffs get sampled
+calculate_adaptive_max_lines() {
+    local total_lines="$1"
+
+    if [ "$total_lines" -le 500 ]; then
+        # Small commits: send full diff
+        echo "$total_lines"
+    elif [ "$total_lines" -le 1000 ]; then
+        # Medium commits: send ~75%
+        echo "$(( total_lines * 75 / 100 ))"
+    elif [ "$total_lines" -le 2000 ]; then
+        # Large commits: send ~50%
+        echo "$(( total_lines * 50 / 100 ))"
+    else
+        # Very large commits: cap at 1000 lines
+        echo "1000"
+    fi
 }
 
 # Intelligently sample diff for large changes
@@ -189,6 +209,9 @@ should_stream() {
     return 1
 }
 
+# Spinner/status message (used by show_spinner and streaming parsers)
+SPINNER_MESSAGE="Generating"
+
 # Streaming arrow animation state
 STREAM_ARROWS=("←" "↖" "↑" "↗" "→" "↘" "↓" "↙")
 STREAM_ARROW_IDX=0
@@ -205,8 +228,7 @@ next_stream_arrow() {
 parse_ollama_stream() {
     local accum_file="$1"
     local full_response=""
-
-    printf "\r%s Generating" "$(next_stream_arrow)" >&2
+    local first_token=true
 
     while IFS= read -r line; do
         [ -z "$line" ] && continue
@@ -239,12 +261,20 @@ parse_ollama_stream() {
         }')
 
         if [ -n "$token" ]; then
+            # Kill background spinner on first token
+            if [ "$first_token" = true ]; then
+                if [ -n "$STREAM_SPINNER_PID" ] && kill -0 "$STREAM_SPINNER_PID" 2>/dev/null; then
+                    kill "$STREAM_SPINNER_PID" 2>/dev/null
+                    wait "$STREAM_SPINNER_PID" 2>/dev/null
+                fi
+                first_token=false
+            fi
             full_response="${full_response}${token}"
-            printf "\r%s" "$(next_stream_arrow)" >&2
+            printf "\r%s %s" "$(next_stream_arrow)" "$SPINNER_MESSAGE" >&3
         fi
     done
 
-    printf "\r%-50s\r" " " >&2
+    printf "\r%-80s\r" " " >&3
     echo "$full_response" > "$accum_file"
 }
 
@@ -256,8 +286,7 @@ parse_anthropic_stream() {
     local full_response=""
     local input_tokens=0
     local output_tokens=0
-
-    printf "\r%s Generating" "$(next_stream_arrow)" >&2
+    local first_token=true
 
     while IFS= read -r line; do
         [ -z "$line" ] && continue
@@ -296,8 +325,16 @@ parse_anthropic_stream() {
                 }')
 
                 if [ -n "$token" ]; then
+                    # Kill background spinner on first token
+                    if [ "$first_token" = true ]; then
+                        if [ -n "$STREAM_SPINNER_PID" ] && kill -0 "$STREAM_SPINNER_PID" 2>/dev/null; then
+                            kill "$STREAM_SPINNER_PID" 2>/dev/null
+                            wait "$STREAM_SPINNER_PID" 2>/dev/null
+                        fi
+                        first_token=false
+                    fi
                     full_response="${full_response}${token}"
-                    printf "\r%s" "$(next_stream_arrow)" >&2
+                    printf "\r%s %s" "$(next_stream_arrow)" "$SPINNER_MESSAGE" >&3
                 fi
             fi
 
@@ -307,7 +344,7 @@ parse_anthropic_stream() {
         fi
     done
 
-    printf "\r%-50s\r" " " >&2
+    printf "\r%-80s\r" " " >&3
 
     echo "$full_response" > "$accum_file"
     echo "${input_tokens:-0}" > "${accum_file}.input_tokens"
@@ -322,8 +359,7 @@ parse_openai_stream() {
     local full_response=""
     local input_tokens=0
     local output_tokens=0
-
-    printf "\r%s Generating" "$(next_stream_arrow)" >&2
+    local first_token=true
 
     while IFS= read -r line; do
         [ -z "$line" ] && continue
@@ -359,8 +395,16 @@ parse_openai_stream() {
             }')
 
             if [ -n "$token" ]; then
+                # Kill background spinner on first token
+                if [ "$first_token" = true ]; then
+                    if [ -n "$STREAM_SPINNER_PID" ] && kill -0 "$STREAM_SPINNER_PID" 2>/dev/null; then
+                        kill "$STREAM_SPINNER_PID" 2>/dev/null
+                        wait "$STREAM_SPINNER_PID" 2>/dev/null
+                    fi
+                    first_token=false
+                fi
                 full_response="${full_response}${token}"
-                printf "\r%s" "$(next_stream_arrow)" >&2
+                printf "\r%s %s" "$(next_stream_arrow)" "$SPINNER_MESSAGE" >&3
             fi
 
             if echo "$data" | grep -q '"usage"'; then
@@ -370,7 +414,7 @@ parse_openai_stream() {
         fi
     done
 
-    printf "\r%-50s\r" " " >&2
+    printf "\r%-80s\r" " " >&3
 
     echo "$full_response" > "$accum_file"
     # Write token counts to sidecar files

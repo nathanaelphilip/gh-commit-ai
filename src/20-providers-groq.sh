@@ -40,7 +40,7 @@ call_groq() {
 
     # Try streaming first (Groq uses OpenAI-compatible format)
     if should_stream; then
-        local stream_payload=$(printf '{"model":"%s","messages":[{"role":"user","content":"%s"}],"temperature":0.7,"stream":true,"stream_options":{"include_usage":true}}' "$GROQ_MODEL" "$prompt_escaped")
+        local stream_payload=$(printf '{"model":"%s","messages":[{"role":"user","content":"%s"}],"temperature":%s,"stream":true,"stream_options":{"include_usage":true}}' "$GROQ_MODEL" "$prompt_escaped" "$AI_TEMPERATURE")
         local stream_output
         stream_output=$(create_secure_temp_file "gh-commit-ai-stream") || return 1
 
@@ -65,12 +65,12 @@ call_groq() {
         fi
 
         rm -f "$stream_output" "${stream_output}.input_tokens" "${stream_output}.output_tokens"
-        printf "\r%-80s\r" " " >&2
+        printf "\r%-80s\r" " " >&3
         echo "Streaming failed, retrying..." >&2
     fi
 
     # Non-streaming path
-    local json_payload=$(printf '{"model":"%s","messages":[{"role":"user","content":"%s"}],"temperature":0.7}' "$GROQ_MODEL" "$prompt_escaped")
+    local json_payload=$(printf '{"model":"%s","messages":[{"role":"user","content":"%s"}],"temperature":%s}' "$GROQ_MODEL" "$prompt_escaped" "$AI_TEMPERATURE")
 
     if [ "$VERBOSE" = "true" ]; then
         echo "[Verbose] Request payload:"
@@ -100,7 +100,7 @@ call_groq() {
     ) &
     local api_pid=$!
 
-    show_spinner "$api_pid" "Thinking"
+    show_spinner "$api_pid" "$SPINNER_MESSAGE"
     wait "$api_pid"
 
     # Read exit code
@@ -110,7 +110,7 @@ call_groq() {
     local response=$(cat "$temp_response" 2>/dev/null)
 
     # Check for final failure after all retries
-    if [ "$exit_code" != "0" ] || [ -z "$response" ]; then
+    if [ -z "$response" ]; then
         echo -e "${RED}Error: Failed to get response from Groq after $MAX_RETRIES attempts${NC}" >&2
         echo "" >&2
         echo "All retry attempts exhausted. Possible causes:" >&2
@@ -168,7 +168,9 @@ call_groq() {
         [ -n "$error_type" ] && echo -e "${RED}Type: $error_type" >&2
         [ -n "$error_msg" ] && echo -e "${RED}Message: $error_msg" >&2
 
-        if [[ "$error_code" == *"invalid_api_key"* ]] || [[ "$error_msg" == *"API key"* ]]; then
+        if [[ "$error_msg" == *"too large"* ]] || [[ "$error_msg" == *"reduce your message size"* ]] || [[ "$error_type" == *"tokens"* ]]; then
+            show_token_limit_tip "Groq"
+        elif [[ "$error_code" == *"invalid_api_key"* ]] || [[ "$error_msg" == *"API key"* ]]; then
             echo "Tip: Check your API key is valid" >&2
         elif [[ "$error_code" == *"rate_limit"* ]]; then
             echo "Tip: You've hit the rate limit. Wait a moment and try again" >&2

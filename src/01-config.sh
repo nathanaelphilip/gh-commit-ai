@@ -29,6 +29,15 @@ parse_yaml_config() {
             ollama_host|OLLAMA_HOST)
                 CONFIG_OLLAMA_HOST="${CONFIG_OLLAMA_HOST:-$value}"
                 ;;
+            ollama_num_ctx|OLLAMA_NUM_CTX)
+                CONFIG_OLLAMA_NUM_CTX="${CONFIG_OLLAMA_NUM_CTX:-$value}"
+                ;;
+            temperature|AI_TEMPERATURE)
+                CONFIG_AI_TEMPERATURE="${CONFIG_AI_TEMPERATURE:-$value}"
+                ;;
+            prompt_style|PROMPT_STYLE)
+                CONFIG_PROMPT_STYLE="${CONFIG_PROMPT_STYLE:-$value}"
+                ;;
             anthropic_model|ANTHROPIC_MODEL)
                 CONFIG_ANTHROPIC_MODEL="${CONFIG_ANTHROPIC_MODEL:-$value}"
                 ;;
@@ -37,6 +46,12 @@ parse_yaml_config() {
                 ;;
             groq_model|GROQ_MODEL)
                 CONFIG_GROQ_MODEL="${CONFIG_GROQ_MODEL:-$value}"
+                ;;
+            enable_fallback|ENABLE_FALLBACK)
+                CONFIG_ENABLE_FALLBACK="${CONFIG_ENABLE_FALLBACK:-$value}"
+                ;;
+            fallback_provider|FALLBACK_PROVIDER)
+                CONFIG_FALLBACK_PROVIDER="${CONFIG_FALLBACK_PROVIDER:-$value}"
                 ;;
             use_scope|USE_SCOPE)
                 CONFIG_USE_SCOPE="${CONFIG_USE_SCOPE:-$value}"
@@ -80,6 +95,24 @@ parse_yaml_config() {
             analytics_enabled|ANALYTICS_ENABLED)
                 CONFIG_ANALYTICS_ENABLED="${CONFIG_ANALYTICS_ENABLED:-$value}"
                 ;;
+            pipeline_enabled|PIPELINE_ENABLED)
+                CONFIG_PIPELINE_ENABLED="${CONFIG_PIPELINE_ENABLED:-$value}"
+                ;;
+            analysis_model|ANALYSIS_MODEL)
+                CONFIG_ANALYSIS_MODEL="${CONFIG_ANALYSIS_MODEL:-$value}"
+                ;;
+            analysis_provider|ANALYSIS_PROVIDER)
+                CONFIG_ANALYSIS_PROVIDER="${CONFIG_ANALYSIS_PROVIDER:-$value}"
+                ;;
+            analysis_anthropic_model|ANALYSIS_ANTHROPIC_MODEL)
+                CONFIG_ANALYSIS_ANTHROPIC_MODEL="${CONFIG_ANALYSIS_ANTHROPIC_MODEL:-$value}"
+                ;;
+            analysis_openai_model|ANALYSIS_OPENAI_MODEL)
+                CONFIG_ANALYSIS_OPENAI_MODEL="${CONFIG_ANALYSIS_OPENAI_MODEL:-$value}"
+                ;;
+            analysis_groq_model|ANALYSIS_GROQ_MODEL)
+                CONFIG_ANALYSIS_GROQ_MODEL="${CONFIG_ANALYSIS_GROQ_MODEL:-$value}"
+                ;;
             *)
                 # Track unknown keys for validation warnings
                 CONFIG_UNKNOWN_KEYS+=("$key")
@@ -89,7 +122,7 @@ parse_yaml_config() {
 }
 
 # Known config keys for validation
-KNOWN_CONFIG_KEYS="ai_provider ollama_model ollama_host anthropic_model openai_model groq_model use_scope use_gitmoji diff_max_lines learn_from_history auto_fix analysis_threshold commit_language code_review_model code_review_anthropic_model code_review_openai_model code_review_groq_model stream_enabled skip_secret_scan analytics_enabled"
+KNOWN_CONFIG_KEYS="ai_provider ollama_model ollama_host ollama_num_ctx temperature prompt_style anthropic_model openai_model groq_model use_scope use_gitmoji diff_max_lines learn_from_history auto_fix analysis_threshold commit_language code_review_model code_review_anthropic_model code_review_openai_model code_review_groq_model stream_enabled skip_secret_scan analytics_enabled pipeline_enabled analysis_model analysis_provider analysis_anthropic_model analysis_openai_model analysis_groq_model"
 
 # Unknown keys collector
 CONFIG_UNKNOWN_KEYS=()
@@ -147,7 +180,7 @@ validate_config() {
     fi
 
     # Validate boolean values
-    for var_name in CONFIG_USE_SCOPE CONFIG_USE_GITMOJI CONFIG_AUTO_FIX CONFIG_LEARN_FROM_HISTORY CONFIG_SKIP_SECRET_SCAN CONFIG_ANALYTICS_ENABLED; do
+    for var_name in CONFIG_USE_SCOPE CONFIG_USE_GITMOJI CONFIG_AUTO_FIX CONFIG_LEARN_FROM_HISTORY CONFIG_SKIP_SECRET_SCAN CONFIG_ANALYTICS_ENABLED CONFIG_PIPELINE_ENABLED; do
         local val="${!var_name}"
         if [ -n "$val" ] && [ "$val" != "true" ] && [ "$val" != "false" ]; then
             local key_name=$(echo "$var_name" | sed 's/^CONFIG_//' | tr '[:upper:]' '[:lower:]')
@@ -157,8 +190,8 @@ validate_config() {
     done
 
     # Validate numeric values
-    if [ -n "$CONFIG_DIFF_MAX_LINES" ] && ! [[ "$CONFIG_DIFF_MAX_LINES" =~ ^[0-9]+$ ]]; then
-        echo "Warning: diff_max_lines must be a positive integer, got '$CONFIG_DIFF_MAX_LINES'" >&2
+    if [ -n "$CONFIG_DIFF_MAX_LINES" ] && [ "$CONFIG_DIFF_MAX_LINES" != "auto" ] && ! [[ "$CONFIG_DIFF_MAX_LINES" =~ ^[0-9]+$ ]]; then
+        echo "Warning: diff_max_lines must be 'auto' or a positive integer, got '$CONFIG_DIFF_MAX_LINES'" >&2
         has_warnings=true
     fi
 
@@ -210,9 +243,23 @@ validate_config
 
 # Configuration (priority: env vars > local config > global config > defaults)
 AI_PROVIDER="${AI_PROVIDER:-${CONFIG_AI_PROVIDER:-auto}}"  # Options: auto, ollama, anthropic, openai, groq
-OLLAMA_MODEL="${OLLAMA_MODEL:-${CONFIG_OLLAMA_MODEL:-gemma3:12b}}"
+OLLAMA_MODEL="${OLLAMA_MODEL:-${CONFIG_OLLAMA_MODEL:-qwen3:8b}}"
 OLLAMA_HOST="${OLLAMA_HOST:-${CONFIG_OLLAMA_HOST:-http://localhost:11434}}"
-ANTHROPIC_MODEL="${ANTHROPIC_MODEL:-${CONFIG_ANTHROPIC_MODEL:-claude-3-5-sonnet-20241022}}"
+# Context window for Ollama. Ollama defaults to only 4096 tokens and SILENTLY
+# truncates prompts that exceed it — with our large diff+instruction prompt this
+# drops the diff or the format rules and wrecks commit quality on big commits.
+# Sized to comfortably fit the instruction prompt plus diff_max_lines: auto,
+# which can send up to ~1000 diff lines.
+OLLAMA_NUM_CTX="${OLLAMA_NUM_CTX:-${CONFIG_OLLAMA_NUM_CTX:-16384}}"
+# Sampling temperature. Commit generation is a structured, low-creativity task;
+# high temperature is the main source of run-to-run inconsistency ("great on some
+# commits, vague on others"). Low values keep output faithful to the diff.
+AI_TEMPERATURE="${AI_TEMPERATURE:-${CONFIG_AI_TEMPERATURE:-0.3}}"
+# Prompt style: "full" (default, all context layers + few-shot walls) or "slim"
+# (lean, diff-focused prompt). Slim reduces instruction overload on smaller models
+# and anchors the model on the actual diff. Set to A/B which yields better messages.
+PROMPT_STYLE="${PROMPT_STYLE:-${CONFIG_PROMPT_STYLE:-full}}"
+ANTHROPIC_MODEL="${ANTHROPIC_MODEL:-${CONFIG_ANTHROPIC_MODEL:-claude-sonnet-4-6}}"
 ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"
 OPENAI_MODEL="${OPENAI_MODEL:-${CONFIG_OPENAI_MODEL:-gpt-4o-mini}}"
 OPENAI_API_KEY="${OPENAI_API_KEY:-}"
@@ -230,6 +277,13 @@ CODE_REVIEW_ANTHROPIC_MODEL="${CODE_REVIEW_ANTHROPIC_MODEL:-${CONFIG_CODE_REVIEW
 CODE_REVIEW_OPENAI_MODEL="${CODE_REVIEW_OPENAI_MODEL:-${CONFIG_CODE_REVIEW_OPENAI_MODEL:-}}"  # OpenAI model for reviews
 CODE_REVIEW_GROQ_MODEL="${CODE_REVIEW_GROQ_MODEL:-${CONFIG_CODE_REVIEW_GROQ_MODEL:-}}"  # Groq model for reviews
 
+# Provider fallback configuration
+# When the configured provider fails with a transient error (rate limit,
+# token-limit-exceeded, network/timeout, service downtime), silently retry with a
+# local model so a commit message still gets generated instead of aborting.
+ENABLE_FALLBACK="${ENABLE_FALLBACK:-${CONFIG_ENABLE_FALLBACK:-true}}"  # Auto-fall back to a local model on provider failure
+FALLBACK_PROVIDER="${FALLBACK_PROVIDER:-${CONFIG_FALLBACK_PROVIDER:-ollama}}"  # Provider to fall back to (local, no rate limits)
+
 # Streaming configuration
 STREAM_ENABLED="${STREAM_ENABLED:-${CONFIG_STREAM_ENABLED:-auto}}"  # auto, true, false - stream AI responses to terminal
 
@@ -238,6 +292,14 @@ SKIP_SECRET_SCAN="${SKIP_SECRET_SCAN:-${CONFIG_SKIP_SECRET_SCAN:-false}}"  # Ski
 
 # Analytics configuration
 ANALYTICS_ENABLED="${ANALYTICS_ENABLED:-${CONFIG_ANALYTICS_ENABLED:-false}}"  # Enable local usage analytics
+
+# Two-model pipeline configuration
+PIPELINE_ENABLED="${PIPELINE_ENABLED:-${CONFIG_PIPELINE_ENABLED:-false}}"  # Enable two-stage pipeline
+ANALYSIS_MODEL="${ANALYSIS_MODEL:-${CONFIG_ANALYSIS_MODEL:-}}"  # Ollama model for Stage 1 analysis
+ANALYSIS_PROVIDER="${ANALYSIS_PROVIDER:-${CONFIG_ANALYSIS_PROVIDER:-}}"  # Provider override for Stage 1
+ANALYSIS_ANTHROPIC_MODEL="${ANALYSIS_ANTHROPIC_MODEL:-${CONFIG_ANALYSIS_ANTHROPIC_MODEL:-}}"  # Anthropic model for analysis
+ANALYSIS_OPENAI_MODEL="${ANALYSIS_OPENAI_MODEL:-${CONFIG_ANALYSIS_OPENAI_MODEL:-}}"  # OpenAI model for analysis
+ANALYSIS_GROQ_MODEL="${ANALYSIS_GROQ_MODEL:-${CONFIG_ANALYSIS_GROQ_MODEL:-}}"  # Groq model for analysis
 
 # Language configuration for commit messages
 COMMIT_LANGUAGE="${COMMIT_LANGUAGE:-${CONFIG_COMMIT_LANGUAGE:-}}"  # Language for commit messages (en, es, fr, de, ja, zh, etc.)
@@ -307,4 +369,8 @@ MAX_RETRIES="${MAX_RETRIES:-3}"  # Maximum number of retry attempts
 RETRY_DELAY="${RETRY_DELAY:-2}"  # Initial retry delay in seconds (doubles each retry)
 CONNECT_TIMEOUT="${CONNECT_TIMEOUT:-10}"  # Connection timeout in seconds
 MAX_TIME="${MAX_TIME:-120}"  # Maximum time for entire request in seconds
+
+# ============================================================================
+# Security Functions
+# ============================================================================
 

@@ -31,7 +31,7 @@ call_ollama() {
 
     # Try streaming first
     if should_stream; then
-        local stream_payload=$(printf '{"model":"%s","prompt":"%s","stream":true}' "$model_escaped" "$prompt_escaped")
+        local stream_payload=$(printf '{"model":"%s","prompt":"%s","stream":true,"options":{"num_ctx":%s,"temperature":%s}}' "$model_escaped" "$prompt_escaped" "$OLLAMA_NUM_CTX" "$AI_TEMPERATURE")
         local stream_output
         stream_output=$(create_secure_temp_file "gh-commit-ai-stream") || return 1
 
@@ -52,12 +52,12 @@ call_ollama() {
 
         # Streaming failed, fall back to non-streaming
         rm -f "$stream_output" "${stream_output}.input_tokens" "${stream_output}.output_tokens"
-        printf "\r%-80s\r" " " >&2
+        printf "\r%-80s\r" " " >&3
         echo "Streaming failed, retrying..." >&2
     fi
 
     # Non-streaming path (original behavior)
-    local json_payload=$(printf '{"model":"%s","prompt":"%s","stream":false}' "$model_escaped" "$prompt_escaped")
+    local json_payload=$(printf '{"model":"%s","prompt":"%s","stream":false,"options":{"num_ctx":%s,"temperature":%s}}' "$model_escaped" "$prompt_escaped" "$OLLAMA_NUM_CTX" "$AI_TEMPERATURE")
 
     if [ "$VERBOSE" = "true" ]; then
         echo "[Verbose] Request payload:"
@@ -86,7 +86,7 @@ call_ollama() {
     ) &
     local api_pid=$!
 
-    show_spinner "$api_pid" "Thinking"
+    show_spinner "$api_pid" "$SPINNER_MESSAGE"
     wait "$api_pid"
 
     exit_code=$(cat "${temp_response}.exit" 2>/dev/null || echo "1")
@@ -95,7 +95,7 @@ call_ollama() {
     local response=$(cat "$temp_response" 2>/dev/null)
 
     # Check for final failure after all retries
-    if [ "$exit_code" != "0" ] || [ -z "$response" ]; then
+    if [ -z "$response" ]; then
         echo -e "${RED}Error: Failed to get response from Ollama after $MAX_RETRIES attempts${NC}" >&2
         echo "" >&2
         echo "All retry attempts exhausted. Possible causes:" >&2
@@ -116,7 +116,7 @@ call_ollama() {
         echo "  • Pull model if needed: ollama pull $OLLAMA_MODEL" >&2
         echo "  • Verify service: curl $OLLAMA_HOST/api/tags" >&2
         echo "  • Check service status: ps aux | grep ollama" >&2
-        echo "  • Try smaller model: OLLAMA_MODEL=gemma2:2b gh commit-ai" >&2
+        echo "  • Try smaller model: OLLAMA_MODEL=qwen3:4b gh commit-ai" >&2
         echo "  • Run with verbose mode: gh commit-ai --verbose" >&2
 
         rm -f "$temp_response" "$temp_error" "${temp_response}.exit"

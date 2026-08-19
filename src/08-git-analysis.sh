@@ -39,7 +39,13 @@ if [ "$AMEND" = true ]; then
         # Extract file list for status
         GIT_STATUS=$(echo "$SHOW_OUTPUT" | awk '/^diff --git/ {print "M " $4}' | sed 's|^M b/|M |')
 
-        GIT_DIFF=$(smart_sample_diff "$FULL_DIFF" "$DIFF_MAX_LINES")
+        # Calculate effective max lines (adaptive or user-specified)
+        effective_max_lines="$DIFF_MAX_LINES"
+        if [ "$DIFF_MAX_LINES" = "auto" ]; then
+            total_diff_lines=$(echo "$FULL_DIFF" | wc -l | tr -d ' ')
+            effective_max_lines=$(calculate_adaptive_max_lines "$total_diff_lines")
+        fi
+        GIT_DIFF=$(smart_sample_diff "$FULL_DIFF" "$effective_max_lines")
 
         # Calculate commit size (lines added + deleted) from numstat
         COMMIT_SIZE=$(echo "$SHOW_OUTPUT" | awk '/^[0-9]+\t[0-9]+\t/ {added+=$1; deleted+=$2} END {print added+deleted}')
@@ -103,7 +109,13 @@ else
         else
             FULL_DIFF=$(eval "git diff $GIT_EXCLUDE_PATTERN" 2>/dev/null)
         fi
-        GIT_DIFF=$(smart_sample_diff "$FULL_DIFF" "$DIFF_MAX_LINES")
+        # Calculate effective max lines (adaptive or user-specified)
+        effective_max_lines="$DIFF_MAX_LINES"
+        if [ "$DIFF_MAX_LINES" = "auto" ]; then
+            total_diff_lines=$(echo "$FULL_DIFF" | wc -l | tr -d ' ')
+            effective_max_lines=$(calculate_adaptive_max_lines "$total_diff_lines")
+        fi
+        GIT_DIFF=$(smart_sample_diff "$FULL_DIFF" "$effective_max_lines")
 
         # Calculate commit size from numstat
         COMMIT_SIZE=$(echo "$NUMSTAT_DATA" | awk '{added+=$1; deleted+=$2} END {print added+deleted}')
@@ -486,8 +498,6 @@ detect_wordpress_plugin_update() {
     local total_files=0
     local plugin_files=0
     local theme_files=0
-    local single_plugin_threshold=80  # 80% threshold for bulk update detection
-
     # Parse each filename and check if it's in a plugin/theme directory
     while IFS= read -r line; do
         # Skip empty lines
@@ -526,20 +536,15 @@ detect_wordpress_plugin_update() {
         fi
     done <<< "$files"
 
-    # Check for single plugin bulk update (80%+ of files in one plugin)
-    if [ ${#plugin_names[@]} -eq 1 ] && [ $total_files -gt 0 ]; then
-        local plugin_name="${plugin_names[0]}"
-        local percentage=$((plugin_files * 100 / total_files))
-
-        if [ $percentage -ge $single_plugin_threshold ]; then
-            echo "plugin-bulk:${plugin_name}"
-            return 0
-        fi
+    # If ALL files are in plugin directories, use simple bulk format
+    if [ ${#plugin_names[@]} -ge 1 ] && [ $plugin_files -eq $total_files ] && [ $total_files -gt 0 ]; then
+        local plugin_list=$(IFS=,; echo "${plugin_names[*]}")
+        echo "plugin-bulk:${plugin_list}"
+        return 0
     fi
 
-    # If any plugin files found, return plugin names (comma-separated if multiple)
+    # If some plugin files found but mixed with non-plugin files, return for detailed analysis
     if [ ${#plugin_names[@]} -gt 0 ]; then
-        # Join plugin names with commas
         local plugin_list=$(IFS=,; echo "${plugin_names[*]}")
         echo "plugin:${plugin_list}"
         return 0

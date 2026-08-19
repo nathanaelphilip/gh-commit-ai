@@ -597,7 +597,12 @@ generate_code_review() {
     fi
 
     # Apply smart sampling if diff is too large
-    diff_content=$(smart_sample_diff "$diff_content" "$DIFF_MAX_LINES")
+    local review_max_lines="$DIFF_MAX_LINES"
+    if [ "$DIFF_MAX_LINES" = "auto" ]; then
+        local total_diff_lines=$(echo "$diff_content" | wc -l | tr -d ' ')
+        review_max_lines=$(calculate_adaptive_max_lines "$total_diff_lines")
+    fi
+    diff_content=$(smart_sample_diff "$diff_content" "$review_max_lines")
 
     # Get file statistics (exclude lock files)
     local file_stats
@@ -684,10 +689,10 @@ Provide your review:"
                 echo -e "${BLUE}Using $AI_PROVIDER model: $current_model${NC}" >&2
 
                 # Recommend better models for code review if using a small/weak model
-                if [[ "$current_model" =~ (gemma2:2b|gemma3:4b|llama3.2:1b|llama3.2:3b|phi3:mini) ]]; then
+                if [[ "$current_model" =~ (gemma2:2b|gemma3:1b|gemma3:4b|gemma3n:1b|gemma3n:4b|llama3.2:1b|llama3.2:3b|phi3:mini|qwen2.5:1b|qwen2.5:3b|qwen2.5-coder:1.5b|qwen2.5-coder:3b|qwen3:0.6b|qwen3:1.7b|qwen3:4b) ]]; then
                     echo -e "${YELLOW}💡 Tip: For better code reviews, consider using a larger model:${NC}" >&2
-                    echo -e "${YELLOW}   CODE_REVIEW_MODEL=\"qwen2.5-coder:14b\" or \"deepseek-coder:6.7b\"${NC}" >&2
-                    echo -e "${YELLOW}   Or add to .gh-commit-ai.yml: code_review_model: qwen2.5-coder:14b${NC}" >&2
+                    echo -e "${YELLOW}   CODE_REVIEW_MODEL=\"qwen3:14b\" or \"qwen2.5-coder:14b\"${NC}" >&2
+                    echo -e "${YELLOW}   Or add to .gh-commit-ai.yml: code_review_model: qwen3:14b${NC}" >&2
                     echo "" >&2
                 fi
                 ;;
@@ -698,7 +703,7 @@ Provide your review:"
                 # Recommend Opus or Sonnet for code review if using Haiku
                 if [[ "$current_model" =~ haiku ]]; then
                     echo -e "${YELLOW}💡 Tip: For more thorough code reviews, consider using Claude Sonnet or Opus${NC}" >&2
-                    echo -e "${YELLOW}   CODE_REVIEW_ANTHROPIC_MODEL=\"claude-3-5-sonnet-20241022\"${NC}" >&2
+                    echo -e "${YELLOW}   CODE_REVIEW_ANTHROPIC_MODEL=\"claude-sonnet-4-6\"${NC}" >&2
                     echo "" >&2
                 fi
                 ;;

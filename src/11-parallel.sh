@@ -1,7 +1,3 @@
-# ============================================================================
-# PARALLEL ANALYSIS - Run all analysis functions simultaneously for speed
-# ============================================================================
-
 # Create temp files for parallel job outputs
 TEMP_HISTORY="${CACHE_DIR}/temp_history_$$"
 TEMP_EXAMPLES="${CACHE_DIR}/temp_examples_$$"

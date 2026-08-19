@@ -53,6 +53,7 @@ src/
   10-analysis.sh            # Commit examples, semantic analysis, file relationships
   11-parallel.sh            # Parallel analysis orchestration
   12-prompt.sh              # Secret scanning, few-shot examples, prompt construction
+  12b-pipeline.sh           # Two-model pipeline: analysis + synthesis prompts and driver
   13-json-utils.sh          # JSON escaping, lowercase enforcement, auto-fix
   14-templates.sh           # Project type detection, template system
   15-cost.sh                # Token cost calculation, cumulative tracking
@@ -61,10 +62,15 @@ src/
   18-providers-anthropic.sh # Anthropic Claude provider
   19-providers-openai.sh    # OpenAI GPT provider
   20-providers-groq.sh      # Groq provider (OpenAI-compatible)
+  20b-provider-dispatch.sh  # Provider dispatch, error logging, automatic local fallback
   21-main.sh                # Main execution flow
 ```
 
 **Key rule**: Numeric prefixes control concatenation order. Functions must be defined before they're called.
+
+**Never edit `gh-commit-ai` directly.** It is generated output; `make build` overwrites it
+from `src/`. Change the module, run `make build`, and commit both. `cat src/*.sh` must stay
+byte-identical to `gh-commit-ai` — `make verify` checks the result.
 
 ### Data Flow
 

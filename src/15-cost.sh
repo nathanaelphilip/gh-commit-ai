@@ -14,10 +14,22 @@ calculate_cost() {
     local output_cost=0
     local currency="USD"
 
-    # Pricing per 1M tokens (as of early 2025)
+    # Pricing per 1M tokens (as of 2025)
     case "$provider" in
         anthropic)
             case "$model" in
+                claude-sonnet-4-6|claude-sonnet-4-5*)
+                    input_cost=3.00    # $3 per MTok
+                    output_cost=15.00  # $15 per MTok
+                    ;;
+                claude-opus-4-6|claude-opus-4*)
+                    input_cost=15.00   # $15 per MTok
+                    output_cost=75.00  # $75 per MTok
+                    ;;
+                claude-haiku-4-5*|claude-haiku-4*)
+                    input_cost=0.80    # $0.80 per MTok
+                    output_cost=4.00   # $4 per MTok
+                    ;;
                 claude-3-5-sonnet-20241022|claude-3-5-sonnet-latest)
                     input_cost=3.00    # $3 per MTok
                     output_cost=15.00  # $15 per MTok
@@ -39,6 +51,14 @@ calculate_cost() {
             ;;
         openai)
             case "$model" in
+                gpt-4.1)
+                    input_cost=2.00    # $2 per MTok
+                    output_cost=8.00   # $8 per MTok
+                    ;;
+                gpt-4.1-mini)
+                    input_cost=0.40    # $0.40 per MTok
+                    output_cost=1.60   # $1.60 per MTok
+                    ;;
                 gpt-4o)
                     input_cost=2.50    # $2.50 per MTok
                     output_cost=10.00  # $10 per MTok
@@ -129,5 +149,30 @@ convert_newlines() {
     local text="$1"
     # Use printf %b to interpret backslash escapes
     printf "%b" "$text"
+}
+
+# Strip <think>...</think> reasoning blocks emitted by reasoning models
+# (qwen3, devstral, etc.). Without this, reasoning can leak into the commit
+# summary line. Pure-awk state machine (no deps) that handles inline,
+# multi-line, and split blocks.
+strip_think_blocks() {
+    local text="$1"
+    printf '%s' "$text" | awk '
+        {
+            line = $0
+            # Remove any fully-inline <think>...</think> on this line
+            gsub(/<think>[^<]*<\/think>/, "", line)
+            if (skip) {
+                if (line ~ /<\/think>/) { sub(/.*<\/think>/, "", line); skip=0 }
+                else next
+            }
+            if (line ~ /<think>/) { sub(/<think>.*/, "", line); skip=1 }
+            # Drop leading blank lines left behind by a stripped block —
+            # a commit message must start with its summary line.
+            if (!started && line ~ /^[[:space:]]*$/) next
+            started=1
+            print line
+        }
+    '
 }
 
