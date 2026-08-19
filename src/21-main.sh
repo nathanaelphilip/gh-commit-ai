@@ -1,9 +1,3 @@
-# Handle version suggestion mode
-if [ "$VERSION_MODE" = true ]; then
-    suggest_next_version "$CREATE_TAG" "$TAG_PREFIX"
-    exit 0
-fi
-
 # Handle code review mode (needs AI functions defined above)
 if [ "$CODE_REVIEW_MODE" = true ]; then
     generate_code_review "$REVIEW_STAGED_ONLY"

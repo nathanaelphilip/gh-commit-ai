@@ -246,7 +246,7 @@ suggest_next_version() {
     if [ -z "$last_tag" ]; then
         echo -e "${YELLOW}No tags found in repository${NC}"
         echo ""
-        echo "Suggested first version: ${GREEN}${tag_prefix}0.1.0${NC}"
+        echo -e "Suggested first version: ${GREEN}${tag_prefix}0.1.0${NC}"
         echo ""
         echo "Reasoning:"
         echo "  • No previous tags exist"
