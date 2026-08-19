@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Groq AI provider support for ultra-fast inference
-  - Default model: llama-3.3-70b-versatile
+  - Default model: openai/gpt-oss-120b
   - Generous free tier: 100 requests/minute
   - Configuration via GROQ_API_KEY and GROQ_MODEL
 - Homebrew formula for easy installation on macOS/Linux

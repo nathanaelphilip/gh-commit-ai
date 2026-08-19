@@ -231,7 +231,7 @@ anthropic_model: claude-3-5-sonnet-20241022
 openai_model: gpt-4o-mini
 
 # Groq Configuration
-groq_model: llama-3.3-70b-versatile
+groq_model: openai/gpt-oss-120b
 
 # Commit Format
 use_scope: false  # Enable conventional commit scopes
@@ -295,8 +295,10 @@ gh commit-ai
 #### Groq Configuration
 
 - `GROQ_API_KEY`: Your Groq API key (required, get one at [console.groq.com](https://console.groq.com/keys))
-- `GROQ_MODEL`: The model to use (default: `llama-3.3-70b-versatile`)
-  - Available models: `llama-3.3-70b-versatile`, `llama-3.1-8b-instant`, `mixtral-8x7b-32768`, `gemma2-9b-it`
+- `GROQ_MODEL`: The model to use (default: `openai/gpt-oss-120b`)
+  - Available models: `openai/gpt-oss-120b`, `openai/gpt-oss-20b`, `qwen/qwen3.6-27b`, `groq/compound`, `groq/compound-mini`
+  - Groq retires models regularly; check the current list with:
+    `curl -s https://api.groq.com/openai/v1/models -H "Authorization: Bearer $GROQ_API_KEY"`
 - Free tier: 100 requests/minute (very generous for development)
 - Ultra-fast inference: 10-20x faster than other providers
 

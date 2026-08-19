@@ -199,7 +199,7 @@ Environment variables take precedence over config files (defined at lines 69-78)
 
 **Groq (API key required, ultra-fast, generous free tier):**
 - `GROQ_API_KEY`: Your Groq API key
-- `GROQ_MODEL`: Model to use (default: `llama-3.3-70b-versatile`)
+- `GROQ_MODEL`: Model to use (default: `openai/gpt-oss-120b`)
 - Features: Ultra-fast inference (10-20x faster), 100 requests/minute free tier
 - Get API key at: https://console.groq.com/keys
 
