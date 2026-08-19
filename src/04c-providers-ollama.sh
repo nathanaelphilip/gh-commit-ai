@@ -2,8 +2,10 @@
 call_ollama() {
     local prompt="$1"
 
-    # Quick pre-flight check: verify Ollama is reachable
-    if ! curl -s --connect-timeout 2 --max-time 5 "$OLLAMA_HOST/api/tags" >/dev/null 2>&1; then
+    # Quick pre-flight check: verify Ollama is reachable. Uses the shared cached
+    # model list, so on the common path this costs nothing - detection already
+    # fetched it moments ago.
+    if [ -z "$(ollama_model_list)" ]; then
         echo -e "${RED}Error: Cannot connect to Ollama at $OLLAMA_HOST${NC}" >&2
         echo "" >&2
         echo "Ollama is not responding. Possible causes:" >&2

@@ -64,16 +64,22 @@ if [ "$RECOVERED_MESSAGE" != "true" ]; then
     if [ "$DISABLE_CACHE" != "true" ]; then
         cache_debug "Starting cache key generation"
 
+        # Everything that changes the generated message has to be in the key.
+        # It used to be md5(diff) alone, so re-running the same staged diff with
+        # a different --type, --lang, scope setting, provider or model returned
+        # the previous, flag-inconsistent message straight from cache.
+        CACHE_FACETS="provider=$AI_PROVIDER;model=$(provider_model "$AI_PROVIDER");scope=$USE_SCOPE;gitmoji=$USE_GITMOJI;lang=$COMMIT_LANGUAGE;type=$FORCED_TYPE;style=$PROMPT_STYLE;pipeline=$PIPELINE_ENABLED;lowercase=$NO_LOWERCASE"
+
         # Use the already-generated GIT_DIFF variable to avoid redundant git calls
         if [ -n "$GIT_DIFF" ]; then
             cache_debug "Using GIT_DIFF for cache key (length: ${#GIT_DIFF})"
-            CACHE_KEY=$(echo "$GIT_DIFF" | get_diff_hash 2>/dev/null)
+            CACHE_KEY=$(printf '%s\n%s' "$CACHE_FACETS" "$GIT_DIFF" | get_diff_hash 2>/dev/null)
         else
             cache_debug "No diff available, generating from git"
             if [ "$AMEND_MODE" = true ]; then
-                CACHE_KEY=$(git show HEAD 2>/dev/null | get_diff_hash 2>/dev/null)
+                CACHE_KEY=$(printf '%s\n%s' "$CACHE_FACETS" "$(git show HEAD 2>/dev/null)" | get_diff_hash 2>/dev/null)
             else
-                CACHE_KEY=$(git diff --cached 2>/dev/null | get_diff_hash 2>/dev/null)
+                CACHE_KEY=$(printf '%s\n%s' "$CACHE_FACETS" "$(git diff --cached 2>/dev/null)" | get_diff_hash 2>/dev/null)
             fi
         fi
 

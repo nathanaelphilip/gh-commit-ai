@@ -1,3 +1,57 @@
+# One cached fetch of Ollama's model list, shared by availability detection and
+# model selection.
+#
+# A single run used to hit $OLLAMA_HOST/api/tags up to four times: twice
+# back-to-back in detect_available_providers (once to test reachability, once to
+# count models), again in get_best_ollama_model on a cold cache, and a fourth
+# time as call_ollama's preflight. Since AI_PROVIDER defaults to "auto", a user
+# with only a cloud key set still paid for the localhost probes on every run.
+#
+# The TTL is short - the point is to collapse the calls within one run, not to
+# remember for long that Ollama was down.
+OLLAMA_TAGS_CACHE="/tmp/gh-commit-ai-ollama-tags-$(id -u 2>/dev/null || echo 0)"
+OLLAMA_TAGS_TTL=60
+
+# Models that cannot generate a commit message. An embedding-only install (say a
+# lone nomic-embed-text pulled for an unrelated project) used to count as
+# "ollama is available", beat a correctly configured cloud key, and then fail.
+ollama_model_is_chat_capable() {
+    case "$1" in
+        *embed*|*bge-*|*minilm*|*paraphrase*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+ollama_model_list() {
+    local age
+
+    if [ -f "$OLLAMA_TAGS_CACHE" ]; then
+        age=$(( $(date +%s) - $(stat -f%m "$OLLAMA_TAGS_CACHE" 2>/dev/null || stat -c%Y "$OLLAMA_TAGS_CACHE" 2>/dev/null || echo 0) ))
+        if [ "$age" -lt "$OLLAMA_TAGS_TTL" ]; then
+            cat "$OLLAMA_TAGS_CACHE"
+            return 0
+        fi
+    fi
+
+    local models
+    models=$(curl -s --connect-timeout 1 "$OLLAMA_HOST/api/tags" 2>/dev/null \
+        | grep -o '"name":"[^"]*"' | sed 's/"name":"//;s/"//')
+
+    local chat_models="" model
+    while IFS= read -r model; do
+        [ -n "$model" ] || continue
+        ollama_model_is_chat_capable "$model" || continue
+        chat_models="${chat_models}${model}
+"
+    done <<EOF
+$models
+EOF
+
+    printf '%s' "$chat_models" > "$OLLAMA_TAGS_CACHE" 2>/dev/null || true
+    chmod 600 "$OLLAMA_TAGS_CACHE" 2>/dev/null || true
+    printf '%s' "$chat_models"
+}
+
 # Auto-detect available AI providers and models
 detect_available_providers() {
     local available=""
@@ -17,12 +71,10 @@ detect_available_providers() {
         available="${available}groq "
     fi
 
-    # Check Ollama (running and has models)
-    if curl -s --connect-timeout 1 "$OLLAMA_HOST/api/tags" >/dev/null 2>&1; then
-        local models=$(curl -s "$OLLAMA_HOST/api/tags" 2>/dev/null | grep -o '"name":"[^"]*"' | sed 's/"name":"//;s/"//' | wc -l)
-        if [ "$models" -gt 0 ]; then
-            available="${available}ollama "
-        fi
+    # Check Ollama (running, and has at least one model that can actually chat).
+    # One cached call now covers both questions.
+    if [ -n "$(ollama_model_list)" ]; then
+        available="${available}ollama "
     fi
 
     echo "$available" | xargs  # Trim whitespace
@@ -43,8 +95,8 @@ get_best_ollama_model() {
         fi
     fi
 
-    # Query Ollama for available models
-    local models=$(curl -s "$OLLAMA_HOST/api/tags" 2>/dev/null | grep -o '"name":"[^"]*"' | sed 's/"name":"//;s/"//')
+    # Query Ollama for available models (shared cache - see ollama_model_list)
+    local models=$(ollama_model_list)
 
     if [ -z "$models" ]; then
         echo ""
@@ -136,6 +188,14 @@ if [ "$AI_PROVIDER" = "auto" ]; then
         if [ -n "$detected_model" ]; then
             OLLAMA_MODEL="$detected_model"
             AUTO_DETECTED=true
+        fi
+
+        # Ollama outranks the cloud providers, and a background Ollama is easy
+        # to forget about. Say so up front rather than letting someone wonder
+        # why the key they exported was ignored.
+        if [ -n "$ANTHROPIC_API_KEY" ] || [ -n "$OPENAI_API_KEY" ] || [ -n "$GROQ_API_KEY" ]; then
+            echo "Note: using local Ollama ($OLLAMA_MODEL); a cloud API key is set but Ollama takes precedence." >&2
+            echo "      Set AI_PROVIDER explicitly (e.g. AI_PROVIDER=anthropic) to use it instead." >&2
         fi
     elif echo "$available_providers" | grep -q "groq"; then
         AI_PROVIDER="groq"

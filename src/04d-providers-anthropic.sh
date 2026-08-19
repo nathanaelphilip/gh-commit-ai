@@ -7,27 +7,9 @@ call_anthropic() {
         exit 1
     fi
 
-    # Check network connectivity before making API call
-    if ! check_network_connectivity; then
-        show_offline_error "Anthropic"
-        exit 1
-    fi
-
-    # Check if Anthropic API is reachable
-    if ! check_host_reachability "api.anthropic.com"; then
-        echo -e "${RED}Error: Cannot reach Anthropic API${NC}" >&2
-        echo "" >&2
-        echo "The API endpoint api.anthropic.com is not reachable." >&2
-        echo "Possible causes:" >&2
-        echo "  • Anthropic service is down" >&2
-        echo "  • Firewall or network filtering" >&2
-        echo "  • DNS issues" >&2
-        echo "" >&2
-        echo "Try:" >&2
-        echo "  • Check service status: https://status.anthropic.com/" >&2
-        echo "  • Use a different provider (export AI_PROVIDER=groq or ollama)" >&2
-        exit 1
-    fi
+    # Connectivity is not probed up front - curl resolves and connects anyway,
+    # and retry_api_call already turns its exit codes into readable errors.
+    # diagnose_network_failure runs on the failure path instead.
 
     local prompt_escaped=$(escape_json "$prompt")
 
@@ -117,6 +99,14 @@ call_anthropic() {
 
     # Check for final failure after all retries
     if [ -z "$response" ]; then
+        # Now that the request has actually failed, it is worth spending two DNS
+        # lookups to say whether the machine is offline or the host is
+        # unreachable. If it reports either, that is the whole story.
+        if diagnose_network_failure "Anthropic" "api.anthropic.com"; then
+            rm -f "$temp_response" "$temp_error" "${temp_response}.exit"
+            return 1
+        fi
+
         echo -e "${RED}Error: Failed to get response from Anthropic after $MAX_RETRIES attempts${NC}" >&2
         echo "" >&2
         echo "All retry attempts exhausted. This could be due to:" >&2
