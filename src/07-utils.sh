@@ -93,7 +93,10 @@ analyze_commit_size() {
 
 # Check if we're in a git repository (cache the result)
 # PERFORMANCE OPTIMIZATION: Cache all git repository info upfront
-GIT_DIR=$(git rev-parse --git-dir 2>/dev/null)
+# `|| GIT_DIR=""` matters: under `set -e` a failing command substitution in an
+# assignment aborts the script, so without it we exited 128 silently instead of
+# reaching the check below.
+GIT_DIR=$(git rev-parse --git-dir 2>/dev/null) || GIT_DIR=""
 if [ -z "$GIT_DIR" ]; then
     echo -e "${RED}Error: Not a git repository"
     exit 1

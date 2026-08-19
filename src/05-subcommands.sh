@@ -411,7 +411,10 @@ suggest_commit_splits() {
     local dry_run="$2"
 
     # Check if we're in a git repository
-    GIT_DIR=$(git rev-parse --git-dir 2>/dev/null)
+    # `|| GIT_DIR=""` matters: under `set -e` a failing command substitution in an
+    # assignment aborts the script, so without it we exited 128 silently instead of
+    # reaching the check below.
+    GIT_DIR=$(git rev-parse --git-dir 2>/dev/null) || GIT_DIR=""
     if [ -z "$GIT_DIR" ]; then
         echo -e "${RED}Error: Not a git repository${NC}" >&2
         exit 1
@@ -569,7 +572,10 @@ generate_code_review() {
     local review_all="$1"  # true = all changes, false = staged only
 
     # Check if we're in a git repository
-    GIT_DIR=$(git rev-parse --git-dir 2>/dev/null)
+    # `|| GIT_DIR=""` matters: under `set -e` a failing command substitution in an
+    # assignment aborts the script, so without it we exited 128 silently instead of
+    # reaching the check below.
+    GIT_DIR=$(git rev-parse --git-dir 2>/dev/null) || GIT_DIR=""
     if [ -z "$GIT_DIR" ]; then
         echo -e "${RED}Error: Not a git repository${NC}" >&2
         exit 1
