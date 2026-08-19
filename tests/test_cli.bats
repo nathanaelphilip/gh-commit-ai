@@ -5,11 +5,11 @@
 load test_helper
 
 setup() {
-    setup
+    common_setup
 }
 
 teardown() {
-    teardown
+    common_teardown
 }
 
 @test "CLI: --help shows usage information" {

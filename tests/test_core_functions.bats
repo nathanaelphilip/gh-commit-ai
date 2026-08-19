@@ -5,12 +5,12 @@
 load test_helper
 
 setup() {
-    setup
+    common_setup
     source_script_functions
 }
 
 teardown() {
-    teardown
+    common_teardown
 }
 
 # Tests for escape_json function
@@ -27,12 +27,12 @@ teardown() {
 
 @test "escape_json: handles newlines" {
     result=$(escape_json $'Line1\nLine2')
-    [[ "$result" == *'\\n'* ]]
+    [[ "$result" == *'\n'* ]]
 }
 
 @test "escape_json: handles tabs" {
     result=$(escape_json $'Column1\tColumn2')
-    [[ "$result" == *'\\t'* ]]
+    [[ "$result" == *'\t'* ]]
 }
 
 @test "escape_json: handles empty string" {

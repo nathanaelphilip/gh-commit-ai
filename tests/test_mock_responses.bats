@@ -70,8 +70,8 @@ EOF
     [[ "$result" == *"- add connection retry logic"* ]]
 
     # Extract token counts
-    input_tokens=$(grep -o '"input_tokens":[0-9]*' /tmp/anthropic_response.json | sed 's/"input_tokens"://')
-    output_tokens=$(grep -o '"output_tokens":[0-9]*' /tmp/anthropic_response.json | sed 's/"output_tokens"://')
+    input_tokens=$(grep -o '"input_tokens": *[0-9]*' /tmp/anthropic_response.json | sed 's/"input_tokens": *//')
+    output_tokens=$(grep -o '"output_tokens": *[0-9]*' /tmp/anthropic_response.json | sed 's/"output_tokens": *//')
 
     [ "$input_tokens" -eq 150 ]
     [ "$output_tokens" -eq 75 ]
@@ -113,8 +113,8 @@ EOF
     [[ "$result" == *"- add authentication section"* ]]
 
     # Extract token counts
-    prompt_tokens=$(grep -o '"prompt_tokens":[0-9]*' /tmp/openai_response.json | sed 's/"prompt_tokens"://')
-    completion_tokens=$(grep -o '"completion_tokens":[0-9]*' /tmp/openai_response.json | sed 's/"completion_tokens"://')
+    prompt_tokens=$(grep -o '"prompt_tokens": *[0-9]*' /tmp/openai_response.json | sed 's/"prompt_tokens": *//')
+    completion_tokens=$(grep -o '"completion_tokens": *[0-9]*' /tmp/openai_response.json | sed 's/"completion_tokens": *//')
 
     [ "$prompt_tokens" -eq 200 ]
     [ "$completion_tokens" -eq 50 ]
@@ -190,10 +190,10 @@ newlines and	tabs'
     result=$(escape_json "$input")
 
     # Verify escaping
-    [[ "$result" == *'\\"quotes\\"'* ]]
-    [[ "$result" == *'\\\\'* ]]  # Backslash should be escaped
-    [[ "$result" == *'\\n'* ]]   # Newline should be escaped
-    [[ "$result" == *'\\t'* ]]   # Tab should be escaped
+    [[ "$result" == *'\"quotes\"'* ]]
+    [[ "$result" == *'\\'* ]]  # Backslash should be escaped to \\
+    [[ "$result" == *'\n'* ]]   # Newline should be escaped
+    [[ "$result" == *'\t'* ]]   # Tab should be escaped
 }
 
 @test "convert_newlines transforms literal backslash-n" {
