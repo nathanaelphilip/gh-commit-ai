@@ -47,54 +47,17 @@ detect_project_type() {
     echo "general"
 }
 
-# Load template from file or return built-in template
+# Load the repo-local commit template, if there is one
 load_template() {
-    local project_type="$1"
-
-    # Check for local template file
+    # Only a repo-local .gh-commit-ai-template does anything. There used to be
+    # a case statement of per-project-type built-in templates below this, but it
+    # was unreachable: every call site already guards on the file existing, and
+    # this function returns the file's contents immediately when it does. The
+    # four built-ins were also byte-identical bar one extra line, so nothing is
+    # lost by dropping them.
     if [ -f ".gh-commit-ai-template" ]; then
         cat ".gh-commit-ai-template"
-        return
     fi
-
-    # Return built-in template based on project type
-    case "$project_type" in
-        web-app)
-            cat <<'EOF'
-{{emoji}} {{type}}{{scope}}: {{message}}
-
-{{bullets}}
-{{breaking}}
-EOF
-            ;;
-        library)
-            cat <<'EOF'
-{{emoji}} {{type}}{{scope}}: {{message}}
-
-{{bullets}}
-{{breaking}}
-
-Changes: {{files_changed}} files changed
-EOF
-            ;;
-        cli)
-            cat <<'EOF'
-{{emoji}} {{type}}{{scope}}: {{message}}
-
-{{bullets}}
-{{breaking}}
-EOF
-            ;;
-        *)
-            # General/default template - same as current format
-            cat <<'EOF'
-{{emoji}} {{type}}{{scope}}: {{message}}
-
-{{bullets}}
-{{breaking}}
-EOF
-            ;;
-    esac
 }
 
 # Parse commit message components from AI-generated message
@@ -194,6 +157,12 @@ apply_template() {
     # Apply template substitutions
     local result="$template"
 
+    # An empty {{emoji}} would otherwise leave the summary line starting with a
+    # stray space, so consume the separator with it.
+    if [ -z "$EMOJI" ]; then
+        result="${result//\{\{emoji\}\} /}"
+    fi
+
     # Simple variable substitution
     result="${result//\{\{emoji\}\}/$EMOJI}"
     result="${result//\{\{type\}\}/$TYPE}"
@@ -208,20 +177,22 @@ apply_template() {
     result="${result//\{\{date\}\}/$DATE}"
     result="${result//\{\{files_changed\}\}/$FILES_CHANGED}"
 
-    # Clean up: remove lines that only contain empty template variables
-    result=$(echo "$result" | sed '/^[[:space:]]*$/d')
-
-    # Remove trailing blank lines
-    result=$(echo "$result" | awk '
-        { lines[NR] = $0 }
-        END {
-            for (i = 1; i <= NR; i++) {
-                if (i == NR) {
-                    if (lines[i] != "") print lines[i]
-                } else if (lines[i] != "" || lines[i+1] != "") {
-                    print lines[i]
-                }
-            }
+    # Clean up the gaps left by placeholders that resolved to nothing.
+    #
+    # This used to be `sed '/^[[:space:]]*$/d'`, which deleted EVERY blank line -
+    # including the one every template puts between the summary and the body. So
+    # any repo with a custom .gh-commit-ai-template got its subject line and
+    # bullets squashed together, breaking the exact git convention the tool
+    # enforces everywhere else. Collapse runs of blank lines to a single
+    # separator instead, and trim them from both ends.
+    result=$(printf '%s\n' "$result" | awk '
+        { sub(/[[:space:]]+$/, "") }
+        NF == 0 { blank = 1; next }
+        {
+            if (seen && blank) print ""
+            blank = 0
+            seen = 1
+            print
         }
     ')
 

@@ -14,21 +14,33 @@ calculate_cost() {
     local output_cost=0
     local currency="USD"
 
-    # Pricing per 1M tokens (as of 2025)
+    # Pricing per 1M tokens. Anthropic rates verified 2026-08.
+    #
+    # The Opus and Haiku rows below were wrong for years: Opus 4.x carried the
+    # old Claude-3-Opus $15/$75, overstating every Opus run by 3x, and Haiku 4.5
+    # was ~20% under. There were also no rows for the current Opus 5 / Sonnet 5,
+    # so those fell through to the Sonnet default - right for Sonnet 5, wrong
+    # for Opus 5.
+    PRICING_MATCHED=false
     case "$provider" in
         anthropic)
+            PRICING_MATCHED=true
             case "$model" in
-                claude-sonnet-4-6|claude-sonnet-4-5*)
+                claude-sonnet-5*|claude-sonnet-4-6|claude-sonnet-4-5*)
                     input_cost=3.00    # $3 per MTok
                     output_cost=15.00  # $15 per MTok
                     ;;
-                claude-opus-4-6|claude-opus-4*)
-                    input_cost=15.00   # $15 per MTok
-                    output_cost=75.00  # $75 per MTok
+                claude-opus-5*|claude-opus-4-8*|claude-opus-4-7*|claude-opus-4-6|claude-opus-4*)
+                    input_cost=5.00    # $5 per MTok
+                    output_cost=25.00  # $25 per MTok
+                    ;;
+                claude-fable-5*|claude-mythos-5*)
+                    input_cost=10.00   # $10 per MTok
+                    output_cost=50.00  # $50 per MTok
                     ;;
                 claude-haiku-4-5*|claude-haiku-4*)
-                    input_cost=0.80    # $0.80 per MTok
-                    output_cost=4.00   # $4 per MTok
+                    input_cost=1.00    # $1 per MTok
+                    output_cost=5.00   # $5 per MTok
                     ;;
                 claude-3-5-sonnet-20241022|claude-3-5-sonnet-latest)
                     input_cost=3.00    # $3 per MTok
@@ -43,13 +55,17 @@ calculate_cost() {
                     output_cost=1.25   # $1.25 per MTok
                     ;;
                 *)
-                    # Default to Sonnet pricing
+                    # Default to Sonnet pricing, but flag it - a silent
+                    # fall-through here is how the stale Opus rate went
+                    # unnoticed, and it under-reports any pricier model.
                     input_cost=3.00
                     output_cost=15.00
+                    PRICING_MATCHED=false
                     ;;
             esac
             ;;
         openai)
+            PRICING_MATCHED=true
             case "$model" in
                 gpt-4.1)
                     input_cost=2.00    # $2 per MTok
@@ -79,6 +95,35 @@ calculate_cost() {
                     # Default to gpt-4o-mini pricing
                     input_cost=0.15
                     output_cost=0.60
+                    PRICING_MATCHED=false
+                    ;;
+            esac
+            ;;
+        groq)
+            # There was no groq arm at all, so every Groq run reported $0.00 -
+            # which reads as "free" rather than "unpriced". Rates per MTok.
+            PRICING_MATCHED=true
+            case "$model" in
+                openai/gpt-oss-120b)
+                    input_cost=0.15
+                    output_cost=0.75
+                    ;;
+                openai/gpt-oss-20b)
+                    input_cost=0.10
+                    output_cost=0.50
+                    ;;
+                llama-3.3-70b-versatile)
+                    input_cost=0.59
+                    output_cost=0.79
+                    ;;
+                llama-3.1-8b-instant)
+                    input_cost=0.05
+                    output_cost=0.08
+                    ;;
+                *)
+                    input_cost=0.15
+                    output_cost=0.75
+                    PRICING_MATCHED=false
                     ;;
             esac
             ;;
@@ -111,6 +156,9 @@ calculate_cost() {
     local total_tokens=$((input_tokens + output_tokens))
     echo "💰 Token usage: ${total_tokens} tokens (${input_tokens} input + ${output_tokens} output)"
     echo "💰 Estimated cost: \$$total_cost_display $currency"
+    if [ "$PRICING_MATCHED" != "true" ]; then
+        echo "   (no pricing entry for $provider/$model - figure above is a fallback estimate)"
+    fi
 
     # Track cumulative cost
     track_cumulative_cost "$total_cost"

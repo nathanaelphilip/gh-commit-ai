@@ -262,6 +262,9 @@ if [ "$MULTIPLE_OPTIONS" = "true" ]; then
     elif [ "$AI_PROVIDER" = "openai" ]; then
         calculate_cost "openai" "$OPENAI_MODEL" "$INPUT_TOKENS" "$OUTPUT_TOKENS"
         echo ""
+    elif [ "$AI_PROVIDER" = "groq" ]; then
+        calculate_cost "groq" "$GROQ_MODEL" "$INPUT_TOKENS" "$OUTPUT_TOKENS"
+        echo ""
     fi
 
     # Get user selection
@@ -316,6 +319,9 @@ else
         echo ""
     elif [ "$AI_PROVIDER" = "openai" ]; then
         calculate_cost "openai" "$OPENAI_MODEL" "$INPUT_TOKENS" "$OUTPUT_TOKENS"
+        echo ""
+    elif [ "$AI_PROVIDER" = "groq" ]; then
+        calculate_cost "groq" "$GROQ_MODEL" "$INPUT_TOKENS" "$OUTPUT_TOKENS"
         echo ""
     fi
 fi
@@ -514,6 +520,9 @@ EOF
             echo ""
         elif [ "$AI_PROVIDER" = "openai" ]; then
             calculate_cost "openai" "$OPENAI_MODEL" "$INPUT_TOKENS" "$OUTPUT_TOKENS"
+            echo ""
+        elif [ "$AI_PROVIDER" = "groq" ]; then
+            calculate_cost "groq" "$GROQ_MODEL" "$INPUT_TOKENS" "$OUTPUT_TOKENS"
             echo ""
         fi
 
