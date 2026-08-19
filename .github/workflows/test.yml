@@ -3,8 +3,11 @@ name: Tests
 on:
   push:
     branches: [ main, develop ]
+  # Deliberately unfiltered: `branches: [main, develop]` here means a PR that
+  # targets anything else gets NO checks at all, silently. A stack of dependent
+  # PRs - each based on the one below it rather than on main - therefore merged
+  # entirely unverified, which is the opposite of what this workflow is for.
   pull_request:
-    branches: [ main, develop ]
 
 jobs:
   unit-tests:
@@ -20,12 +23,9 @@ jobs:
 
       - name: Install Bats
         run: |
-          if [ "$RUNNER_OS" == "Linux" ]; then
-            sudo apt-get update
-            sudo apt-get install -y bats
-          elif [ "$RUNNER_OS" == "macOS" ]; then
-            brew install bats-core
-          fi
+          # npm ships bats-core and is preinstalled on every runner image.
+          # apt-get/brew were stalling for 20-30 minutes at a time on this step.
+          sudo npm install -g bats
 
       - name: Make script executable
         run: chmod +x gh-commit-ai
@@ -50,12 +50,9 @@ jobs:
 
       - name: Install Bats
         run: |
-          if [ "$RUNNER_OS" == "Linux" ]; then
-            sudo apt-get update
-            sudo apt-get install -y bats
-          elif [ "$RUNNER_OS" == "macOS" ]; then
-            brew install bats-core
-          fi
+          # npm ships bats-core and is preinstalled on every runner image.
+          # apt-get/brew were stalling for 20-30 minutes at a time on this step.
+          sudo npm install -g bats
 
       - name: Make script executable
         run: chmod +x gh-commit-ai
@@ -88,8 +85,7 @@ jobs:
 
       - name: Install Bats
         run: |
-          sudo apt-get update
-          sudo apt-get install -y bats
+          sudo npm install -g bats
 
       - name: Make script executable
         run: chmod +x gh-commit-ai
@@ -112,8 +108,7 @@ jobs:
 
       - name: Install Bats
         run: |
-          sudo apt-get update
-          sudo apt-get install -y bats
+          sudo npm install -g bats
 
       - name: Make script executable
         run: chmod +x gh-commit-ai
@@ -140,8 +135,7 @@ jobs:
 
       - name: Install Bats
         run: |
-          sudo apt-get update
-          sudo apt-get install -y bats
+          sudo npm install -g bats
 
       - name: Make script executable
         run: chmod +x gh-commit-ai
@@ -164,8 +158,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install shellcheck
-        run: sudo apt-get update && sudo apt-get install -y shellcheck
+      # shellcheck is preinstalled on the ubuntu runner image; only install it
+      # if that ever stops being true. Avoids another apt-get on the hot path.
+      - name: Ensure shellcheck
+        run: |
+          command -v shellcheck >/dev/null 2>&1 \
+            || { sudo apt-get update && sudo apt-get install -y shellcheck; }
+          shellcheck --version
 
       - name: Run shellcheck
         run: shellcheck -x gh-commit-ai || true
@@ -182,8 +181,7 @@ jobs:
 
       - name: Install Bats
         run: |
-          sudo apt-get update
-          sudo apt-get install -y bats
+          sudo npm install -g bats
 
       - name: Make script executable
         run: chmod +x gh-commit-ai

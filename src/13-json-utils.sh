@@ -1,6 +1,31 @@
-# Escape JSON strings (replace backslash, double quote, newline, carriage return, tab)
+# Escape a string for embedding in JSON.
+#
+# The sed pass handles backslash, double quote, CR and tab; the awk pass joins
+# lines with \n and escapes every remaining control character as \uXXXX. That
+# last part matters: RFC 8259 requires all of U+0000-U+001F to be escaped, and
+# emitting a raw one (ESC is the common case - captured terminal output, ANSI
+# logs, some binaries) produced invalid JSON and an opaque provider 400 with
+# nothing pointing at the cause.
+#
+# LC_ALL=C keeps awk byte-oriented, so multibyte UTF-8 passes through untouched.
 escape_json() {
-    echo "$1" | sed 's/\\/\\\\/g; s/"/\\"/g; s/\n/\\n/g; s/\r/\\r/g; s/\t/\\t/g' | awk '{printf "%s\\n", $0}' | sed '$ s/\\n$//'
+    echo "$1" \
+        | sed 's/\\/\\\\/g; s/"/\\"/g; s/\r/\\r/g; s/\t/\\t/g' \
+        | LC_ALL=C awk '
+            BEGIN {
+                for (i = 1; i <= 31; i++) ctrl[sprintf("%c", i)] = sprintf("\\u%04x", i)
+            }
+            {
+                out = ""
+                n = length($0)
+                for (i = 1; i <= n; i++) {
+                    c = substr($0, i, 1)
+                    out = out (c in ctrl ? ctrl[c] : c)
+                }
+                printf "%s\\n", out
+            }
+        ' \
+        | sed '$ s/\\n$//'
 }
 
 # Unescape JSON strings (handle unicode escapes like \u0026)

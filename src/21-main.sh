@@ -205,7 +205,7 @@ fi
 # Handle multiple options mode
 if [ "$MULTIPLE_OPTIONS" = "true" ]; then
     # Clean up any existing temp files
-    rm -f /tmp/option_*.txt /tmp/reasoning_*.txt /tmp/ai_recommendation.txt 2>/dev/null
+    rm -f "$OPTIONS_DIR"/option_*.txt "$OPTIONS_DIR"/reasoning_*.txt "$OPTIONS_DIR/ai_recommendation.txt" 2>/dev/null
 
     # Parse options from response
     num_options=$(parse_multiple_options "$COMMIT_MSG")
@@ -213,10 +213,10 @@ if [ "$MULTIPLE_OPTIONS" = "true" ]; then
     # Enforce lowercase on each option (unless disabled)
     if [ "$NO_LOWERCASE" != "true" ]; then
         for i in $(seq 1 $num_options); do
-            if [ -f "/tmp/option_${i}.txt" ]; then
-                option_content=$(cat "/tmp/option_${i}.txt")
+            if [ -f "$OPTIONS_DIR/option_${i}.txt" ]; then
+                option_content=$(cat "$OPTIONS_DIR/option_${i}.txt")
                 lowercased=$(enforce_lowercase "$option_content")
-                echo "$lowercased" > "/tmp/option_${i}.txt"
+                echo "$lowercased" > "$OPTIONS_DIR/option_${i}.txt"
             fi
         done
     fi
@@ -224,10 +224,10 @@ if [ "$MULTIPLE_OPTIONS" = "true" ]; then
     # Auto-fix common formatting issues on each option (unless disabled)
     if [ "$AUTO_FIX" = "true" ]; then
         for i in $(seq 1 $num_options); do
-            if [ -f "/tmp/option_${i}.txt" ]; then
-                option_content=$(cat "/tmp/option_${i}.txt")
+            if [ -f "$OPTIONS_DIR/option_${i}.txt" ]; then
+                option_content=$(cat "$OPTIONS_DIR/option_${i}.txt")
                 fixed=$(auto_fix_message "$option_content")
-                echo "$fixed" > "/tmp/option_${i}.txt"
+                echo "$fixed" > "$OPTIONS_DIR/option_${i}.txt"
             fi
         done
     fi
@@ -237,10 +237,10 @@ if [ "$MULTIPLE_OPTIONS" = "true" ]; then
         PROJECT_TYPE=$(detect_project_type)
         TEMPLATE=$(load_template "$PROJECT_TYPE")
         for i in $(seq 1 $num_options); do
-            if [ -f "/tmp/option_${i}.txt" ]; then
-                option_content=$(cat "/tmp/option_${i}.txt")
+            if [ -f "$OPTIONS_DIR/option_${i}.txt" ]; then
+                option_content=$(cat "$OPTIONS_DIR/option_${i}.txt")
                 templated=$(apply_template "$TEMPLATE" "$option_content")
-                echo "$templated" > "/tmp/option_${i}.txt"
+                echo "$templated" > "$OPTIONS_DIR/option_${i}.txt"
             fi
         done
     fi
@@ -263,13 +263,13 @@ if [ "$MULTIPLE_OPTIONS" = "true" ]; then
 
     if [ "$selected" = "cancelled" ]; then
         echo "Commit cancelled"
-        rm -f /tmp/option_*.txt /tmp/reasoning_*.txt /tmp/ai_recommendation.txt 2>/dev/null
+        rm -f "$OPTIONS_DIR"/option_*.txt "$OPTIONS_DIR"/reasoning_*.txt "$OPTIONS_DIR/ai_recommendation.txt" 2>/dev/null
         exit 0
     fi
 
     # Load selected option
-    COMMIT_MSG=$(cat "/tmp/option_${selected}.txt")
-    rm -f /tmp/option_*.txt /tmp/reasoning_*.txt /tmp/ai_recommendation.txt 2>/dev/null
+    COMMIT_MSG=$(cat "$OPTIONS_DIR/option_${selected}.txt")
+    rm -f "$OPTIONS_DIR"/option_*.txt "$OPTIONS_DIR"/reasoning_*.txt "$OPTIONS_DIR/ai_recommendation.txt" 2>/dev/null
 
     # Save to message history
     save_message_history "$COMMIT_MSG"
@@ -369,10 +369,13 @@ EOF
                 exit 1
             fi
         else
-            # Stage all changes if nothing is staged
+            # Stage all changes if nothing is staged. The analysis pass folded
+            # untracked files into the diff for exactly this reason, so what is
+            # staged here is the same set that was summarised and secret-scanned.
             if git diff --cached --quiet; then
-                echo "Staging all changes"
+                echo "Staging all changes:"
                 git add -A
+                git diff --cached --name-only | sed 's/^/  /'
             fi
 
             # Commit with the generated message using HEREDOC for proper newline handling

@@ -166,9 +166,8 @@ teardown() {
     git add file.txt
     git commit -m "initial commit"
 
-    echo "new auth feature" > src/auth.js
     mkdir -p src
-    mv src/auth.js src/ 2>/dev/null || true
+    echo "new auth feature" > src/auth.js
     git add src/auth.js
 
     export AI_PROVIDER="ollama"

@@ -35,20 +35,34 @@ if [ "$AMEND" = true ]; then
     stats_file=$(create_secure_temp_file "gh-commit-ai-stats") || { rm -f "$status_file"; exit 1; }
     diff_file=$(create_secure_temp_file "gh-commit-ai-diff") || { rm -f "$status_file" "$stats_file"; exit 1; }
     size_file=$(create_secure_temp_file "gh-commit-ai-size") || { rm -f "$status_file" "$stats_file" "$diff_file"; exit 1; }
+    # Explicitly removed further down on the happy path; registering them as
+    # well is what cleans them up when the run is interrupted instead.
+    register_temp_path "$status_file"
+    register_temp_path "$stats_file"
+    register_temp_path "$diff_file"
+    register_temp_path "$size_file"
 
     # Get the changes from the last commit with loading animation (optimized - minimal git calls)
     (
         # Get all needed data with just two git calls (show for diff, numstat for stats)
         SHOW_OUTPUT=$(eval "git show --numstat HEAD $GIT_EXCLUDE_PATTERN")
 
-        # Extract stats from numstat output (before the diff starts)
-        GIT_STATS=$(echo "$SHOW_OUTPUT" | awk '/^[0-9]+\t[0-9]+\t/ {print $3}' | head -10 | awk '{print "M " $0}')
+        # Isolate the numstat header lines that precede the diff. Both the file
+        # list and the size come from these, so parse them once.
+        NUMSTAT_DATA=$(echo "$SHOW_OUTPUT" | awk '/^[0-9]+\t[0-9]+\t/ {print}')
+
+        # Extract stats from numstat output (before the diff starts). numstat is
+        # "added<TAB>deleted<TAB>path", so cut -f3- keeps paths containing spaces
+        # intact; awk '{print $3}' would truncate them at the first space.
+        GIT_STATS=$(echo "$NUMSTAT_DATA" | cut -f3- | head -10 | sed 's/^/M /')
 
         # Extract full diff (after numstat section)
         FULL_DIFF=$(echo "$SHOW_OUTPUT" | awk '/^diff --git/,0')
 
-        # Extract file list for status
-        GIT_STATUS=$(echo "$SHOW_OUTPUT" | awk '/^diff --git/ {print "M " $4}' | sed 's|^M b/|M |')
+        # Extract file list for status. Derived from numstat rather than the
+        # "diff --git a/x b/x" header, whose fields are unparseable once a path
+        # contains a space.
+        GIT_STATUS=$(echo "$NUMSTAT_DATA" | cut -f3- | sed 's/^/M /')
 
         # Calculate effective max lines (adaptive or user-specified)
         effective_max_lines="$DIFF_MAX_LINES"
@@ -59,7 +73,7 @@ if [ "$AMEND" = true ]; then
         GIT_DIFF=$(smart_sample_diff "$FULL_DIFF" "$effective_max_lines")
 
         # Calculate commit size (lines added + deleted) from numstat
-        COMMIT_SIZE=$(echo "$SHOW_OUTPUT" | awk '/^[0-9]+\t[0-9]+\t/ {added+=$1; deleted+=$2} END {print added+deleted}')
+        COMMIT_SIZE=$(echo "$NUMSTAT_DATA" | awk '{added+=$1; deleted+=$2} END {print added+deleted}')
 
         # Export to temp file for parent process
         echo "$GIT_STATUS" > "$status_file"
@@ -96,6 +110,12 @@ else
     stats_file=$(create_secure_temp_file "gh-commit-ai-stats") || { rm -f "$status_file"; exit 1; }
     diff_file=$(create_secure_temp_file "gh-commit-ai-diff") || { rm -f "$status_file" "$stats_file"; exit 1; }
     size_file=$(create_secure_temp_file "gh-commit-ai-size") || { rm -f "$status_file" "$stats_file" "$diff_file"; exit 1; }
+    # Explicitly removed further down on the happy path; registering them as
+    # well is what cleans them up when the run is interrupted instead.
+    register_temp_path "$status_file"
+    register_temp_path "$stats_file"
+    register_temp_path "$diff_file"
+    register_temp_path "$size_file"
 
     # Get git status and diff with loading animation (optimized - minimal git calls)
     (
@@ -112,17 +132,37 @@ else
         # Extract numstat data (header lines before the diff)
         NUMSTAT_DATA=$(echo "$FULL_NUMSTAT_OUTPUT" | awk '/^[0-9]+\t[0-9]+\t/ {print}')
 
-        # Generate GIT_STATUS from numstat data (avoids separate git status call)
-        GIT_STATUS=$(echo "$NUMSTAT_DATA" | awk '{print "M " $3}')
+        # Generate GIT_STATUS from numstat data (avoids separate git status call).
+        # numstat is "added<TAB>deleted<TAB>path", so cut -f3- keeps the whole path -
+        # awk '{print $3}' would truncate "Screen Shot.png" at the first space.
+        GIT_STATUS=$(echo "$NUMSTAT_DATA" | cut -f3- | sed 's/^/M /')
 
         # Extract file list for GIT_STATS (first 10 files)
-        GIT_STATS=$(echo "$NUMSTAT_DATA" | awk '{print $3}' | head -10 | awk '{print "M " $0}')
+        GIT_STATS=$(echo "$NUMSTAT_DATA" | cut -f3- | head -10 | sed 's/^/M /')
 
         # Get full diff for AI (single call)
         if [ "$IS_STAGED" = "true" ]; then
             FULL_DIFF=$(eval "git diff --cached $GIT_EXCLUDE_PATTERN" 2>/dev/null)
         else
             FULL_DIFF=$(eval "git diff $GIT_EXCLUDE_PATTERN" 2>/dev/null)
+
+            # Nothing is staged, so the commit path will run `git add -A` and
+            # sweep up untracked files too. Fold them into the diff now so they
+            # are described in the message and seen by the secret scanner,
+            # rather than riding along invisibly.
+            UNTRACKED_DIFF=$(untracked_files_diff)
+            if [ -n "$UNTRACKED_DIFF" ]; then
+                FULL_DIFF="${FULL_DIFF}
+${UNTRACKED_DIFF}"
+            fi
+
+            UNTRACKED_LIST=$(untracked_files_list)
+            if [ -n "$UNTRACKED_LIST" ]; then
+                GIT_STATUS="${GIT_STATUS}
+$(echo "$UNTRACKED_LIST" | sed 's/^/A /')"
+                GIT_STATS="$(echo "${GIT_STATS}
+$(echo "$UNTRACKED_LIST" | sed 's/^/A /')" | head -10)"
+            fi
         fi
         # Calculate effective max lines (adaptive or user-specified)
         effective_max_lines="$DIFF_MAX_LINES"
