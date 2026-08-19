@@ -114,6 +114,16 @@ use_gitmoji: false
 # Note: Case conversion is handled separately by enforce_lowercase()
 auto_fix: true
 
+# Staged-file formatting auto-fix (distinct from auto_fix above, which only
+# touches the generated message). Detects trailing whitespace, wrong line
+# endings and missing final newlines in staged files before generating the
+# message, and re-stages anything it repairs.
+# auto_fix_formatting: false        # true = fix silently, false = ask first
+# auto_fix_trailing_whitespace: false
+# auto_fix_line_endings: true
+# auto_fix_final_newline: true
+# line_ending_style: lf             # "lf" (Unix) or "crlf" (Windows)
+
 # Performance Configuration
 # Maximum number of diff lines to send to AI
 # Default: 200

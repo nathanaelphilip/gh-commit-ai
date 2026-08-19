@@ -101,6 +101,10 @@ else
         exit 0
     fi
 
+    # Check and optionally fix formatting issues. Runs before analysis so any
+    # re-staged fixes are part of the diff the message describes.
+    check_and_fix_formatting
+
     # There is work to summarise, so a provider will definitely be needed. Fail
     # here rather than after the analysis passes have already burned time.
     require_ai_provider
@@ -571,7 +575,7 @@ detect_wordpress_plugin_update() {
             local plugin_name="${BASH_REMATCH[1]}"
 
             # Add plugin name to array if not already there
-            if [[ ! " ${plugin_names[@]} " =~ " ${plugin_name} " ]]; then
+            if [[ ! " ${plugin_names[*]} " =~ " ${plugin_name} " ]]; then
                 plugin_names+=("$plugin_name")
             fi
 
@@ -583,7 +587,7 @@ detect_wordpress_plugin_update() {
             local theme_name="${BASH_REMATCH[1]}"
 
             # Add theme name to array if not already there
-            if [[ ! " ${theme_names[@]} " =~ " ${theme_name} " ]]; then
+            if [[ ! " ${theme_names[*]} " =~ " ${theme_name} " ]]; then
                 theme_names+=("$theme_name")
             fi
 

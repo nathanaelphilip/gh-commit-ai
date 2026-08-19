@@ -35,8 +35,18 @@ measure() {
 # Create test scenario
 echo -e "${YELLOW}Setting up test scenario...${NC}"
 
-# Save current state
-STASH_OUTPUT=$(git stash push -m "benchmark-temp" 2>&1 || echo "")
+# Refuse to run against a dirty tree rather than stashing.
+#
+# This used to `git stash push` here and `git stash pop` at the end. The stash
+# stack is shared across every worktree of a repository, so a bare pop can
+# restore an entirely different session's work - and if the benchmark died in
+# between, the user's changes were left stashed with no indication.
+if [ -n "$(git status --porcelain)" ]; then
+    echo "Error: benchmark needs a clean working tree." >&2
+    echo "Commit or set aside your changes first - this script will not stash them" >&2
+    echo "for you, because the stash stack is shared between worktrees." >&2
+    exit 1
+fi
 
 # Create a test file
 TEST_FILE=".benchmark_test_$$"
@@ -115,10 +125,8 @@ echo -e "${YELLOW}Cleaning up...${NC}"
 git reset HEAD "$TEST_FILE" >/dev/null 2>&1 || true
 rm -f "$TEST_FILE"
 
-# Restore stash if we created one
-if [[ "$STASH_OUTPUT" != "No local changes to save" ]] && [[ -n "$STASH_OUTPUT" ]]; then
-    git stash pop >/dev/null 2>&1 || true
-fi
+# Nothing to restore: the run refuses to start unless the tree was already
+# clean, so only the test file created above needed removing.
 
 echo -e "${GREEN}Done!${NC}\n"
 

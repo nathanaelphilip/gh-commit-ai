@@ -43,7 +43,10 @@ echo ""
 echo "Test 3: Checking provider functions use retry..."
 providers=("ollama" "anthropic" "openai" "groq")
 for provider in "${providers[@]}"; do
-    if grep -A 30 "call_${provider}()" ./gh-commit-ai | grep -q "retry_api_call"; then
+    # Scan the whole function body, not a fixed window. This used to be
+    # `grep -A 30`, which started failing purely because call_ollama grew past
+    # 30 lines - its retry_api_call sits around line 79.
+    if awk "/^call_${provider}\(\)/,/^}/" ./gh-commit-ai | grep -q "retry_api_call"; then
         echo -e "${GREEN}✓${NC} call_${provider} uses retry_api_call"
     else
         echo -e "${RED}✗ FAIL: call_${provider} doesn't use retry_api_call${NC}"

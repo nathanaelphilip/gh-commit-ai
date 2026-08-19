@@ -20,14 +20,23 @@ jobs:
       - name: Validate bash syntax
         run: bash -n gh-commit-ai
 
+      # The committed script is generated from src/. Releasing one that no
+      # longer matches its sources ships whatever drift crept into the built
+      # file, so gate the tag on them agreeing.
+      - name: Verify src/ matches the built script
+        run: make verify-sync
+
+      - name: Install Bats
+        run: sudo apt-get update && sudo apt-get install -y bats
+
+      # This used to be a hand-maintained list that named
+      # tests/test_core_functions.sh - a file that does not exist (it is
+      # .bats). GitHub run: blocks use `bash -eo pipefail`, so that line exited
+      # 127 and aborted the job before any of the other four suites ran, which
+      # meant every tag push failed here. `make test` runs both suites and
+      # cannot drift out of date the same way.
       - name: Run test suite
-        run: |
-          chmod +x tests/*.sh
-          bash tests/test_core_functions.sh
-          bash tests/test_retry_logic.sh
-          bash tests/test_message_history_isolation.sh
-          bash tests/test_auto_fix.sh
-          bash tests/test_commit_split.sh
+        run: make test
 
   release:
     name: Create Release
