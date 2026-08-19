@@ -62,11 +62,27 @@ enforce_lowercase() {
     # Restore common acronyms (case-insensitive search and replace)
     local acronyms="API HTTP HTTPS JSON XML SQL JWT OAuth REST CLI UI UX CSS HTML JS TS URL URI PDF CSV IDE SDK CI CD AWS GCP DNS SSL TLS SSH FTP SMTP TCP UDP IP DOM npm NPM README TODO FIXME"
 
-    for acronym in $acronyms; do
-        local lowercase_acronym=$(echo "$acronym" | tr '[:upper:]' '[:lower:]')
-        # Use word boundaries to avoid partial matches
-        temp_message=$(echo "$temp_message" | sed "s/\b$lowercase_acronym\b/$acronym/g")
-    done
+    # Restore them in a single awk pass over whole words. This used to be a loop
+    # of sed calls using \b, which is a GNU extension: BSD sed (macOS) silently
+    # ignores it, so every acronym stayed lowercased there.
+    temp_message=$(echo "$temp_message" | ACRONYMS="$acronyms" awk '
+        BEGIN {
+            n = split(ENVIRON["ACRONYMS"], list, " ")
+            for (i = 1; i <= n; i++) canonical[tolower(list[i])] = list[i]
+        }
+        {
+            out = ""
+            rest = $0
+            while (match(rest, /[A-Za-z0-9]+/)) {
+                word = substr(rest, RSTART, RLENGTH)
+                key = tolower(word)
+                if (key in canonical) word = canonical[key]
+                out = out substr(rest, 1, RSTART - 1) word
+                rest = substr(rest, RSTART + RLENGTH)
+            }
+            print out rest
+        }
+    ')
 
     echo "$temp_message"
 }
