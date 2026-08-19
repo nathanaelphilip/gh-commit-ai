@@ -3,8 +3,11 @@ name: Tests
 on:
   push:
     branches: [ main, develop ]
+  # Deliberately unfiltered: `branches: [main, develop]` here means a PR that
+  # targets anything else gets NO checks at all, silently. A stack of dependent
+  # PRs - each based on the one below it rather than on main - therefore merged
+  # entirely unverified, which is the opposite of what this workflow is for.
   pull_request:
-    branches: [ main, develop ]
 
 jobs:
   unit-tests:
