@@ -248,10 +248,9 @@ EOF
     git commit -m "initial"
 
     # Add only documentation
+    mkdir -p docs
     echo "# Documentation" > README.md
     echo "# API Docs" > docs/api.md
-    mkdir -p docs
-    mv docs/api.md docs/ 2>/dev/null || true
     git add README.md docs/api.md
 
     # Smart detection should suggest "docs" type
