@@ -60,10 +60,11 @@ openai_model: gpt-4o-mini
 
 # Groq Configuration
 # Model to use when ai_provider is groq
-# Default: llama-3.3-70b-versatile
-# Options: llama-3.3-70b-versatile, llama-3.1-8b-instant, mixtral-8x7b-32768, gemma2-9b-it
+# Default: openai/gpt-oss-120b
+# Options: openai/gpt-oss-120b, openai/gpt-oss-20b, qwen/qwen3.6-27b, groq/compound-mini
 # Note: Groq offers ultra-fast inference with generous free tier
-groq_model: llama-3.3-70b-versatile
+# Note: the llama-3.x and mixtral models were decommissioned by Groq
+groq_model: openai/gpt-oss-120b
 
 # Language Configuration
 # Generate commit messages in your preferred language
@@ -172,7 +173,7 @@ stream_enabled: auto
 # Provider-specific analysis models (when analysis_provider differs)
 # analysis_anthropic_model: claude-3-5-sonnet-20241022
 # analysis_openai_model: gpt-4o
-# analysis_groq_model: llama-3.3-70b-versatile
+# analysis_groq_model: openai/gpt-oss-120b
 #
 # Stage 2 (synthesis) always uses your default model
 # (ollama_model, anthropic_model, openai_model, or groq_model)

@@ -718,9 +718,9 @@ Provide your review:"
                 echo -e "${BLUE}Using $AI_PROVIDER model: $current_model${NC}" >&2
 
                 # Recommend larger models for code review if using smaller models
-                if [[ "$current_model" =~ (llama-3.1-8b|gemma2-9b|mixtral-8x7b) ]]; then
-                    echo -e "${YELLOW}💡 Tip: For more thorough code reviews, consider using llama-3.3-70b-versatile${NC}" >&2
-                    echo -e "${YELLOW}   CODE_REVIEW_GROQ_MODEL=\"llama-3.3-70b-versatile\"${NC}" >&2
+                if [[ "$current_model" =~ (gpt-oss-20b|compound-mini) ]]; then
+                    echo -e "${YELLOW}💡 Tip: For more thorough code reviews, consider using openai/gpt-oss-120b${NC}" >&2
+                    echo -e "${YELLOW}   CODE_REVIEW_GROQ_MODEL=\"openai/gpt-oss-120b\"${NC}" >&2
                     echo "" >&2
                 fi
                 ;;

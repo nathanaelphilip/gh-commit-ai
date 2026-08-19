@@ -224,7 +224,7 @@ Add feature requests from users here as they come in.
   - [x] Auto-detection and provider priority
   - [x] Code review model support
   - [x] Documentation and examples
-  - [x] Default model: llama-3.3-70b-versatile
+  - [x] Default model: openai/gpt-oss-120b
   - [x] Free tier: 100 requests/minute
 - [ ] **Cohere** - Add Cohere Command models
 - [ ] **Mistral AI** - Support Mistral API
