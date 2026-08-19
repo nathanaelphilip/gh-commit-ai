@@ -294,6 +294,42 @@ check_host_reachability() {
     return 1
 }
 
+# Explain an already-failed API call in network terms.
+#
+# These two lookups used to run *before* every cloud request, which cost two
+# forked processes and up to two DNS round trips (or a 2s ping timeout where
+# neither host(1) nor nslookup exists) on every successful call - while telling
+# the user nothing that curl's own exit codes, already mapped to friendly text
+# in retry_api_call, did not cover. Running them only after a failure keeps the
+# better error message and takes the cost off the success path.
+#
+# Usage: diagnose_network_failure <provider_label> <hostname>
+diagnose_network_failure() {
+    local provider="$1"
+    local host="$2"
+
+    if ! check_network_connectivity; then
+        show_offline_error "$provider"
+        return 0
+    fi
+
+    if ! check_host_reachability "$host"; then
+        echo -e "${RED}Error: Cannot reach $provider API${NC}" >&2
+        echo "" >&2
+        echo "The API endpoint $host is not reachable." >&2
+        echo "Possible causes:" >&2
+        echo "  • $provider service is down" >&2
+        echo "  • Firewall or network filtering" >&2
+        echo "  • DNS issues" >&2
+        echo "" >&2
+        echo "Try:" >&2
+        echo "  • Use a different provider (export AI_PROVIDER=groq or ollama)" >&2
+        return 0
+    fi
+
+    return 1
+}
+
 # Display offline mode error with helpful suggestions
 show_offline_error() {
     local provider="$1"

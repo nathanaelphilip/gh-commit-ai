@@ -62,38 +62,50 @@ smart_sample_diff() {
     }
     > "$priority_file"
 
+    # Every pass below uses `grep -n`, so each selected line is kept as
+    # "<lineno>:<content>". Those numbers are what let the final sort put the
+    # sample back into diff order - see the note at the bottom.
+
     # Priority 1: File headers and chunk headers (MUST keep)
-    grep -E '^(diff --git|index |---|\+\+\+|@@)' "$temp_file" >> "$priority_file" 2>/dev/null || true
+    grep -nE '^(diff --git|index |---|\+\+\+|@@)' "$temp_file" >> "$priority_file" 2>/dev/null || true
 
     # Priority 2: Function/class definitions (HIGH priority)
-    grep -E '^\+.*(function |def |class |const |export |public |private |func )' "$temp_file" >> "$priority_file" 2>/dev/null || true
+    grep -nE '^\+.*(function |def |class |const |export |public |private |func )' "$temp_file" >> "$priority_file" 2>/dev/null || true
 
     # Priority 3: Added lines (MEDIUM-HIGH priority)
     # Sample added lines evenly throughout the diff
-    local added_lines=$(grep -n '^\+[^+]' "$temp_file" | wc -l | tr -d ' ')
+    local added_lines=$(grep -c '^\+[^+]' "$temp_file" 2>/dev/null || echo 0)
     if [ "$added_lines" -gt 0 ]; then
         # Calculate sample rate to get ~40% of max_lines from added lines
         local target_added=$((max_lines * 40 / 100))
         local sample_rate=$((added_lines / target_added + 1))
 
-        grep -n '^\+[^+]' "$temp_file" | awk -v rate="$sample_rate" 'NR % rate == 1' | cut -d: -f1 | while read line_num; do
-            sed -n "${line_num}p" "$temp_file" >> "$priority_file"
-        done
+        # One awk pass over the grep output. This used to pipe each sampled line
+        # number into its own `sed -n "Np"`, which forked a process per sample
+        # and rescanned the file from the top every time - ~375 processes and
+        # around a million redundant line reads on a 3000-line diff.
+        grep -n '^\+[^+]' "$temp_file" | awk -v rate="$sample_rate" 'NR % rate == 1' >> "$priority_file" 2>/dev/null || true
     fi
 
     # Priority 4: Context lines around changes (MEDIUM priority)
     # Get a few context lines for readability
-    grep -E '^ [a-zA-Z]' "$temp_file" | head -n $((max_lines * 20 / 100)) >> "$priority_file" 2>/dev/null || true
+    grep -nE '^ [a-zA-Z]' "$temp_file" | head -n $((max_lines * 20 / 100)) >> "$priority_file" 2>/dev/null || true
 
     # Priority 5: Deleted lines (LOW priority) - only sample if we have room
-    local current_count=$(cat "$priority_file" | wc -l | tr -d ' ')
+    local current_count=$(wc -l < "$priority_file" | tr -d ' ')
     if [ "$current_count" -lt "$max_lines" ]; then
         local remaining=$((max_lines - current_count))
-        grep -E '^\-[^-]' "$temp_file" | head -n $((remaining / 2)) >> "$priority_file" 2>/dev/null || true
+        grep -nE '^\-[^-]' "$temp_file" | head -n $((remaining / 2)) >> "$priority_file" 2>/dev/null || true
     fi
 
-    # Sort by line number to maintain diff structure, remove duplicates, and limit
-    cat "$priority_file" | sort -u | head -n "$max_lines"
+    # Restore diff order, drop lines picked by more than one pass, and cap.
+    #
+    # This previously ran `sort -u` over the raw diff lines. The comment claimed
+    # it sorted by line number, but the lines carried no line numbers, so it
+    # actually sorted them ALPHABETICALLY - every diff large enough to be
+    # sampled reached the model with its hunks shuffled out of order. Sorting on
+    # the numeric "<lineno>:" key fixes that; `cut` strips the key afterwards.
+    sort -t: -k1,1n -u "$priority_file" | head -n "$max_lines" | cut -d: -f2-
 
     # Cleanup
     rm -f "$temp_file" "$priority_file"

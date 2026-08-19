@@ -6,27 +6,9 @@ call_groq() {
         exit 1
     fi
 
-    # Check network connectivity before making API call
-    if ! check_network_connectivity; then
-        show_offline_error "Groq"
-        exit 1
-    fi
-
-    # Check if Groq API is reachable
-    if ! check_host_reachability "api.groq.com"; then
-        echo -e "${RED}Error: Cannot reach Groq API${NC}" >&2
-        echo "" >&2
-        echo "The API endpoint api.groq.com is not reachable." >&2
-        echo "Possible causes:" >&2
-        echo "  • Groq service is down" >&2
-        echo "  • Firewall or network filtering" >&2
-        echo "  • DNS issues" >&2
-        echo "" >&2
-        echo "Try:" >&2
-        echo "  • Check service status: https://status.groq.com/" >&2
-        echo "  • Use a different provider (export AI_PROVIDER=ollama)" >&2
-        exit 1
-    fi
+    # Connectivity is not probed up front - curl resolves and connects anyway,
+    # and retry_api_call already turns its exit codes into readable errors.
+    # diagnose_network_failure runs on the failure path instead.
 
     local prompt_escaped=$(escape_json "$prompt")
 
@@ -111,6 +93,13 @@ call_groq() {
 
     # Check for final failure after all retries
     if [ -z "$response" ]; then
+        # Only now is it worth two DNS lookups to distinguish "offline" from
+        # "host unreachable" from "the API just failed".
+        if diagnose_network_failure "Groq" "api.groq.com"; then
+            rm -f "$temp_response" "$temp_error" "${temp_response}.exit"
+            return 1
+        fi
+
         echo -e "${RED}Error: Failed to get response from Groq after $MAX_RETRIES attempts${NC}" >&2
         echo "" >&2
         echo "All retry attempts exhausted. Possible causes:" >&2
