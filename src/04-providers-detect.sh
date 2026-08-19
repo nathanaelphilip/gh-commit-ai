@@ -87,6 +87,31 @@ get_best_ollama_model() {
     echo "$models" | head -1 | tee "$cache_file"
 }
 
+# Fail only when a provider is actually about to be used. See the comment in the
+# auto-detection block below.
+AI_PROVIDER_UNAVAILABLE=false
+
+require_ai_provider() {
+    [ "$AI_PROVIDER_UNAVAILABLE" = "true" ] || return 0
+
+    echo -e "${RED}Error: No AI providers available${NC}" >&2
+    echo "" >&2
+    echo "Available options:" >&2
+    echo "  1. Install Ollama (free, local): https://ollama.ai" >&2
+    echo "     Then run: ollama pull qwen3:8b" >&2
+    echo "" >&2
+    echo "  2. Set up Groq API (ultra-fast, generous free tier):" >&2
+    echo "     export GROQ_API_KEY=\"gsk-...\"" >&2
+    echo "     Get your key from: https://console.groq.com/keys" >&2
+    echo "" >&2
+    echo "  3. Set up Anthropic API:" >&2
+    echo "     export ANTHROPIC_API_KEY=\"sk-ant-...\"" >&2
+    echo "" >&2
+    echo "  4. Set up OpenAI API:" >&2
+    echo "     export OPENAI_API_KEY=\"sk-proj-...\"" >&2
+    exit 1
+}
+
 # Auto-select provider if set to "auto"
 AUTO_DETECTED=false
 if [ "$AI_PROVIDER" = "auto" ]; then
@@ -94,22 +119,13 @@ if [ "$AI_PROVIDER" = "auto" ]; then
     available_providers=$(detect_available_providers)
 
     if [ -z "$available_providers" ]; then
-        echo -e "${RED}Error: No AI providers available${NC}"
-        echo ""
-        echo "Available options:"
-        echo "  1. Install Ollama (free, local): https://ollama.ai"
-        echo "     Then run: ollama pull qwen3:8b"
-        echo ""
-        echo "  2. Set up Groq API (ultra-fast, generous free tier):"
-        echo "     export GROQ_API_KEY=\"gsk-...\""
-        echo "     Get your key from: https://console.groq.com/keys"
-        echo ""
-        echo "  3. Set up Anthropic API:"
-        echo "     export ANTHROPIC_API_KEY=\"sk-ant-...\""
-        echo ""
-        echo "  4. Set up OpenAI API:"
-        echo "     export OPENAI_API_KEY=\"sk-proj-...\""
-        exit 1
+        # Deliberately not fatal here. This block runs before argument parsing,
+        # so exiting would make --help, --version, "Not a git repository" and
+        # "No changes to commit" all unreachable on a machine that has no
+        # provider configured yet - exactly the machine whose user needs to read
+        # --help. Record it instead and let require_ai_provider fail at the point
+        # where a provider is genuinely needed.
+        AI_PROVIDER_UNAVAILABLE=true
     fi
 
     # Pick the best available provider (prefer local/free first, then fast/free APIs, then paid APIs)

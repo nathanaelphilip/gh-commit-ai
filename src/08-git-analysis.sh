@@ -76,6 +76,10 @@ else
         exit 0
     fi
 
+    # There is work to summarise, so a provider will definitely be needed. Fail
+    # here rather than after the analysis passes have already burned time.
+    require_ai_provider
+
     # Create secure temp files for inter-process communication
     status_file=$(create_secure_temp_file "gh-commit-ai-status") || exit 1
     stats_file=$(create_secure_temp_file "gh-commit-ai-stats") || { rm -f "$status_file"; exit 1; }

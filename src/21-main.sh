@@ -109,6 +109,8 @@ if [ "$RECOVERED_MESSAGE" != "true" ]; then
     else
         cache_debug "No cache hit, calling AI provider: $AI_PROVIDER"
 
+        require_ai_provider
+
         # Call AI provider (with timing for analytics)
         ai_start_time=$(date +%s 2>/dev/null || echo "0")
 
@@ -428,6 +430,7 @@ EOF
         break
     elif [[ $REPLY =~ ^[Rr]$ ]]; then
         # Regenerate the commit message
+        require_ai_provider
         echo "Regenerating commit message..."
         echo ""
 

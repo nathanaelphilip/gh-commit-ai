@@ -988,6 +988,31 @@ get_best_ollama_model() {
     echo "$models" | head -1 | tee "$cache_file"
 }
 
+# Fail only when a provider is actually about to be used. See the comment in the
+# auto-detection block below.
+AI_PROVIDER_UNAVAILABLE=false
+
+require_ai_provider() {
+    [ "$AI_PROVIDER_UNAVAILABLE" = "true" ] || return 0
+
+    echo -e "${RED}Error: No AI providers available${NC}" >&2
+    echo "" >&2
+    echo "Available options:" >&2
+    echo "  1. Install Ollama (free, local): https://ollama.ai" >&2
+    echo "     Then run: ollama pull qwen3:8b" >&2
+    echo "" >&2
+    echo "  2. Set up Groq API (ultra-fast, generous free tier):" >&2
+    echo "     export GROQ_API_KEY=\"gsk-...\"" >&2
+    echo "     Get your key from: https://console.groq.com/keys" >&2
+    echo "" >&2
+    echo "  3. Set up Anthropic API:" >&2
+    echo "     export ANTHROPIC_API_KEY=\"sk-ant-...\"" >&2
+    echo "" >&2
+    echo "  4. Set up OpenAI API:" >&2
+    echo "     export OPENAI_API_KEY=\"sk-proj-...\"" >&2
+    exit 1
+}
+
 # Auto-select provider if set to "auto"
 AUTO_DETECTED=false
 if [ "$AI_PROVIDER" = "auto" ]; then
@@ -995,22 +1020,13 @@ if [ "$AI_PROVIDER" = "auto" ]; then
     available_providers=$(detect_available_providers)
 
     if [ -z "$available_providers" ]; then
-        echo -e "${RED}Error: No AI providers available${NC}"
-        echo ""
-        echo "Available options:"
-        echo "  1. Install Ollama (free, local): https://ollama.ai"
-        echo "     Then run: ollama pull qwen3:8b"
-        echo ""
-        echo "  2. Set up Groq API (ultra-fast, generous free tier):"
-        echo "     export GROQ_API_KEY=\"gsk-...\""
-        echo "     Get your key from: https://console.groq.com/keys"
-        echo ""
-        echo "  3. Set up Anthropic API:"
-        echo "     export ANTHROPIC_API_KEY=\"sk-ant-...\""
-        echo ""
-        echo "  4. Set up OpenAI API:"
-        echo "     export OPENAI_API_KEY=\"sk-proj-...\""
-        exit 1
+        # Deliberately not fatal here. This block runs before argument parsing,
+        # so exiting would make --help, --version, "Not a git repository" and
+        # "No changes to commit" all unreachable on a machine that has no
+        # provider configured yet - exactly the machine whose user needs to read
+        # --help. Record it instead and let require_ai_provider fail at the point
+        # where a provider is genuinely needed.
+        AI_PROVIDER_UNAVAILABLE=true
     fi
 
     # Pick the best available provider (prefer local/free first, then fast/free APIs, then paid APIs)
@@ -1577,6 +1593,8 @@ Be specific and practical."
 call_ai_for_split() {
     local prompt="$1"
 
+    require_ai_provider
+
     # Detect and use available AI provider
     if [ "$AI_PROVIDER" = "auto" ]; then
         detect_available_providers > /dev/null
@@ -1774,6 +1792,8 @@ Provide your review:"
         esac
     fi
 
+    require_ai_provider
+
     # Call AI provider for review
     local review_result
     case "$AI_PROVIDER" in
@@ -1963,6 +1983,8 @@ FORMAT:
     echo "→ Analyzing $num_commits commits on branch: $current_branch" >&2
     echo "→ Comparing against: $base_branch" >&2
     echo "" >&2
+
+    require_ai_provider
 
     # Call AI to generate PR description
     local pr_description=""
@@ -3542,6 +3564,10 @@ else
         echo "No changes to commit"
         exit 0
     fi
+
+    # There is work to summarise, so a provider will definitely be needed. Fail
+    # here rather than after the analysis passes have already burned time.
+    require_ai_provider
 
     # Create secure temp files for inter-process communication
     status_file=$(create_secure_temp_file "gh-commit-ai-status") || exit 1
@@ -7515,6 +7541,8 @@ if [ "$RECOVERED_MESSAGE" != "true" ]; then
     else
         cache_debug "No cache hit, calling AI provider: $AI_PROVIDER"
 
+        require_ai_provider
+
         # Call AI provider (with timing for analytics)
         ai_start_time=$(date +%s 2>/dev/null || echo "0")
 
@@ -7834,6 +7862,7 @@ EOF
         break
     elif [[ $REPLY =~ ^[Rr]$ ]]; then
         # Regenerate the commit message
+        require_ai_provider
         echo "Regenerating commit message..."
         echo ""
 

@@ -541,6 +541,8 @@ Be specific and practical."
 call_ai_for_split() {
     local prompt="$1"
 
+    require_ai_provider
+
     # Detect and use available AI provider
     if [ "$AI_PROVIDER" = "auto" ]; then
         detect_available_providers > /dev/null
@@ -738,6 +740,8 @@ Provide your review:"
         esac
     fi
 
+    require_ai_provider
+
     # Call AI provider for review
     local review_result
     case "$AI_PROVIDER" in
@@ -927,6 +931,8 @@ FORMAT:
     echo "→ Analyzing $num_commits commits on branch: $current_branch" >&2
     echo "→ Comparing against: $base_branch" >&2
     echo "" >&2
+
+    require_ai_provider
 
     # Call AI to generate PR description
     local pr_description=""
