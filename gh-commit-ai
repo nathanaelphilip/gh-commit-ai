@@ -13,6 +13,33 @@ NC='\033[0m' # No Color
 # without hiding the progress indicator. Defaults to the real stderr (terminal).
 exec 3>&2
 
+# Paths registered here are removed when the script exits for any reason,
+# including Ctrl-C. Without this, an interrupted run left temp files behind and
+# could orphan the background spinner subshell.
+GH_COMMIT_AI_TEMP_PATHS=()
+
+register_temp_path() {
+    [ -n "$1" ] || return 0
+    GH_COMMIT_AI_TEMP_PATHS+=("$1")
+}
+
+cleanup_temp_paths() {
+    local path
+    for path in "${GH_COMMIT_AI_TEMP_PATHS[@]+"${GH_COMMIT_AI_TEMP_PATHS[@]}"}"; do
+        rm -rf "$path" 2>/dev/null || true
+    done
+    GH_COMMIT_AI_TEMP_PATHS=()
+
+    # Kill a spinner still running in the background on an interrupted run.
+    if [ -n "${STREAM_SPINNER_PID:-}" ]; then
+        kill "$STREAM_SPINNER_PID" 2>/dev/null || true
+    fi
+}
+
+trap cleanup_temp_paths EXIT
+trap 'cleanup_temp_paths; exit 130' INT
+trap 'cleanup_temp_paths; exit 143' TERM
+
 # Simple YAML parser (supports only simple key: value pairs)
 parse_yaml_config() {
     local config_file="$1"
@@ -411,6 +438,26 @@ create_secure_temp_file() {
     echo "$temp_file"
 }
 
+# Create a secure temporary directory with restricted permissions (700)
+# Returns the path to the created directory
+create_secure_temp_dir() {
+    local prefix="${1:-gh-commit-ai}"
+    local temp_dir
+
+    temp_dir=$(mktemp -d "/tmp/${prefix}.XXXXXXXXXX") || {
+        echo -e "${RED}Error: Failed to create secure temporary directory${NC}" >&2
+        return 1
+    }
+
+    chmod 700 "$temp_dir" 2>/dev/null || {
+        echo -e "${RED}Error: Failed to set secure permissions on temporary directory${NC}" >&2
+        rm -rf "$temp_dir"
+        return 1
+    }
+
+    echo "$temp_dir"
+}
+
 # Validate that a parameter is a positive integer
 # Usage: validate_positive_integer <value> <param_name>
 # Returns: 0 if valid, 1 if invalid
@@ -562,6 +609,39 @@ detect_secrets_in_diff() {
     fi
 
     return 0
+}
+
+# List every provider that could receive the diff on this run, excluding the
+# local one. The diff does not only go to $AI_PROVIDER: the two-stage pipeline
+# can route Stage 1 to $ANALYSIS_PROVIDER, and a primary failure can hand the
+# same diff to $FALLBACK_PROVIDER. Gating the secret scan on $AI_PROVIDER alone
+# meant `AI_PROVIDER=ollama` skipped the scan while a cloud analysis or fallback
+# provider still received the raw diff.
+# Output: space-separated provider names, empty if everything stays local.
+cloud_providers_in_play() {
+    local candidates="$AI_PROVIDER"
+
+    if [ "$PIPELINE_ENABLED" = "true" ] && [ -n "$ANALYSIS_PROVIDER" ]; then
+        candidates="$candidates $ANALYSIS_PROVIDER"
+    fi
+
+    if [ "$ENABLE_FALLBACK" = "true" ] && [ -n "$FALLBACK_PROVIDER" ]; then
+        candidates="$candidates $FALLBACK_PROVIDER"
+    fi
+
+    local provider seen="" cloud=""
+    for provider in $candidates; do
+        [ -n "$provider" ] || continue
+        [ "$provider" != "ollama" ] || continue
+        case " $seen " in
+            *" $provider "*) continue ;;
+        esac
+        seen="$seen $provider"
+        cloud="$cloud $provider"
+    done
+
+    # shellcheck disable=SC2086
+    echo $cloud
 }
 
 # Prompt user about detected secrets and handle their choice
@@ -1049,6 +1129,1026 @@ if [ "$AI_PROVIDER" = "auto" ]; then
         AUTO_DETECTED=true
     fi
 fi
+
+# Call Ollama API
+call_ollama() {
+    local prompt="$1"
+
+    # Quick pre-flight check: verify Ollama is reachable
+    if ! curl -s --connect-timeout 2 --max-time 5 "$OLLAMA_HOST/api/tags" >/dev/null 2>&1; then
+        echo -e "${RED}Error: Cannot connect to Ollama at $OLLAMA_HOST${NC}" >&2
+        echo "" >&2
+        echo "Ollama is not responding. Possible causes:" >&2
+        echo "  • Ollama service is not running" >&2
+        echo "  • Wrong OLLAMA_HOST configuration" >&2
+        echo "  • Port conflict or firewall blocking" >&2
+        echo "" >&2
+        echo "Troubleshooting:" >&2
+        echo "  • Start Ollama: ollama serve" >&2
+        echo "  • Check if running: ps aux | grep ollama" >&2
+        echo "  • Verify host: curl $OLLAMA_HOST/api/tags" >&2
+        echo "  • List models: ollama list" >&2
+        echo "" >&2
+        echo "Don't have Ollama? Install from: https://ollama.ai" >&2
+        return 1
+    fi
+
+    local model_escaped=$(escape_json "$OLLAMA_MODEL")
+    local prompt_escaped=$(escape_json "$prompt")
+
+    if [ "$VERBOSE" = "true" ]; then
+        echo "[Verbose] API Endpoint:${NC} $OLLAMA_HOST/api/generate"
+        echo "[Verbose] Model:${NC} $OLLAMA_MODEL"
+    fi
+
+    # Try streaming first
+    if should_stream; then
+        local stream_payload=$(printf '{"model":"%s","prompt":"%s","stream":true,"options":{"num_ctx":%s,"temperature":%s}}' "$model_escaped" "$prompt_escaped" "$OLLAMA_NUM_CTX" "$AI_TEMPERATURE")
+        local stream_output
+        stream_output=$(create_secure_temp_file "gh-commit-ai-stream") || return 1
+
+        if streaming_api_call \
+            "$OLLAMA_HOST/api/generate" \
+            "$stream_payload" \
+            "$stream_output" \
+            parse_ollama_stream \
+            -H "Content-Type: application/json"; then
+
+            local result=$(cat "$stream_output" 2>/dev/null)
+            rm -f "$stream_output" "${stream_output}.input_tokens" "${stream_output}.output_tokens"
+            if [ -n "$result" ]; then
+                unescape_json "$result"
+                return 0
+            fi
+        fi
+
+        # Streaming failed, fall back to non-streaming
+        rm -f "$stream_output" "${stream_output}.input_tokens" "${stream_output}.output_tokens"
+        printf "\r%-80s\r" " " >&3
+        echo "Streaming failed, retrying..." >&2
+    fi
+
+    # Non-streaming path (original behavior)
+    local json_payload=$(printf '{"model":"%s","prompt":"%s","stream":false,"options":{"num_ctx":%s,"temperature":%s}}' "$model_escaped" "$prompt_escaped" "$OLLAMA_NUM_CTX" "$AI_TEMPERATURE")
+
+    if [ "$VERBOSE" = "true" ]; then
+        echo "[Verbose] Request payload:"
+        echo "$json_payload" | jq '.' 2>/dev/null || echo "$json_payload"
+        echo ""
+    fi
+
+    # Run API call with retry logic in background with spinner
+    local temp_response
+    local temp_error
+    temp_response=$(create_secure_temp_file "gh-commit-ai-response") || return 1
+    temp_error=$(create_secure_temp_file "gh-commit-ai-error") || {
+        rm -f "$temp_response"
+        return 1
+    }
+    local exit_code=0
+    (
+        retry_api_call \
+            "$OLLAMA_HOST/api/generate" \
+            "$json_payload" \
+            "$temp_response" \
+            "$temp_error" \
+            "Ollama" \
+            -H "Content-Type: application/json"
+        echo $? > "${temp_response}.exit"
+    ) &
+    local api_pid=$!
+
+    show_spinner "$api_pid" "$SPINNER_MESSAGE"
+    wait "$api_pid"
+
+    exit_code=$(cat "${temp_response}.exit" 2>/dev/null || echo "1")
+
+    # Read response from file
+    local response=$(cat "$temp_response" 2>/dev/null)
+
+    # Check for final failure after all retries
+    if [ -z "$response" ]; then
+        echo -e "${RED}Error: Failed to get response from Ollama after $MAX_RETRIES attempts${NC}" >&2
+        echo "" >&2
+        echo "All retry attempts exhausted. Possible causes:" >&2
+        echo "  • Model '$OLLAMA_MODEL' not found or not loaded" >&2
+        echo "  • Ollama service stopped during request" >&2
+        echo "  • Out of memory (model too large)" >&2
+        echo "  • Request timeout" >&2
+        echo "" >&2
+
+        # Show actual error if available
+        if [ -s "$temp_error" ]; then
+            echo -e "${YELLOW}Error details: $(cat "$temp_error" | head -1)${NC}" >&2
+            echo "" >&2
+        fi
+
+        echo "Troubleshooting:" >&2
+        echo "  • Check if model exists: ollama list" >&2
+        echo "  • Pull model if needed: ollama pull $OLLAMA_MODEL" >&2
+        echo "  • Verify service: curl $OLLAMA_HOST/api/tags" >&2
+        echo "  • Check service status: ps aux | grep ollama" >&2
+        echo "  • Try smaller model: OLLAMA_MODEL=qwen3:4b gh commit-ai" >&2
+        echo "  • Run with verbose mode: gh commit-ai --verbose" >&2
+
+        rm -f "$temp_response" "$temp_error" "${temp_response}.exit"
+        return 1
+    fi
+
+    # Validate response content
+    if ! validate_api_response "$response"; then
+        echo -e "${RED}Error: Invalid response from Ollama${NC}" >&2
+        echo "" >&2
+        echo "The Ollama API returned an unexpected response format." >&2
+        echo "This could indicate:" >&2
+        echo "  • Model compatibility issues" >&2
+        echo "  • Corrupted model installation" >&2
+        echo "  • Ollama version mismatch" >&2
+        echo "" >&2
+        echo "Try:" >&2
+        echo "  • Update Ollama: brew upgrade ollama" >&2
+        echo "  • Reinstall model: ollama rm $OLLAMA_MODEL && ollama pull $OLLAMA_MODEL" >&2
+        echo "  • Run with verbose mode: gh commit-ai --verbose" >&2
+        rm -f "$temp_response" "$temp_error" "${temp_response}.exit"
+        return 1
+    fi
+
+    rm -f "$temp_error" "${temp_response}.exit"
+
+    if [ "$VERBOSE" = "true" ]; then
+        echo "[Verbose] Response:"
+        echo "$response" | jq '.' 2>/dev/null || echo "$response"
+        echo ""
+    fi
+
+    # Check for errors
+    if echo "$response" | grep -q '"error"'; then
+        local error_msg=$(echo "$response" | grep -o '"error":"[^"]*"' | sed 's/"error":"//;s/"$//')
+        echo -e "${RED}Error from Ollama: $error_msg${NC}" >&2
+        echo "" >&2
+
+        # Check if it's a model not found error
+        if echo "$error_msg" | grep -qi "model.*not found\|pull.*model"; then
+            echo -e "Model '${BLUE}$OLLAMA_MODEL${NC}' is not installed." >&2
+            echo "" >&2
+            echo "To fix this, run:" >&2
+            echo -e "  ${GREEN}ollama pull $OLLAMA_MODEL${NC}" >&2
+            echo "" >&2
+            echo "Or use a different model:" >&2
+            echo -e "  ${GREEN}OLLAMA_MODEL=llama3.2 gh commit-ai${NC}" >&2
+        else
+            echo "Troubleshooting:" >&2
+            echo "  - Check available models: ollama list" >&2
+            echo "  - Verify Ollama status: ollama ps" >&2
+            echo "  - Try verbose mode: gh commit-ai --verbose" >&2
+        fi
+        return 1
+    fi
+
+    # Extract commit message from response
+    # Use awk to properly extract JSON string value (handles escaped quotes)
+    local raw_message=$(echo "$response" | awk -F'"response":"' '{
+        if (NF > 1) {
+            str = $2
+            result = ""
+            escaped = 0
+            for (i = 1; i <= length(str); i++) {
+                c = substr(str, i, 1)
+                if (escaped) {
+                    result = result c
+                    escaped = 0
+                } else if (c == "\\") {
+                    result = result c
+                    escaped = 1
+                } else if (c == "\"") {
+                    break
+                } else {
+                    result = result c
+                }
+            }
+            print result
+        }
+    }')
+    unescape_json "$raw_message"
+}
+
+# Call Anthropic API
+call_anthropic() {
+    local prompt="$1"
+
+    if [ -z "$ANTHROPIC_API_KEY" ]; then
+        show_api_key_error "Anthropic" "ANTHROPIC_API_KEY"
+        exit 1
+    fi
+
+    # Check network connectivity before making API call
+    if ! check_network_connectivity; then
+        show_offline_error "Anthropic"
+        exit 1
+    fi
+
+    # Check if Anthropic API is reachable
+    if ! check_host_reachability "api.anthropic.com"; then
+        echo -e "${RED}Error: Cannot reach Anthropic API${NC}" >&2
+        echo "" >&2
+        echo "The API endpoint api.anthropic.com is not reachable." >&2
+        echo "Possible causes:" >&2
+        echo "  • Anthropic service is down" >&2
+        echo "  • Firewall or network filtering" >&2
+        echo "  • DNS issues" >&2
+        echo "" >&2
+        echo "Try:" >&2
+        echo "  • Check service status: https://status.anthropic.com/" >&2
+        echo "  • Use a different provider (export AI_PROVIDER=groq or ollama)" >&2
+        exit 1
+    fi
+
+    local prompt_escaped=$(escape_json "$prompt")
+
+    if [ "$VERBOSE" = "true" ]; then
+        echo "[Verbose] API Endpoint:${NC} https://api.anthropic.com/v1/messages"
+        echo "[Verbose] Model:${NC} $ANTHROPIC_MODEL"
+    fi
+
+    # Token file for streaming (used to pass token counts out of subshell)
+    local token_file="/tmp/gh-commit-ai-tokens-$$"
+
+    # Try streaming first
+    if should_stream; then
+        local stream_payload=$(printf '{"model":"%s","max_tokens":1024,"temperature":%s,"stream":true,"messages":[{"role":"user","content":"%s"}]}' "$ANTHROPIC_MODEL" "$AI_TEMPERATURE" "$prompt_escaped")
+        local stream_output
+        stream_output=$(create_secure_temp_file "gh-commit-ai-stream") || return 1
+
+        if streaming_api_call \
+            "https://api.anthropic.com/v1/messages" \
+            "$stream_payload" \
+            "$stream_output" \
+            parse_anthropic_stream \
+            -H "Content-Type: application/json" \
+            -H "x-api-key: $ANTHROPIC_API_KEY" \
+            -H "anthropic-version: 2023-06-01"; then
+
+            local result=$(cat "$stream_output" 2>/dev/null)
+            # Read token counts from sidecar files
+            INPUT_TOKENS=$(cat "${stream_output}.input_tokens" 2>/dev/null || echo "0")
+            OUTPUT_TOKENS=$(cat "${stream_output}.output_tokens" 2>/dev/null || echo "0")
+            # Write token counts for parent process
+            echo "${INPUT_TOKENS:-0}" > "${token_file}.input"
+            echo "${OUTPUT_TOKENS:-0}" > "${token_file}.output"
+            rm -f "$stream_output" "${stream_output}.input_tokens" "${stream_output}.output_tokens"
+            if [ -n "$result" ]; then
+                unescape_json "$result"
+                return 0
+            fi
+        fi
+
+        # Streaming failed, fall back
+        rm -f "$stream_output" "${stream_output}.input_tokens" "${stream_output}.output_tokens"
+        printf "\r%-80s\r" " " >&3
+        echo "Streaming failed, retrying..." >&2
+    fi
+
+    # Non-streaming path (original behavior)
+    local json_payload=$(printf '{"model":"%s","max_tokens":1024,"temperature":%s,"messages":[{"role":"user","content":"%s"}]}' "$ANTHROPIC_MODEL" "$AI_TEMPERATURE" "$prompt_escaped")
+
+    if [ "$VERBOSE" = "true" ]; then
+        echo "[Verbose] Request payload:"
+        echo "$json_payload" | jq '.' 2>/dev/null || echo "$json_payload"
+        echo ""
+    fi
+
+    # Run API call with retry logic in background with spinner
+    local temp_response
+    local temp_error
+    temp_response=$(create_secure_temp_file "gh-commit-ai-response") || return 1
+    temp_error=$(create_secure_temp_file "gh-commit-ai-error") || {
+        rm -f "$temp_response"
+        return 1
+    }
+    local exit_code=0
+    (
+        retry_api_call \
+            "https://api.anthropic.com/v1/messages" \
+            "$json_payload" \
+            "$temp_response" \
+            "$temp_error" \
+            "Anthropic" \
+            -H "Content-Type: application/json" \
+            -H "x-api-key: $ANTHROPIC_API_KEY" \
+            -H "anthropic-version: 2023-06-01"
+        echo $? > "${temp_response}.exit"
+    ) &
+    local api_pid=$!
+
+    show_spinner "$api_pid" "$SPINNER_MESSAGE"
+    wait "$api_pid"
+
+    # Read exit code
+    exit_code=$(cat "${temp_response}.exit" 2>/dev/null || echo "1")
+
+    # Read response from file
+    local response=$(cat "$temp_response" 2>/dev/null)
+
+    # Check for final failure after all retries
+    if [ -z "$response" ]; then
+        echo -e "${RED}Error: Failed to get response from Anthropic after $MAX_RETRIES attempts${NC}" >&2
+        echo "" >&2
+        echo "All retry attempts exhausted. This could be due to:" >&2
+        echo "  • Poor network connection" >&2
+        echo "  • API service issues" >&2
+        echo "  • Request timeouts" >&2
+        echo "" >&2
+        echo "Suggestions:" >&2
+        echo "  • Check your internet connection" >&2
+        echo "  • Check Anthropic status: https://status.anthropic.com/" >&2
+        echo "  • Try again in a few minutes" >&2
+        echo "  • Use a different provider: export AI_PROVIDER=ollama" >&2
+        rm -f "$temp_response" "$temp_error" "${temp_response}.exit"
+        return 1
+    fi
+
+    # Validate API response
+    if ! validate_api_response "$response"; then
+        echo -e "${RED}Error: Invalid response from Anthropic${NC}" >&2
+        echo "" >&2
+        echo "The API returned an unexpected response format." >&2
+        echo "This could indicate:" >&2
+        echo "  • API version changes" >&2
+        echo "  • Service degradation" >&2
+        echo "  • Network proxy interference" >&2
+        echo "" >&2
+        echo "Try:" >&2
+        echo "  • Run with verbose mode: gh commit-ai --verbose" >&2
+        echo "  • Use a different provider: export AI_PROVIDER=ollama" >&2
+        rm -f "$temp_response" "$temp_error" "${temp_response}.exit"
+        return 1
+    fi
+
+    # Cleanup temp files
+    rm -f "$temp_error" "${temp_response}.exit"
+
+    if [ "$VERBOSE" = "true" ]; then
+        echo "[Verbose] Response:"
+        echo "$response" | jq '.' 2>/dev/null || echo "$response"
+        echo ""
+    fi
+
+    # Check for errors
+    if echo "$response" | grep -q '"error"'; then
+        local error_type=$(echo "$response" | grep -o '"type":"[^"]*"' | head -1 | sed 's/"type":"//;s/"$//')
+        local error_msg=$(echo "$response" | grep -o '"message":"[^"]*"' | head -1 | sed 's/"message":"//;s/"$//')
+        echo -e "${RED}Error from Anthropic ($error_type): $error_msg" >&2
+
+        if [[ "$error_msg" == *"too long"* ]] || [[ "$error_msg" == *"too large"* ]] || [[ "$error_msg" == *"maximum"* ]]; then
+            show_token_limit_tip "Anthropic"
+        elif [[ "$error_type" == *"authentication"* ]] || [[ "$error_msg" == *"API key"* ]]; then
+            echo "Tip: Check your API key is valid and has credits" >&2
+        elif [[ "$error_type" == *"rate_limit"* ]]; then
+            echo "Tip: You've hit the rate limit. Wait a moment and try again" >&2
+        fi
+        return 1
+    fi
+
+    # Extract token usage (global variables for cost tracking)
+    INPUT_TOKENS=$(echo "$response" | grep -o '"input_tokens":[0-9]*' | head -1 | grep -o '[0-9]*')
+    OUTPUT_TOKENS=$(echo "$response" | grep -o '"output_tokens":[0-9]*' | head -1 | grep -o '[0-9]*')
+
+    # Write token counts for parent process
+    echo "${INPUT_TOKENS:-0}" > "${token_file}.input"
+    echo "${OUTPUT_TOKENS:-0}" > "${token_file}.output"
+
+    # Extract commit message from response
+    # Anthropic returns: {"content":[{"text":"...","type":"text"}],...}
+    # Use awk to properly extract JSON string value (handles escaped quotes)
+    local raw_message=$(echo "$response" | awk -F'"text":"' '{
+        if (NF > 1) {
+            str = $2
+            result = ""
+            escaped = 0
+            for (i = 1; i <= length(str); i++) {
+                c = substr(str, i, 1)
+                if (escaped) {
+                    result = result c
+                    escaped = 0
+                } else if (c == "\\") {
+                    result = result c
+                    escaped = 1
+                } else if (c == "\"") {
+                    break
+                } else {
+                    result = result c
+                }
+            }
+            print result
+            exit
+        }
+    }')
+
+    # Cleanup temp files
+    rm -f "$temp_response"
+
+    unescape_json "$raw_message"
+}
+
+# Call OpenAI API
+call_openai() {
+    local prompt="$1"
+
+    if [ -z "$OPENAI_API_KEY" ]; then
+        show_api_key_error "OpenAI" "OPENAI_API_KEY"
+        exit 1
+    fi
+
+    # Check network connectivity before making API call
+    if ! check_network_connectivity; then
+        show_offline_error "OpenAI"
+        exit 1
+    fi
+
+    # Check if OpenAI API is reachable
+    if ! check_host_reachability "api.openai.com"; then
+        echo -e "${RED}Error: Cannot reach OpenAI API${NC}" >&2
+        echo "" >&2
+        echo "The API endpoint api.openai.com is not reachable." >&2
+        echo "Possible causes:" >&2
+        echo "  • OpenAI service is down" >&2
+        echo "  • Firewall or network filtering" >&2
+        echo "  • DNS issues" >&2
+        echo "" >&2
+        echo "Try:" >&2
+        echo "  • Check service status: https://status.openai.com/" >&2
+        echo "  • Use a different provider (export AI_PROVIDER=groq or ollama)" >&2
+        exit 1
+    fi
+
+    local prompt_escaped=$(escape_json "$prompt")
+
+    if [ "$VERBOSE" = "true" ]; then
+        echo "[Verbose] API Endpoint:${NC} https://api.openai.com/v1/chat/completions"
+        echo "[Verbose] Model:${NC} $OPENAI_MODEL"
+    fi
+
+    # Token file for streaming
+    local token_file="/tmp/gh-commit-ai-tokens-$$"
+
+    # Try streaming first
+    if should_stream; then
+        local stream_payload=$(printf '{"model":"%s","messages":[{"role":"user","content":"%s"}],"temperature":%s,"stream":true,"stream_options":{"include_usage":true}}' "$OPENAI_MODEL" "$prompt_escaped" "$AI_TEMPERATURE")
+        local stream_output
+        stream_output=$(create_secure_temp_file "gh-commit-ai-stream") || return 1
+
+        if streaming_api_call \
+            "https://api.openai.com/v1/chat/completions" \
+            "$stream_payload" \
+            "$stream_output" \
+            parse_openai_stream \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $OPENAI_API_KEY"; then
+
+            local result=$(cat "$stream_output" 2>/dev/null)
+            INPUT_TOKENS=$(cat "${stream_output}.input_tokens" 2>/dev/null || echo "0")
+            OUTPUT_TOKENS=$(cat "${stream_output}.output_tokens" 2>/dev/null || echo "0")
+            echo "${INPUT_TOKENS:-0}" > "${token_file}.input"
+            echo "${OUTPUT_TOKENS:-0}" > "${token_file}.output"
+            rm -f "$stream_output" "${stream_output}.input_tokens" "${stream_output}.output_tokens"
+            if [ -n "$result" ]; then
+                unescape_json "$result"
+                return 0
+            fi
+        fi
+
+        rm -f "$stream_output" "${stream_output}.input_tokens" "${stream_output}.output_tokens"
+        printf "\r%-80s\r" " " >&3
+        echo "Streaming failed, retrying..." >&2
+    fi
+
+    # Non-streaming path
+    local json_payload=$(printf '{"model":"%s","messages":[{"role":"user","content":"%s"}],"temperature":%s}' "$OPENAI_MODEL" "$prompt_escaped" "$AI_TEMPERATURE")
+
+    if [ "$VERBOSE" = "true" ]; then
+        echo "[Verbose] Request payload:"
+        echo "$json_payload" | jq '.' 2>/dev/null || echo "$json_payload"
+        echo ""
+    fi
+
+    # Run API call with retry logic in background with spinner
+    local temp_response
+    local temp_error
+    temp_response=$(create_secure_temp_file "gh-commit-ai-response") || return 1
+    temp_error=$(create_secure_temp_file "gh-commit-ai-error") || {
+        rm -f "$temp_response"
+        return 1
+    }
+    local exit_code=0
+    (
+        retry_api_call \
+            "https://api.openai.com/v1/chat/completions" \
+            "$json_payload" \
+            "$temp_response" \
+            "$temp_error" \
+            "OpenAI" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $OPENAI_API_KEY"
+        echo $? > "${temp_response}.exit"
+    ) &
+    local api_pid=$!
+
+    show_spinner "$api_pid" "$SPINNER_MESSAGE"
+    wait "$api_pid"
+
+    # Read exit code
+    exit_code=$(cat "${temp_response}.exit" 2>/dev/null || echo "1")
+
+    # Read response from file
+    local response=$(cat "$temp_response" 2>/dev/null)
+
+    # Check for final failure after all retries
+    if [ -z "$response" ]; then
+        echo -e "${RED}Error: Failed to get response from OpenAI after $MAX_RETRIES attempts${NC}" >&2
+        echo "" >&2
+        echo "All retry attempts exhausted. Possible causes:" >&2
+        echo "  • Network connection issues" >&2
+        echo "  • OpenAI API is experiencing downtime" >&2
+        echo "  • Request timeout (large diff or slow connection)" >&2
+        echo "  • Rate limiting or quota exceeded" >&2
+        echo "" >&2
+        echo "Suggestions:" >&2
+        echo "  • Check your internet: ping api.openai.com" >&2
+        echo "  • Verify service status: https://status.openai.com/" >&2
+        echo "  • Try reducing diff size: DIFF_MAX_LINES=50 gh commit-ai" >&2
+        echo "  • Use a different provider:" >&2
+        echo "    - Groq (fast, free tier): export AI_PROVIDER=groq" >&2
+        echo "    - Ollama (local, no internet): export AI_PROVIDER=ollama" >&2
+        echo "  • Wait a few minutes and try again" >&2
+        rm -f "$temp_response" "$temp_error" "${temp_response}.exit"
+        return 1
+    fi
+
+    # Validate response content
+    if ! validate_api_response "$response"; then
+        echo -e "${RED}Error: Invalid response from OpenAI${NC}" >&2
+        echo "" >&2
+        echo "The API returned an unexpected response format." >&2
+        echo "This could indicate:" >&2
+        echo "  • API version changes" >&2
+        echo "  • Service degradation" >&2
+        echo "  • Network proxy interference" >&2
+        echo "" >&2
+        echo "Try:" >&2
+        echo "  • Run with verbose mode: gh commit-ai --verbose" >&2
+        echo "  • Use a different provider: export AI_PROVIDER=ollama" >&2
+        rm -f "$temp_response" "$temp_error" "${temp_response}.exit"
+        return 1
+    fi
+
+    # Cleanup temp files
+    rm -f "$temp_error" "${temp_response}.exit"
+
+    if [ "$VERBOSE" = "true" ]; then
+        echo "[Verbose] Response:"
+        echo "$response" | jq '.' 2>/dev/null || echo "$response"
+        echo ""
+    fi
+
+    # Check for errors
+    if echo "$response" | grep -q '"error"'; then
+        local error_type=$(echo "$response" | grep -o '"type":"[^"]*"' | head -1 | sed 's/"type":"//;s/"$//')
+        local error_msg=$(echo "$response" | grep -o '"message":"[^"]*"' | head -1 | sed 's/"message":"//;s/"$//')
+        local error_code=$(echo "$response" | grep -o '"code":"[^"]*"' | head -1 | sed 's/"code":"//;s/"$//')
+
+        echo -e "${RED}Error from OpenAI" >&2
+        [ -n "$error_code" ] && echo -e "${RED}Code: $error_code" >&2
+        [ -n "$error_type" ] && echo -e "${RED}Type: $error_type" >&2
+        [ -n "$error_msg" ] && echo -e "${RED}Message: $error_msg" >&2
+
+        if [[ "$error_code" == *"context_length"* ]] || [[ "$error_msg" == *"too large"* ]] || [[ "$error_msg" == *"maximum context"* ]] || [[ "$error_msg" == *"reduce"* ]]; then
+            show_token_limit_tip "OpenAI"
+        elif [[ "$error_code" == *"invalid_api_key"* ]] || [[ "$error_msg" == *"API key"* ]]; then
+            echo "Tip: Check your API key is valid and has credits" >&2
+        elif [[ "$error_code" == *"rate_limit"* ]]; then
+            echo "Tip: You've hit the rate limit. Wait a moment and try again" >&2
+        elif [[ "$error_code" == *"model_not_found"* ]]; then
+            echo "Tip: The model '$OPENAI_MODEL' doesn't exist or you don't have access" >&2
+        fi
+        return 1
+    fi
+
+    # Extract token usage (global variables for cost tracking)
+    INPUT_TOKENS=$(echo "$response" | grep -o '"prompt_tokens":[0-9]*' | head -1 | grep -o '[0-9]*')
+    OUTPUT_TOKENS=$(echo "$response" | grep -o '"completion_tokens":[0-9]*' | head -1 | grep -o '[0-9]*')
+
+    # Write token counts for parent process
+    echo "${INPUT_TOKENS:-0}" > "${token_file}.input"
+    echo "${OUTPUT_TOKENS:-0}" > "${token_file}.output"
+
+    # Extract commit message from response
+    # OpenAI returns: {"choices":[{"message":{"content":"..."},...}],...}
+    # Use awk to properly extract JSON string value (handles escaped quotes)
+    local raw_message=$(echo "$response" | awk -F'"content":"' '{
+        if (NF > 1) {
+            str = $2
+            result = ""
+            escaped = 0
+            for (i = 1; i <= length(str); i++) {
+                c = substr(str, i, 1)
+                if (escaped) {
+                    result = result c
+                    escaped = 0
+                } else if (c == "\\") {
+                    result = result c
+                    escaped = 1
+                } else if (c == "\"") {
+                    break
+                } else {
+                    result = result c
+                }
+            }
+            print result
+            exit
+        }
+    }')
+
+    # Cleanup temp files
+    rm -f "$temp_response"
+
+    unescape_json "$raw_message"
+}
+
+call_groq() {
+    local prompt="$1"
+
+    if [ -z "$GROQ_API_KEY" ]; then
+        show_api_key_error "Groq" "GROQ_API_KEY"
+        exit 1
+    fi
+
+    # Check network connectivity before making API call
+    if ! check_network_connectivity; then
+        show_offline_error "Groq"
+        exit 1
+    fi
+
+    # Check if Groq API is reachable
+    if ! check_host_reachability "api.groq.com"; then
+        echo -e "${RED}Error: Cannot reach Groq API${NC}" >&2
+        echo "" >&2
+        echo "The API endpoint api.groq.com is not reachable." >&2
+        echo "Possible causes:" >&2
+        echo "  • Groq service is down" >&2
+        echo "  • Firewall or network filtering" >&2
+        echo "  • DNS issues" >&2
+        echo "" >&2
+        echo "Try:" >&2
+        echo "  • Check service status: https://status.groq.com/" >&2
+        echo "  • Use a different provider (export AI_PROVIDER=ollama)" >&2
+        exit 1
+    fi
+
+    local prompt_escaped=$(escape_json "$prompt")
+
+    if [ "$VERBOSE" = "true" ]; then
+        echo "[Verbose] API Endpoint:${NC} https://api.groq.com/openai/v1/chat/completions"
+        echo "[Verbose] Model:${NC} $GROQ_MODEL"
+    fi
+
+    # Token file for streaming
+    local token_file="/tmp/gh-commit-ai-tokens-$$"
+
+    # Try streaming first (Groq uses OpenAI-compatible format)
+    if should_stream; then
+        local stream_payload=$(printf '{"model":"%s","messages":[{"role":"user","content":"%s"}],"temperature":%s,"stream":true,"stream_options":{"include_usage":true}}' "$GROQ_MODEL" "$prompt_escaped" "$AI_TEMPERATURE")
+        local stream_output
+        stream_output=$(create_secure_temp_file "gh-commit-ai-stream") || return 1
+
+        if streaming_api_call \
+            "https://api.groq.com/openai/v1/chat/completions" \
+            "$stream_payload" \
+            "$stream_output" \
+            parse_openai_stream \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $GROQ_API_KEY"; then
+
+            local result=$(cat "$stream_output" 2>/dev/null)
+            INPUT_TOKENS=$(cat "${stream_output}.input_tokens" 2>/dev/null || echo "0")
+            OUTPUT_TOKENS=$(cat "${stream_output}.output_tokens" 2>/dev/null || echo "0")
+            echo "${INPUT_TOKENS:-0}" > "${token_file}.input"
+            echo "${OUTPUT_TOKENS:-0}" > "${token_file}.output"
+            rm -f "$stream_output" "${stream_output}.input_tokens" "${stream_output}.output_tokens"
+            if [ -n "$result" ]; then
+                unescape_json "$result"
+                return 0
+            fi
+        fi
+
+        rm -f "$stream_output" "${stream_output}.input_tokens" "${stream_output}.output_tokens"
+        printf "\r%-80s\r" " " >&3
+        echo "Streaming failed, retrying..." >&2
+    fi
+
+    # Non-streaming path
+    local json_payload=$(printf '{"model":"%s","messages":[{"role":"user","content":"%s"}],"temperature":%s}' "$GROQ_MODEL" "$prompt_escaped" "$AI_TEMPERATURE")
+
+    if [ "$VERBOSE" = "true" ]; then
+        echo "[Verbose] Request payload:"
+        echo "$json_payload" | jq '.' 2>/dev/null || echo "$json_payload"
+        echo ""
+    fi
+
+    # Run API call with retry logic in background with spinner
+    local temp_response
+    local temp_error
+    temp_response=$(create_secure_temp_file "gh-commit-ai-response") || return 1
+    temp_error=$(create_secure_temp_file "gh-commit-ai-error") || {
+        rm -f "$temp_response"
+        return 1
+    }
+    local exit_code=0
+    (
+        retry_api_call \
+            "https://api.groq.com/openai/v1/chat/completions" \
+            "$json_payload" \
+            "$temp_response" \
+            "$temp_error" \
+            "Groq" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $GROQ_API_KEY"
+        echo $? > "${temp_response}.exit"
+    ) &
+    local api_pid=$!
+
+    show_spinner "$api_pid" "$SPINNER_MESSAGE"
+    wait "$api_pid"
+
+    # Read exit code
+    exit_code=$(cat "${temp_response}.exit" 2>/dev/null || echo "1")
+
+    # Read response from file
+    local response=$(cat "$temp_response" 2>/dev/null)
+
+    # Check for final failure after all retries
+    if [ -z "$response" ]; then
+        echo -e "${RED}Error: Failed to get response from Groq after $MAX_RETRIES attempts${NC}" >&2
+        echo "" >&2
+        echo "All retry attempts exhausted. Possible causes:" >&2
+        echo "  • Network connection issues" >&2
+        echo "  • Groq API is experiencing downtime" >&2
+        echo "  • Request timeout (large diff or slow connection)" >&2
+        echo "  • Rate limiting or quota exceeded" >&2
+        echo "" >&2
+        echo "Suggestions:" >&2
+        echo "  • Check your internet: ping api.groq.com" >&2
+        echo "  • Verify service status: https://status.groq.com/" >&2
+        echo "  • Try reducing diff size: DIFF_MAX_LINES=50 gh commit-ai" >&2
+        echo "  • Use a different provider:" >&2
+        echo "    - Ollama (local, no internet): export AI_PROVIDER=ollama" >&2
+        echo "    - Anthropic: export AI_PROVIDER=anthropic" >&2
+        echo "  • Wait a few minutes and try again" >&2
+        rm -f "$temp_response" "$temp_error" "${temp_response}.exit"
+        return 1
+    fi
+
+    # Validate response content
+    if ! validate_api_response "$response"; then
+        echo -e "${RED}Error: Invalid response from Groq${NC}" >&2
+        echo "" >&2
+        echo "The API returned an unexpected response format." >&2
+        echo "This could indicate:" >&2
+        echo "  • API version changes" >&2
+        echo "  • Service degradation" >&2
+        echo "  • Network proxy interference" >&2
+        echo "" >&2
+        echo "Try:" >&2
+        echo "  • Run with verbose mode: gh commit-ai --verbose" >&2
+        echo "  • Use a different provider: export AI_PROVIDER=ollama" >&2
+        rm -f "$temp_response" "$temp_error" "${temp_response}.exit"
+        return 1
+    fi
+
+    # Cleanup temp files
+    rm -f "$temp_error" "${temp_response}.exit"
+
+    if [ "$VERBOSE" = "true" ]; then
+        echo "[Verbose] Response:"
+        echo "$response" | jq '.' 2>/dev/null || echo "$response"
+        echo ""
+    fi
+
+    # Check for errors
+    if echo "$response" | grep -q '"error"'; then
+        local error_type=$(echo "$response" | grep -o '"type":"[^"]*"' | head -1 | sed 's/"type":"//;s/"$//')
+        local error_msg=$(echo "$response" | grep -o '"message":"[^"]*"' | head -1 | sed 's/"message":"//;s/"$//')
+        local error_code=$(echo "$response" | grep -o '"code":"[^"]*"' | head -1 | sed 's/"code":"//;s/"$//')
+
+        echo -e "${RED}Error from Groq" >&2
+        [ -n "$error_code" ] && echo -e "${RED}Code: $error_code" >&2
+        [ -n "$error_type" ] && echo -e "${RED}Type: $error_type" >&2
+        [ -n "$error_msg" ] && echo -e "${RED}Message: $error_msg" >&2
+
+        if [[ "$error_msg" == *"too large"* ]] || [[ "$error_msg" == *"reduce your message size"* ]] || [[ "$error_type" == *"tokens"* ]]; then
+            show_token_limit_tip "Groq"
+        elif [[ "$error_code" == *"invalid_api_key"* ]] || [[ "$error_msg" == *"API key"* ]]; then
+            echo "Tip: Check your API key is valid" >&2
+        elif [[ "$error_code" == *"rate_limit"* ]]; then
+            echo "Tip: You've hit the rate limit. Wait a moment and try again" >&2
+        elif [[ "$error_code" == *"model_not_found"* ]]; then
+            echo "Tip: The model '$GROQ_MODEL' doesn't exist or you don't have access" >&2
+        fi
+        return 1
+    fi
+
+    # Extract token usage (global variables for cost tracking)
+    INPUT_TOKENS=$(echo "$response" | grep -o '"prompt_tokens":[0-9]*' | head -1 | grep -o '[0-9]*')
+    OUTPUT_TOKENS=$(echo "$response" | grep -o '"completion_tokens":[0-9]*' | head -1 | grep -o '[0-9]*')
+
+    # Write token counts for parent process
+    echo "${INPUT_TOKENS:-0}" > "${token_file}.input"
+    echo "${OUTPUT_TOKENS:-0}" > "${token_file}.output"
+
+    # Extract commit message from response
+    # Groq uses OpenAI format: {"choices":[{"message":{"content":"..."},...}],...}
+    # Use awk to properly extract JSON string value (handles escaped quotes)
+    local raw_message=$(echo "$response" | awk -F'"content":"' '{
+        if (NF > 1) {
+            str = $2
+            result = ""
+            escaped = 0
+            for (i = 1; i <= length(str); i++) {
+                c = substr(str, i, 1)
+                if (escaped) {
+                    result = result c
+                    escaped = 0
+                } else if (c == "\\") {
+                    result = result c
+                    escaped = 1
+                } else if (c == "\"") {
+                    break
+                } else {
+                    result = result c
+                }
+            }
+            print result
+            exit
+        }
+    }')
+
+    # Cleanup temp files
+    rm -f "$temp_response"
+
+    unescape_json "$raw_message"
+}
+
+# ---------------------------------------------------------------------------
+# Provider dispatch with automatic local fallback
+# ---------------------------------------------------------------------------
+
+# Records the provider that actually produced output (may differ from the
+# configured AI_PROVIDER when a fallback kicks in). Read by callers so analytics
+# and cost tracking point at the model that ran.
+EFFECTIVE_PROVIDER_FILE="/tmp/gh-commit-ai-provider-$$"
+
+# Route a prompt to a named provider.
+dispatch_provider() {
+    local provider="$1"
+    local prompt="$2"
+    case "$provider" in
+        ollama)    call_ollama "$prompt" ;;
+        anthropic) call_anthropic "$prompt" ;;
+        openai)    call_openai "$prompt" ;;
+        groq)      call_groq "$prompt" ;;
+        *)
+            echo -e "${RED}Error: Unknown AI provider '$provider'${NC}" >&2
+            return 1
+            ;;
+    esac
+}
+
+# Is the local fallback provider ready to serve? (Only Ollama needs a live check;
+# other providers gate on their own API keys inside their call_* functions.)
+fallback_is_available() {
+    [ "$FALLBACK_PROVIDER" = "ollama" ] || return 0
+    curl -s --connect-timeout 1 "$OLLAMA_HOST/api/tags" >/dev/null 2>&1 || return 1
+    local count
+    count=$(curl -s "$OLLAMA_HOST/api/tags" 2>/dev/null | grep -o '"name":"[^"]*"' | wc -l)
+    [ "$count" -gt 0 ]
+}
+
+# Choose which local model to use for the fallback: honor the configured
+# OLLAMA_MODEL if it's actually installed, otherwise auto-pick the best one
+# available so the fallback doesn't fail on a missing model.
+pick_fallback_ollama_model() {
+    local installed
+    installed=$(curl -s "$OLLAMA_HOST/api/tags" 2>/dev/null | grep -o '"name":"[^"]*"' | sed 's/"name":"//;s/"//')
+    if [ -n "$OLLAMA_MODEL" ] && echo "$installed" | grep -qxF "$OLLAMA_MODEL"; then
+        echo "$OLLAMA_MODEL"
+        return
+    fi
+    get_best_ollama_model
+}
+
+# Resolve the model name configured for a given provider.
+provider_model() {
+    case "$1" in
+        ollama)    echo "$OLLAMA_MODEL" ;;
+        anthropic) echo "$ANTHROPIC_MODEL" ;;
+        openai)    echo "$OPENAI_MODEL" ;;
+        groq)      echo "$GROQ_MODEL" ;;
+        *)         echo "" ;;
+    esac
+}
+
+# Daily-rotated error log. The full provider error output goes here instead of the
+# terminal. The file is reset the first time it is written on a new day, so it
+# never grows beyond a single day's worth of failures.
+ERROR_LOG="${GH_COMMIT_AI_ERROR_LOG:-/tmp/gh-commit-ai-errors.log}"
+
+log_provider_error() {
+    local provider="$1" model="$2" detail_file="$3"
+    local today ts label first_date esc
+    today=$(date +%Y-%m-%d 2>/dev/null || echo "unknown")
+    ts=$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "$today")
+    esc=$(printf '\033')   # literal ESC byte, portable across GNU/BSD sed
+    label="$provider"
+    if [ -n "$model" ]; then label="$provider/$model"; fi
+
+    # Daily rotation: start a fresh log if the existing one isn't from today.
+    if [ -f "$ERROR_LOG" ]; then
+        first_date=$(head -1 "$ERROR_LOG" 2>/dev/null | grep -oE '^[0-9]{4}-[0-9]{2}-[0-9]{2}' || true)
+        if [ "$first_date" != "$today" ]; then
+            : > "$ERROR_LOG" 2>/dev/null || true
+        fi
+    fi
+
+    {
+        echo "$ts  [$label]"
+        if [ -s "$detail_file" ]; then
+            # Strip ANSI color codes and indent for readability.
+            sed -E "s/${esc}\[[0-9;]*m//g; s/^/    /" "$detail_file" 2>/dev/null || true
+        else
+            echo "    (no error detail captured)"
+        fi
+        echo "------------------------------------------------------------"
+    } >> "$ERROR_LOG" 2>/dev/null || true
+    return 0
+}
+
+# Log the full error quietly and show the user a single concise line.
+report_provider_failure() {
+    local provider="$1" model="$2" detail_file="$3"
+    local label="$provider"
+    if [ -n "$model" ]; then label="$provider/$model"; fi
+    log_provider_error "$provider" "$model" "$detail_file"
+    echo -e "${RED}✗ Model ${label} failed.${NC} See error log: $ERROR_LOG" >&2
+    return 0
+}
+
+# Call the configured provider; on failure, log the (verbose) error to ERROR_LOG,
+# tell the user where to find it in one line, then transparently retry with the
+# local fallback provider so a commit message still gets generated. Records the
+# provider that produced output in EFFECTIVE_PROVIDER_FILE.
+call_provider_with_fallback() {
+    local prompt="$1"
+    local result="" rc=0
+    local errfile="/tmp/gh-commit-ai-provider-err-$$"
+
+    printf '%s' "$AI_PROVIDER" > "$EFFECTIVE_PROVIDER_FILE" 2>/dev/null || true
+
+    # Primary provider. Capture fd 2 (error detail) to a file; the spinner uses
+    # fd 3 and still reaches the terminal. '|| rc=$?' keeps set -e from aborting
+    # here so we can fall back instead of dying on the first failure.
+    : > "$errfile" 2>/dev/null || true
+    rc=0
+    result=$(dispatch_provider "$AI_PROVIDER" "$prompt" 2>"$errfile") || rc=$?
+    if [ "$rc" -eq 0 ] && [ -n "$result" ]; then
+        rm -f "$errfile"
+        printf '%s\n' "$result"
+        return 0
+    fi
+
+    report_provider_failure "$AI_PROVIDER" "$(provider_model "$AI_PROVIDER")" "$errfile"
+    rm -f "$errfile"
+
+    # Fall back to a local model when enabled, different, and actually available.
+    if [ "$ENABLE_FALLBACK" = "true" ] && [ "$AI_PROVIDER" != "$FALLBACK_PROVIDER" ] && fallback_is_available; then
+        if [ "$FALLBACK_PROVIDER" = "ollama" ]; then
+            OLLAMA_MODEL=$(pick_fallback_ollama_model 2>/dev/null || echo "$OLLAMA_MODEL")
+        fi
+        echo -e "↪ Falling back to $FALLBACK_PROVIDER ($(provider_model "$FALLBACK_PROVIDER"))" >&2
+
+        : > "$errfile" 2>/dev/null || true
+        rc=0
+        result=$(dispatch_provider "$FALLBACK_PROVIDER" "$prompt" 2>"$errfile") || rc=$?
+        if [ "$rc" -eq 0 ] && [ -n "$result" ]; then
+            rm -f "$errfile"
+            printf '%s' "$FALLBACK_PROVIDER" > "$EFFECTIVE_PROVIDER_FILE" 2>/dev/null || true
+            printf '%s\n' "$result"
+            return 0
+        fi
+        report_provider_failure "$FALLBACK_PROVIDER" "$(provider_model "$FALLBACK_PROVIDER")" "$errfile"
+        rm -f "$errfile"
+    fi
+
+    return 1
+}
 
 # Generate changelog from commit history
 generate_changelog() {
@@ -1589,36 +2689,19 @@ Be specific and practical."
     fi
 }
 
-# Helper function to call AI for split suggestions
+# Helper function to call AI for split suggestions.
+#
+# Goes through call_provider_with_fallback rather than dispatching to the
+# provider functions directly, so this path gets the same retry, fallback and
+# ERROR_LOG treatment as commit-message generation. (The old inline `case` also
+# carried a dead `if [ "$AI_PROVIDER" = "auto" ]` branch that discarded the
+# detection result and never assigned AI_PROVIDER - resolution already happened
+# in 04-providers-detect.sh long before this ran.)
 call_ai_for_split() {
     local prompt="$1"
 
     require_ai_provider
-
-    # Detect and use available AI provider
-    if [ "$AI_PROVIDER" = "auto" ]; then
-        detect_available_providers > /dev/null
-    fi
-
-    # Route to appropriate provider
-    case "$AI_PROVIDER" in
-        ollama)
-            call_ollama "$prompt"
-            ;;
-        anthropic)
-            call_anthropic "$prompt"
-            ;;
-        openai)
-            call_openai "$prompt"
-            ;;
-        groq)
-            call_groq "$prompt"
-            ;;
-        *)
-            echo -e "${RED}Error: Unknown AI provider: $AI_PROVIDER${NC}" >&2
-            exit 1
-            ;;
-    esac
+    call_provider_with_fallback "$prompt"
 }
 
 # Generate code review for changes
@@ -1794,26 +2877,10 @@ Provide your review:"
 
     require_ai_provider
 
-    # Call AI provider for review
+    # Call AI provider for review, through the shared dispatcher so a failure
+    # here gets the same fallback and ERROR_LOG detail as the commit path.
     local review_result
-    case "$AI_PROVIDER" in
-        ollama)
-            review_result=$(call_ollama "$review_prompt")
-            ;;
-        anthropic)
-            review_result=$(call_anthropic "$review_prompt")
-            ;;
-        openai)
-            review_result=$(call_openai "$review_prompt")
-            ;;
-        groq)
-            review_result=$(call_groq "$review_prompt")
-            ;;
-        *)
-            echo -e "${RED}Error: Unknown AI provider: $AI_PROVIDER${NC}" >&2
-            exit 1
-            ;;
-    esac
+    review_result=$(call_provider_with_fallback "$review_prompt") || review_result=""
 
     # Restore original models
     OLLAMA_MODEL="$original_ollama_model"
@@ -1986,26 +3053,10 @@ FORMAT:
 
     require_ai_provider
 
-    # Call AI to generate PR description
+    # Call AI to generate PR description, through the shared dispatcher so a
+    # failure here gets the same fallback and ERROR_LOG detail as the commit path.
     local pr_description=""
-    case "$AI_PROVIDER" in
-        ollama)
-            pr_description=$(call_ollama "$pr_prompt")
-            ;;
-        anthropic)
-            pr_description=$(call_anthropic "$pr_prompt")
-            ;;
-        openai)
-            pr_description=$(call_openai "$pr_prompt")
-            ;;
-        groq)
-            pr_description=$(call_groq "$pr_prompt")
-            ;;
-        *)
-            echo -e "${RED}Error: Unknown AI provider '$AI_PROVIDER'${NC}" >&2
-            exit 1
-            ;;
-    esac
+    pr_description=$(call_provider_with_fallback "$pr_prompt") || pr_description=""
 
     # Strip any markdown fences
     pr_description=$(echo "$pr_description" | awk '
@@ -3161,6 +4212,38 @@ smart_sample_diff() {
     rm -f "$temp_file" "$priority_file"
 }
 
+# Build a diff for untracked (but not ignored) files.
+#
+# `git diff` only ever reports tracked files, yet the commit path stages with
+# `git add -A`, which also sweeps up untracked ones. Left alone, that means a
+# brand-new file gets committed under a message that never described it and,
+# worse, never passed through the secret scanner. Producing a real diff for
+# those files here keeps "what we analyze" and "what we commit" the same set.
+#
+# Binary files and anything past max_files are skipped: they are noise in a
+# commit message and can be enormous.
+untracked_files_diff() {
+    local max_files="${1:-25}"
+    local file
+    local count=0
+
+    while IFS= read -r -d '' file; do
+        [ -f "$file" ] || continue
+        grep -Iq . "$file" 2>/dev/null || continue
+
+        count=$((count + 1))
+        [ "$count" -le "$max_files" ] || break
+
+        # --no-index exits 1 whenever the files differ, which is always here.
+        git diff --no-index -- /dev/null "$file" 2>/dev/null || true
+    done < <(git ls-files --others --exclude-standard -z 2>/dev/null)
+}
+
+# List untracked (but not ignored) files, one per line.
+untracked_files_list() {
+    git ls-files --others --exclude-standard 2>/dev/null || true
+}
+
 # Analyze commit size (count lines changed)
 analyze_commit_size() {
     local diff="$1"
@@ -3524,20 +4607,34 @@ if [ "$AMEND" = true ]; then
     stats_file=$(create_secure_temp_file "gh-commit-ai-stats") || { rm -f "$status_file"; exit 1; }
     diff_file=$(create_secure_temp_file "gh-commit-ai-diff") || { rm -f "$status_file" "$stats_file"; exit 1; }
     size_file=$(create_secure_temp_file "gh-commit-ai-size") || { rm -f "$status_file" "$stats_file" "$diff_file"; exit 1; }
+    # Explicitly removed further down on the happy path; registering them as
+    # well is what cleans them up when the run is interrupted instead.
+    register_temp_path "$status_file"
+    register_temp_path "$stats_file"
+    register_temp_path "$diff_file"
+    register_temp_path "$size_file"
 
     # Get the changes from the last commit with loading animation (optimized - minimal git calls)
     (
         # Get all needed data with just two git calls (show for diff, numstat for stats)
         SHOW_OUTPUT=$(eval "git show --numstat HEAD $GIT_EXCLUDE_PATTERN")
 
-        # Extract stats from numstat output (before the diff starts)
-        GIT_STATS=$(echo "$SHOW_OUTPUT" | awk '/^[0-9]+\t[0-9]+\t/ {print $3}' | head -10 | awk '{print "M " $0}')
+        # Isolate the numstat header lines that precede the diff. Both the file
+        # list and the size come from these, so parse them once.
+        NUMSTAT_DATA=$(echo "$SHOW_OUTPUT" | awk '/^[0-9]+\t[0-9]+\t/ {print}')
+
+        # Extract stats from numstat output (before the diff starts). numstat is
+        # "added<TAB>deleted<TAB>path", so cut -f3- keeps paths containing spaces
+        # intact; awk '{print $3}' would truncate them at the first space.
+        GIT_STATS=$(echo "$NUMSTAT_DATA" | cut -f3- | head -10 | sed 's/^/M /')
 
         # Extract full diff (after numstat section)
         FULL_DIFF=$(echo "$SHOW_OUTPUT" | awk '/^diff --git/,0')
 
-        # Extract file list for status
-        GIT_STATUS=$(echo "$SHOW_OUTPUT" | awk '/^diff --git/ {print "M " $4}' | sed 's|^M b/|M |')
+        # Extract file list for status. Derived from numstat rather than the
+        # "diff --git a/x b/x" header, whose fields are unparseable once a path
+        # contains a space.
+        GIT_STATUS=$(echo "$NUMSTAT_DATA" | cut -f3- | sed 's/^/M /')
 
         # Calculate effective max lines (adaptive or user-specified)
         effective_max_lines="$DIFF_MAX_LINES"
@@ -3548,7 +4645,7 @@ if [ "$AMEND" = true ]; then
         GIT_DIFF=$(smart_sample_diff "$FULL_DIFF" "$effective_max_lines")
 
         # Calculate commit size (lines added + deleted) from numstat
-        COMMIT_SIZE=$(echo "$SHOW_OUTPUT" | awk '/^[0-9]+\t[0-9]+\t/ {added+=$1; deleted+=$2} END {print added+deleted}')
+        COMMIT_SIZE=$(echo "$NUMSTAT_DATA" | awk '{added+=$1; deleted+=$2} END {print added+deleted}')
 
         # Export to temp file for parent process
         echo "$GIT_STATUS" > "$status_file"
@@ -3585,6 +4682,12 @@ else
     stats_file=$(create_secure_temp_file "gh-commit-ai-stats") || { rm -f "$status_file"; exit 1; }
     diff_file=$(create_secure_temp_file "gh-commit-ai-diff") || { rm -f "$status_file" "$stats_file"; exit 1; }
     size_file=$(create_secure_temp_file "gh-commit-ai-size") || { rm -f "$status_file" "$stats_file" "$diff_file"; exit 1; }
+    # Explicitly removed further down on the happy path; registering them as
+    # well is what cleans them up when the run is interrupted instead.
+    register_temp_path "$status_file"
+    register_temp_path "$stats_file"
+    register_temp_path "$diff_file"
+    register_temp_path "$size_file"
 
     # Get git status and diff with loading animation (optimized - minimal git calls)
     (
@@ -3601,17 +4704,37 @@ else
         # Extract numstat data (header lines before the diff)
         NUMSTAT_DATA=$(echo "$FULL_NUMSTAT_OUTPUT" | awk '/^[0-9]+\t[0-9]+\t/ {print}')
 
-        # Generate GIT_STATUS from numstat data (avoids separate git status call)
-        GIT_STATUS=$(echo "$NUMSTAT_DATA" | awk '{print "M " $3}')
+        # Generate GIT_STATUS from numstat data (avoids separate git status call).
+        # numstat is "added<TAB>deleted<TAB>path", so cut -f3- keeps the whole path -
+        # awk '{print $3}' would truncate "Screen Shot.png" at the first space.
+        GIT_STATUS=$(echo "$NUMSTAT_DATA" | cut -f3- | sed 's/^/M /')
 
         # Extract file list for GIT_STATS (first 10 files)
-        GIT_STATS=$(echo "$NUMSTAT_DATA" | awk '{print $3}' | head -10 | awk '{print "M " $0}')
+        GIT_STATS=$(echo "$NUMSTAT_DATA" | cut -f3- | head -10 | sed 's/^/M /')
 
         # Get full diff for AI (single call)
         if [ "$IS_STAGED" = "true" ]; then
             FULL_DIFF=$(eval "git diff --cached $GIT_EXCLUDE_PATTERN" 2>/dev/null)
         else
             FULL_DIFF=$(eval "git diff $GIT_EXCLUDE_PATTERN" 2>/dev/null)
+
+            # Nothing is staged, so the commit path will run `git add -A` and
+            # sweep up untracked files too. Fold them into the diff now so they
+            # are described in the message and seen by the secret scanner,
+            # rather than riding along invisibly.
+            UNTRACKED_DIFF=$(untracked_files_diff)
+            if [ -n "$UNTRACKED_DIFF" ]; then
+                FULL_DIFF="${FULL_DIFF}
+${UNTRACKED_DIFF}"
+            fi
+
+            UNTRACKED_LIST=$(untracked_files_list)
+            if [ -n "$UNTRACKED_LIST" ]; then
+                GIT_STATUS="${GIT_STATUS}
+$(echo "$UNTRACKED_LIST" | sed 's/^/A /')"
+                GIT_STATS="$(echo "${GIT_STATS}
+$(echo "$UNTRACKED_LIST" | sed 's/^/A /')" | head -10)"
+            fi
         fi
         # Calculate effective max lines (adaptive or user-specified)
         effective_max_lines="$DIFF_MAX_LINES"
@@ -4825,10 +5948,13 @@ if [ $? -eq 0 ] && [ -n "$DETECTED_WP_COMPONENT" ]; then
     WP_COMPONENT_NAME=$(echo "$DETECTED_WP_COMPONENT" | cut -d: -f2)
 fi
 
-# Secret detection: scan diff before sending to cloud providers
-if [ "$AI_PROVIDER" != "ollama" ] && [ "$SKIP_SECRET_SCAN" != "true" ] && [ -n "$GIT_DIFF" ]; then
+# Secret detection: scan diff before sending to cloud providers.
+# Considers every provider that could receive the diff - primary, pipeline
+# analysis stage, and fallback - not just $AI_PROVIDER.
+SECRET_SCAN_TARGETS=$(cloud_providers_in_play)
+if [ -n "$SECRET_SCAN_TARGETS" ] && [ "$SKIP_SECRET_SCAN" != "true" ] && [ -n "$GIT_DIFF" ]; then
     if ! detect_secrets_in_diff "$GIT_DIFF"; then
-        if ! handle_detected_secrets "$AI_PROVIDER"; then
+        if ! handle_detected_secrets "$(echo "$SECRET_SCAN_TARGETS" | tr ' ' '/')"; then
             exit 0
         fi
     fi
@@ -5700,9 +6826,34 @@ call_pipeline() {
     return 0
 }
 
-# Escape JSON strings (replace backslash, double quote, newline, carriage return, tab)
+# Escape a string for embedding in JSON.
+#
+# The sed pass handles backslash, double quote, CR and tab; the awk pass joins
+# lines with \n and escapes every remaining control character as \uXXXX. That
+# last part matters: RFC 8259 requires all of U+0000-U+001F to be escaped, and
+# emitting a raw one (ESC is the common case - captured terminal output, ANSI
+# logs, some binaries) produced invalid JSON and an opaque provider 400 with
+# nothing pointing at the cause.
+#
+# LC_ALL=C keeps awk byte-oriented, so multibyte UTF-8 passes through untouched.
 escape_json() {
-    echo "$1" | sed 's/\\/\\\\/g; s/"/\\"/g; s/\n/\\n/g; s/\r/\\r/g; s/\t/\\t/g' | awk '{printf "%s\\n", $0}' | sed '$ s/\\n$//'
+    echo "$1" \
+        | sed 's/\\/\\\\/g; s/"/\\"/g; s/\r/\\r/g; s/\t/\\t/g' \
+        | LC_ALL=C awk '
+            BEGIN {
+                for (i = 1; i <= 31; i++) ctrl[sprintf("%c", i)] = sprintf("\\u%04x", i)
+            }
+            {
+                out = ""
+                n = length($0)
+                for (i = 1; i <= n; i++) {
+                    c = substr($0, i, 1)
+                    out = out (c in ctrl ? ctrl[c] : c)
+                }
+                printf "%s\\n", out
+            }
+        ' \
+        | sed '$ s/\\n$//'
 }
 
 # Unescape JSON strings (handle unicode escapes like \u0026)
@@ -6296,13 +7447,29 @@ strip_think_blocks() {
     '
 }
 
+# Per-run private directory for the --options working files.
+#
+# These used to be fixed paths under /tmp: readable by any local user,
+# clobbered when two runs overlapped, and symlink-attackable in the window after
+# each `rm -f`. OPTIONS_DIR is created 700 by mktemp and removed by the EXIT
+# trap.
+#
+# Created eagerly rather than lazily: a lazy helper called via $(...) would run
+# in a subshell, so the assignment would not survive and every call site would
+# get a different directory.
+OPTIONS_DIR=""
+if [ "$MULTIPLE_OPTIONS" = "true" ]; then
+    OPTIONS_DIR=$(create_secure_temp_dir "gh-commit-ai-options") || exit 1
+    register_temp_path "$OPTIONS_DIR"
+fi
+
 # Parse multiple commit message options from AI response
 parse_multiple_options() {
     local response="$1"
 
     # Extract recommendation if present
     if echo "$response" | grep -q "\[RECOMMENDATION\]"; then
-        echo "$response" | sed -n '/\[RECOMMENDATION\]/,$ p' | tail -n +2 > /tmp/ai_recommendation.txt
+        echo "$response" | sed -n '/\[RECOMMENDATION\]/,$ p' | tail -n +2 > "$OPTIONS_DIR/ai_recommendation.txt"
     fi
 
     # Parse with a simple sed/bash approach for better compatibility
@@ -6330,34 +7497,34 @@ parse_multiple_options() {
 
         # Write to appropriate file
         if [ "$in_option" = "1" ] && [ "$current_option" -gt 0 ]; then
-            echo "$line" >> "/tmp/option_${current_option}.txt"
+            echo "$line" >> "$OPTIONS_DIR/option_${current_option}.txt"
         elif [ "$in_reasoning" = "1" ] && [ "$current_option" -gt 0 ]; then
-            echo "$line" >> "/tmp/reasoning_${current_option}.txt"
+            echo "$line" >> "$OPTIONS_DIR/reasoning_${current_option}.txt"
         fi
     done
 
     # If no structured format found, fallback to old simple parsing
-    if [ ! -f "/tmp/option_1.txt" ]; then
+    if [ ! -f "$OPTIONS_DIR/option_1.txt" ]; then
         current_option=1
         echo "$response" | while IFS= read -r line; do
             if echo "$line" | grep -q "^---OPTION---$"; then
                 current_option=$((current_option + 1))
             else
-                echo "$line" >> "/tmp/option_${current_option}.txt"
+                echo "$line" >> "$OPTIONS_DIR/option_${current_option}.txt"
             fi
         done
     fi
 
     # If still no options, treat as single option
-    if [ ! -f "/tmp/option_1.txt" ]; then
-        echo "$response" > "/tmp/option_1.txt"
+    if [ ! -f "$OPTIONS_DIR/option_1.txt" ]; then
+        echo "$response" > "$OPTIONS_DIR/option_1.txt"
         echo "1"
         return
     fi
 
     # Count how many options we have
     count=0
-    for f in /tmp/option_*.txt; do
+    for f in "$OPTIONS_DIR"/option_*.txt; do
         [ -f "$f" ] && count=$((count + 1))
     done
 
@@ -6371,8 +7538,8 @@ display_options() {
     echo -e "Generated ${num_options} commit message options:\n"
 
     for i in $(seq 1 $num_options); do
-        local option_file="/tmp/option_${i}.txt"
-        local reasoning_file="/tmp/reasoning_${i}.txt"
+        local option_file="$OPTIONS_DIR/option_${i}.txt"
+        local reasoning_file="$OPTIONS_DIR/reasoning_${i}.txt"
 
         if [ -f "$option_file" ]; then
             local option_content=$(cat "$option_file" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
@@ -6389,8 +7556,8 @@ display_options() {
     done
 
     # Display AI recommendation if available
-    if [ -f "/tmp/ai_recommendation.txt" ]; then
-        local recommendation=$(cat "/tmp/ai_recommendation.txt" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    if [ -f "$OPTIONS_DIR/ai_recommendation.txt" ]; then
+        local recommendation=$(cat "$OPTIONS_DIR/ai_recommendation.txt" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
         echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
         echo -e "${CYAN}AI Recommendation:${NC}"
         echo -e "$recommendation"
@@ -6419,1026 +7586,6 @@ select_option() {
 
         echo -e "${RED}❌ Invalid selection. Please enter 1-${num_options} or 'n' to cancel."
     done
-}
-
-# Call Ollama API
-call_ollama() {
-    local prompt="$1"
-
-    # Quick pre-flight check: verify Ollama is reachable
-    if ! curl -s --connect-timeout 2 --max-time 5 "$OLLAMA_HOST/api/tags" >/dev/null 2>&1; then
-        echo -e "${RED}Error: Cannot connect to Ollama at $OLLAMA_HOST${NC}" >&2
-        echo "" >&2
-        echo "Ollama is not responding. Possible causes:" >&2
-        echo "  • Ollama service is not running" >&2
-        echo "  • Wrong OLLAMA_HOST configuration" >&2
-        echo "  • Port conflict or firewall blocking" >&2
-        echo "" >&2
-        echo "Troubleshooting:" >&2
-        echo "  • Start Ollama: ollama serve" >&2
-        echo "  • Check if running: ps aux | grep ollama" >&2
-        echo "  • Verify host: curl $OLLAMA_HOST/api/tags" >&2
-        echo "  • List models: ollama list" >&2
-        echo "" >&2
-        echo "Don't have Ollama? Install from: https://ollama.ai" >&2
-        return 1
-    fi
-
-    local model_escaped=$(escape_json "$OLLAMA_MODEL")
-    local prompt_escaped=$(escape_json "$prompt")
-
-    if [ "$VERBOSE" = "true" ]; then
-        echo "[Verbose] API Endpoint:${NC} $OLLAMA_HOST/api/generate"
-        echo "[Verbose] Model:${NC} $OLLAMA_MODEL"
-    fi
-
-    # Try streaming first
-    if should_stream; then
-        local stream_payload=$(printf '{"model":"%s","prompt":"%s","stream":true,"options":{"num_ctx":%s,"temperature":%s}}' "$model_escaped" "$prompt_escaped" "$OLLAMA_NUM_CTX" "$AI_TEMPERATURE")
-        local stream_output
-        stream_output=$(create_secure_temp_file "gh-commit-ai-stream") || return 1
-
-        if streaming_api_call \
-            "$OLLAMA_HOST/api/generate" \
-            "$stream_payload" \
-            "$stream_output" \
-            parse_ollama_stream \
-            -H "Content-Type: application/json"; then
-
-            local result=$(cat "$stream_output" 2>/dev/null)
-            rm -f "$stream_output" "${stream_output}.input_tokens" "${stream_output}.output_tokens"
-            if [ -n "$result" ]; then
-                unescape_json "$result"
-                return 0
-            fi
-        fi
-
-        # Streaming failed, fall back to non-streaming
-        rm -f "$stream_output" "${stream_output}.input_tokens" "${stream_output}.output_tokens"
-        printf "\r%-80s\r" " " >&3
-        echo "Streaming failed, retrying..." >&2
-    fi
-
-    # Non-streaming path (original behavior)
-    local json_payload=$(printf '{"model":"%s","prompt":"%s","stream":false,"options":{"num_ctx":%s,"temperature":%s}}' "$model_escaped" "$prompt_escaped" "$OLLAMA_NUM_CTX" "$AI_TEMPERATURE")
-
-    if [ "$VERBOSE" = "true" ]; then
-        echo "[Verbose] Request payload:"
-        echo "$json_payload" | jq '.' 2>/dev/null || echo "$json_payload"
-        echo ""
-    fi
-
-    # Run API call with retry logic in background with spinner
-    local temp_response
-    local temp_error
-    temp_response=$(create_secure_temp_file "gh-commit-ai-response") || return 1
-    temp_error=$(create_secure_temp_file "gh-commit-ai-error") || {
-        rm -f "$temp_response"
-        return 1
-    }
-    local exit_code=0
-    (
-        retry_api_call \
-            "$OLLAMA_HOST/api/generate" \
-            "$json_payload" \
-            "$temp_response" \
-            "$temp_error" \
-            "Ollama" \
-            -H "Content-Type: application/json"
-        echo $? > "${temp_response}.exit"
-    ) &
-    local api_pid=$!
-
-    show_spinner "$api_pid" "$SPINNER_MESSAGE"
-    wait "$api_pid"
-
-    exit_code=$(cat "${temp_response}.exit" 2>/dev/null || echo "1")
-
-    # Read response from file
-    local response=$(cat "$temp_response" 2>/dev/null)
-
-    # Check for final failure after all retries
-    if [ -z "$response" ]; then
-        echo -e "${RED}Error: Failed to get response from Ollama after $MAX_RETRIES attempts${NC}" >&2
-        echo "" >&2
-        echo "All retry attempts exhausted. Possible causes:" >&2
-        echo "  • Model '$OLLAMA_MODEL' not found or not loaded" >&2
-        echo "  • Ollama service stopped during request" >&2
-        echo "  • Out of memory (model too large)" >&2
-        echo "  • Request timeout" >&2
-        echo "" >&2
-
-        # Show actual error if available
-        if [ -s "$temp_error" ]; then
-            echo -e "${YELLOW}Error details: $(cat "$temp_error" | head -1)${NC}" >&2
-            echo "" >&2
-        fi
-
-        echo "Troubleshooting:" >&2
-        echo "  • Check if model exists: ollama list" >&2
-        echo "  • Pull model if needed: ollama pull $OLLAMA_MODEL" >&2
-        echo "  • Verify service: curl $OLLAMA_HOST/api/tags" >&2
-        echo "  • Check service status: ps aux | grep ollama" >&2
-        echo "  • Try smaller model: OLLAMA_MODEL=qwen3:4b gh commit-ai" >&2
-        echo "  • Run with verbose mode: gh commit-ai --verbose" >&2
-
-        rm -f "$temp_response" "$temp_error" "${temp_response}.exit"
-        return 1
-    fi
-
-    # Validate response content
-    if ! validate_api_response "$response"; then
-        echo -e "${RED}Error: Invalid response from Ollama${NC}" >&2
-        echo "" >&2
-        echo "The Ollama API returned an unexpected response format." >&2
-        echo "This could indicate:" >&2
-        echo "  • Model compatibility issues" >&2
-        echo "  • Corrupted model installation" >&2
-        echo "  • Ollama version mismatch" >&2
-        echo "" >&2
-        echo "Try:" >&2
-        echo "  • Update Ollama: brew upgrade ollama" >&2
-        echo "  • Reinstall model: ollama rm $OLLAMA_MODEL && ollama pull $OLLAMA_MODEL" >&2
-        echo "  • Run with verbose mode: gh commit-ai --verbose" >&2
-        rm -f "$temp_response" "$temp_error" "${temp_response}.exit"
-        return 1
-    fi
-
-    rm -f "$temp_error" "${temp_response}.exit"
-
-    if [ "$VERBOSE" = "true" ]; then
-        echo "[Verbose] Response:"
-        echo "$response" | jq '.' 2>/dev/null || echo "$response"
-        echo ""
-    fi
-
-    # Check for errors
-    if echo "$response" | grep -q '"error"'; then
-        local error_msg=$(echo "$response" | grep -o '"error":"[^"]*"' | sed 's/"error":"//;s/"$//')
-        echo -e "${RED}Error from Ollama: $error_msg${NC}" >&2
-        echo "" >&2
-
-        # Check if it's a model not found error
-        if echo "$error_msg" | grep -qi "model.*not found\|pull.*model"; then
-            echo -e "Model '${BLUE}$OLLAMA_MODEL${NC}' is not installed." >&2
-            echo "" >&2
-            echo "To fix this, run:" >&2
-            echo -e "  ${GREEN}ollama pull $OLLAMA_MODEL${NC}" >&2
-            echo "" >&2
-            echo "Or use a different model:" >&2
-            echo -e "  ${GREEN}OLLAMA_MODEL=llama3.2 gh commit-ai${NC}" >&2
-        else
-            echo "Troubleshooting:" >&2
-            echo "  - Check available models: ollama list" >&2
-            echo "  - Verify Ollama status: ollama ps" >&2
-            echo "  - Try verbose mode: gh commit-ai --verbose" >&2
-        fi
-        return 1
-    fi
-
-    # Extract commit message from response
-    # Use awk to properly extract JSON string value (handles escaped quotes)
-    local raw_message=$(echo "$response" | awk -F'"response":"' '{
-        if (NF > 1) {
-            str = $2
-            result = ""
-            escaped = 0
-            for (i = 1; i <= length(str); i++) {
-                c = substr(str, i, 1)
-                if (escaped) {
-                    result = result c
-                    escaped = 0
-                } else if (c == "\\") {
-                    result = result c
-                    escaped = 1
-                } else if (c == "\"") {
-                    break
-                } else {
-                    result = result c
-                }
-            }
-            print result
-        }
-    }')
-    unescape_json "$raw_message"
-}
-
-# Call Anthropic API
-call_anthropic() {
-    local prompt="$1"
-
-    if [ -z "$ANTHROPIC_API_KEY" ]; then
-        show_api_key_error "Anthropic" "ANTHROPIC_API_KEY"
-        exit 1
-    fi
-
-    # Check network connectivity before making API call
-    if ! check_network_connectivity; then
-        show_offline_error "Anthropic"
-        exit 1
-    fi
-
-    # Check if Anthropic API is reachable
-    if ! check_host_reachability "api.anthropic.com"; then
-        echo -e "${RED}Error: Cannot reach Anthropic API${NC}" >&2
-        echo "" >&2
-        echo "The API endpoint api.anthropic.com is not reachable." >&2
-        echo "Possible causes:" >&2
-        echo "  • Anthropic service is down" >&2
-        echo "  • Firewall or network filtering" >&2
-        echo "  • DNS issues" >&2
-        echo "" >&2
-        echo "Try:" >&2
-        echo "  • Check service status: https://status.anthropic.com/" >&2
-        echo "  • Use a different provider (export AI_PROVIDER=groq or ollama)" >&2
-        exit 1
-    fi
-
-    local prompt_escaped=$(escape_json "$prompt")
-
-    if [ "$VERBOSE" = "true" ]; then
-        echo "[Verbose] API Endpoint:${NC} https://api.anthropic.com/v1/messages"
-        echo "[Verbose] Model:${NC} $ANTHROPIC_MODEL"
-    fi
-
-    # Token file for streaming (used to pass token counts out of subshell)
-    local token_file="/tmp/gh-commit-ai-tokens-$$"
-
-    # Try streaming first
-    if should_stream; then
-        local stream_payload=$(printf '{"model":"%s","max_tokens":1024,"temperature":%s,"stream":true,"messages":[{"role":"user","content":"%s"}]}' "$ANTHROPIC_MODEL" "$AI_TEMPERATURE" "$prompt_escaped")
-        local stream_output
-        stream_output=$(create_secure_temp_file "gh-commit-ai-stream") || return 1
-
-        if streaming_api_call \
-            "https://api.anthropic.com/v1/messages" \
-            "$stream_payload" \
-            "$stream_output" \
-            parse_anthropic_stream \
-            -H "Content-Type: application/json" \
-            -H "x-api-key: $ANTHROPIC_API_KEY" \
-            -H "anthropic-version: 2023-06-01"; then
-
-            local result=$(cat "$stream_output" 2>/dev/null)
-            # Read token counts from sidecar files
-            INPUT_TOKENS=$(cat "${stream_output}.input_tokens" 2>/dev/null || echo "0")
-            OUTPUT_TOKENS=$(cat "${stream_output}.output_tokens" 2>/dev/null || echo "0")
-            # Write token counts for parent process
-            echo "${INPUT_TOKENS:-0}" > "${token_file}.input"
-            echo "${OUTPUT_TOKENS:-0}" > "${token_file}.output"
-            rm -f "$stream_output" "${stream_output}.input_tokens" "${stream_output}.output_tokens"
-            if [ -n "$result" ]; then
-                unescape_json "$result"
-                return 0
-            fi
-        fi
-
-        # Streaming failed, fall back
-        rm -f "$stream_output" "${stream_output}.input_tokens" "${stream_output}.output_tokens"
-        printf "\r%-80s\r" " " >&3
-        echo "Streaming failed, retrying..." >&2
-    fi
-
-    # Non-streaming path (original behavior)
-    local json_payload=$(printf '{"model":"%s","max_tokens":1024,"temperature":%s,"messages":[{"role":"user","content":"%s"}]}' "$ANTHROPIC_MODEL" "$AI_TEMPERATURE" "$prompt_escaped")
-
-    if [ "$VERBOSE" = "true" ]; then
-        echo "[Verbose] Request payload:"
-        echo "$json_payload" | jq '.' 2>/dev/null || echo "$json_payload"
-        echo ""
-    fi
-
-    # Run API call with retry logic in background with spinner
-    local temp_response
-    local temp_error
-    temp_response=$(create_secure_temp_file "gh-commit-ai-response") || return 1
-    temp_error=$(create_secure_temp_file "gh-commit-ai-error") || {
-        rm -f "$temp_response"
-        return 1
-    }
-    local exit_code=0
-    (
-        retry_api_call \
-            "https://api.anthropic.com/v1/messages" \
-            "$json_payload" \
-            "$temp_response" \
-            "$temp_error" \
-            "Anthropic" \
-            -H "Content-Type: application/json" \
-            -H "x-api-key: $ANTHROPIC_API_KEY" \
-            -H "anthropic-version: 2023-06-01"
-        echo $? > "${temp_response}.exit"
-    ) &
-    local api_pid=$!
-
-    show_spinner "$api_pid" "$SPINNER_MESSAGE"
-    wait "$api_pid"
-
-    # Read exit code
-    exit_code=$(cat "${temp_response}.exit" 2>/dev/null || echo "1")
-
-    # Read response from file
-    local response=$(cat "$temp_response" 2>/dev/null)
-
-    # Check for final failure after all retries
-    if [ -z "$response" ]; then
-        echo -e "${RED}Error: Failed to get response from Anthropic after $MAX_RETRIES attempts${NC}" >&2
-        echo "" >&2
-        echo "All retry attempts exhausted. This could be due to:" >&2
-        echo "  • Poor network connection" >&2
-        echo "  • API service issues" >&2
-        echo "  • Request timeouts" >&2
-        echo "" >&2
-        echo "Suggestions:" >&2
-        echo "  • Check your internet connection" >&2
-        echo "  • Check Anthropic status: https://status.anthropic.com/" >&2
-        echo "  • Try again in a few minutes" >&2
-        echo "  • Use a different provider: export AI_PROVIDER=ollama" >&2
-        rm -f "$temp_response" "$temp_error" "${temp_response}.exit"
-        return 1
-    fi
-
-    # Validate API response
-    if ! validate_api_response "$response"; then
-        echo -e "${RED}Error: Invalid response from Anthropic${NC}" >&2
-        echo "" >&2
-        echo "The API returned an unexpected response format." >&2
-        echo "This could indicate:" >&2
-        echo "  • API version changes" >&2
-        echo "  • Service degradation" >&2
-        echo "  • Network proxy interference" >&2
-        echo "" >&2
-        echo "Try:" >&2
-        echo "  • Run with verbose mode: gh commit-ai --verbose" >&2
-        echo "  • Use a different provider: export AI_PROVIDER=ollama" >&2
-        rm -f "$temp_response" "$temp_error" "${temp_response}.exit"
-        return 1
-    fi
-
-    # Cleanup temp files
-    rm -f "$temp_error" "${temp_response}.exit"
-
-    if [ "$VERBOSE" = "true" ]; then
-        echo "[Verbose] Response:"
-        echo "$response" | jq '.' 2>/dev/null || echo "$response"
-        echo ""
-    fi
-
-    # Check for errors
-    if echo "$response" | grep -q '"error"'; then
-        local error_type=$(echo "$response" | grep -o '"type":"[^"]*"' | head -1 | sed 's/"type":"//;s/"$//')
-        local error_msg=$(echo "$response" | grep -o '"message":"[^"]*"' | head -1 | sed 's/"message":"//;s/"$//')
-        echo -e "${RED}Error from Anthropic ($error_type): $error_msg" >&2
-
-        if [[ "$error_msg" == *"too long"* ]] || [[ "$error_msg" == *"too large"* ]] || [[ "$error_msg" == *"maximum"* ]]; then
-            show_token_limit_tip "Anthropic"
-        elif [[ "$error_type" == *"authentication"* ]] || [[ "$error_msg" == *"API key"* ]]; then
-            echo "Tip: Check your API key is valid and has credits" >&2
-        elif [[ "$error_type" == *"rate_limit"* ]]; then
-            echo "Tip: You've hit the rate limit. Wait a moment and try again" >&2
-        fi
-        return 1
-    fi
-
-    # Extract token usage (global variables for cost tracking)
-    INPUT_TOKENS=$(echo "$response" | grep -o '"input_tokens":[0-9]*' | head -1 | grep -o '[0-9]*')
-    OUTPUT_TOKENS=$(echo "$response" | grep -o '"output_tokens":[0-9]*' | head -1 | grep -o '[0-9]*')
-
-    # Write token counts for parent process
-    echo "${INPUT_TOKENS:-0}" > "${token_file}.input"
-    echo "${OUTPUT_TOKENS:-0}" > "${token_file}.output"
-
-    # Extract commit message from response
-    # Anthropic returns: {"content":[{"text":"...","type":"text"}],...}
-    # Use awk to properly extract JSON string value (handles escaped quotes)
-    local raw_message=$(echo "$response" | awk -F'"text":"' '{
-        if (NF > 1) {
-            str = $2
-            result = ""
-            escaped = 0
-            for (i = 1; i <= length(str); i++) {
-                c = substr(str, i, 1)
-                if (escaped) {
-                    result = result c
-                    escaped = 0
-                } else if (c == "\\") {
-                    result = result c
-                    escaped = 1
-                } else if (c == "\"") {
-                    break
-                } else {
-                    result = result c
-                }
-            }
-            print result
-            exit
-        }
-    }')
-
-    # Cleanup temp files
-    rm -f "$temp_response"
-
-    unescape_json "$raw_message"
-}
-
-# Call OpenAI API
-call_openai() {
-    local prompt="$1"
-
-    if [ -z "$OPENAI_API_KEY" ]; then
-        show_api_key_error "OpenAI" "OPENAI_API_KEY"
-        exit 1
-    fi
-
-    # Check network connectivity before making API call
-    if ! check_network_connectivity; then
-        show_offline_error "OpenAI"
-        exit 1
-    fi
-
-    # Check if OpenAI API is reachable
-    if ! check_host_reachability "api.openai.com"; then
-        echo -e "${RED}Error: Cannot reach OpenAI API${NC}" >&2
-        echo "" >&2
-        echo "The API endpoint api.openai.com is not reachable." >&2
-        echo "Possible causes:" >&2
-        echo "  • OpenAI service is down" >&2
-        echo "  • Firewall or network filtering" >&2
-        echo "  • DNS issues" >&2
-        echo "" >&2
-        echo "Try:" >&2
-        echo "  • Check service status: https://status.openai.com/" >&2
-        echo "  • Use a different provider (export AI_PROVIDER=groq or ollama)" >&2
-        exit 1
-    fi
-
-    local prompt_escaped=$(escape_json "$prompt")
-
-    if [ "$VERBOSE" = "true" ]; then
-        echo "[Verbose] API Endpoint:${NC} https://api.openai.com/v1/chat/completions"
-        echo "[Verbose] Model:${NC} $OPENAI_MODEL"
-    fi
-
-    # Token file for streaming
-    local token_file="/tmp/gh-commit-ai-tokens-$$"
-
-    # Try streaming first
-    if should_stream; then
-        local stream_payload=$(printf '{"model":"%s","messages":[{"role":"user","content":"%s"}],"temperature":%s,"stream":true,"stream_options":{"include_usage":true}}' "$OPENAI_MODEL" "$prompt_escaped" "$AI_TEMPERATURE")
-        local stream_output
-        stream_output=$(create_secure_temp_file "gh-commit-ai-stream") || return 1
-
-        if streaming_api_call \
-            "https://api.openai.com/v1/chat/completions" \
-            "$stream_payload" \
-            "$stream_output" \
-            parse_openai_stream \
-            -H "Content-Type: application/json" \
-            -H "Authorization: Bearer $OPENAI_API_KEY"; then
-
-            local result=$(cat "$stream_output" 2>/dev/null)
-            INPUT_TOKENS=$(cat "${stream_output}.input_tokens" 2>/dev/null || echo "0")
-            OUTPUT_TOKENS=$(cat "${stream_output}.output_tokens" 2>/dev/null || echo "0")
-            echo "${INPUT_TOKENS:-0}" > "${token_file}.input"
-            echo "${OUTPUT_TOKENS:-0}" > "${token_file}.output"
-            rm -f "$stream_output" "${stream_output}.input_tokens" "${stream_output}.output_tokens"
-            if [ -n "$result" ]; then
-                unescape_json "$result"
-                return 0
-            fi
-        fi
-
-        rm -f "$stream_output" "${stream_output}.input_tokens" "${stream_output}.output_tokens"
-        printf "\r%-80s\r" " " >&3
-        echo "Streaming failed, retrying..." >&2
-    fi
-
-    # Non-streaming path
-    local json_payload=$(printf '{"model":"%s","messages":[{"role":"user","content":"%s"}],"temperature":%s}' "$OPENAI_MODEL" "$prompt_escaped" "$AI_TEMPERATURE")
-
-    if [ "$VERBOSE" = "true" ]; then
-        echo "[Verbose] Request payload:"
-        echo "$json_payload" | jq '.' 2>/dev/null || echo "$json_payload"
-        echo ""
-    fi
-
-    # Run API call with retry logic in background with spinner
-    local temp_response
-    local temp_error
-    temp_response=$(create_secure_temp_file "gh-commit-ai-response") || return 1
-    temp_error=$(create_secure_temp_file "gh-commit-ai-error") || {
-        rm -f "$temp_response"
-        return 1
-    }
-    local exit_code=0
-    (
-        retry_api_call \
-            "https://api.openai.com/v1/chat/completions" \
-            "$json_payload" \
-            "$temp_response" \
-            "$temp_error" \
-            "OpenAI" \
-            -H "Content-Type: application/json" \
-            -H "Authorization: Bearer $OPENAI_API_KEY"
-        echo $? > "${temp_response}.exit"
-    ) &
-    local api_pid=$!
-
-    show_spinner "$api_pid" "$SPINNER_MESSAGE"
-    wait "$api_pid"
-
-    # Read exit code
-    exit_code=$(cat "${temp_response}.exit" 2>/dev/null || echo "1")
-
-    # Read response from file
-    local response=$(cat "$temp_response" 2>/dev/null)
-
-    # Check for final failure after all retries
-    if [ -z "$response" ]; then
-        echo -e "${RED}Error: Failed to get response from OpenAI after $MAX_RETRIES attempts${NC}" >&2
-        echo "" >&2
-        echo "All retry attempts exhausted. Possible causes:" >&2
-        echo "  • Network connection issues" >&2
-        echo "  • OpenAI API is experiencing downtime" >&2
-        echo "  • Request timeout (large diff or slow connection)" >&2
-        echo "  • Rate limiting or quota exceeded" >&2
-        echo "" >&2
-        echo "Suggestions:" >&2
-        echo "  • Check your internet: ping api.openai.com" >&2
-        echo "  • Verify service status: https://status.openai.com/" >&2
-        echo "  • Try reducing diff size: DIFF_MAX_LINES=50 gh commit-ai" >&2
-        echo "  • Use a different provider:" >&2
-        echo "    - Groq (fast, free tier): export AI_PROVIDER=groq" >&2
-        echo "    - Ollama (local, no internet): export AI_PROVIDER=ollama" >&2
-        echo "  • Wait a few minutes and try again" >&2
-        rm -f "$temp_response" "$temp_error" "${temp_response}.exit"
-        return 1
-    fi
-
-    # Validate response content
-    if ! validate_api_response "$response"; then
-        echo -e "${RED}Error: Invalid response from OpenAI${NC}" >&2
-        echo "" >&2
-        echo "The API returned an unexpected response format." >&2
-        echo "This could indicate:" >&2
-        echo "  • API version changes" >&2
-        echo "  • Service degradation" >&2
-        echo "  • Network proxy interference" >&2
-        echo "" >&2
-        echo "Try:" >&2
-        echo "  • Run with verbose mode: gh commit-ai --verbose" >&2
-        echo "  • Use a different provider: export AI_PROVIDER=ollama" >&2
-        rm -f "$temp_response" "$temp_error" "${temp_response}.exit"
-        return 1
-    fi
-
-    # Cleanup temp files
-    rm -f "$temp_error" "${temp_response}.exit"
-
-    if [ "$VERBOSE" = "true" ]; then
-        echo "[Verbose] Response:"
-        echo "$response" | jq '.' 2>/dev/null || echo "$response"
-        echo ""
-    fi
-
-    # Check for errors
-    if echo "$response" | grep -q '"error"'; then
-        local error_type=$(echo "$response" | grep -o '"type":"[^"]*"' | head -1 | sed 's/"type":"//;s/"$//')
-        local error_msg=$(echo "$response" | grep -o '"message":"[^"]*"' | head -1 | sed 's/"message":"//;s/"$//')
-        local error_code=$(echo "$response" | grep -o '"code":"[^"]*"' | head -1 | sed 's/"code":"//;s/"$//')
-
-        echo -e "${RED}Error from OpenAI" >&2
-        [ -n "$error_code" ] && echo -e "${RED}Code: $error_code" >&2
-        [ -n "$error_type" ] && echo -e "${RED}Type: $error_type" >&2
-        [ -n "$error_msg" ] && echo -e "${RED}Message: $error_msg" >&2
-
-        if [[ "$error_code" == *"context_length"* ]] || [[ "$error_msg" == *"too large"* ]] || [[ "$error_msg" == *"maximum context"* ]] || [[ "$error_msg" == *"reduce"* ]]; then
-            show_token_limit_tip "OpenAI"
-        elif [[ "$error_code" == *"invalid_api_key"* ]] || [[ "$error_msg" == *"API key"* ]]; then
-            echo "Tip: Check your API key is valid and has credits" >&2
-        elif [[ "$error_code" == *"rate_limit"* ]]; then
-            echo "Tip: You've hit the rate limit. Wait a moment and try again" >&2
-        elif [[ "$error_code" == *"model_not_found"* ]]; then
-            echo "Tip: The model '$OPENAI_MODEL' doesn't exist or you don't have access" >&2
-        fi
-        return 1
-    fi
-
-    # Extract token usage (global variables for cost tracking)
-    INPUT_TOKENS=$(echo "$response" | grep -o '"prompt_tokens":[0-9]*' | head -1 | grep -o '[0-9]*')
-    OUTPUT_TOKENS=$(echo "$response" | grep -o '"completion_tokens":[0-9]*' | head -1 | grep -o '[0-9]*')
-
-    # Write token counts for parent process
-    echo "${INPUT_TOKENS:-0}" > "${token_file}.input"
-    echo "${OUTPUT_TOKENS:-0}" > "${token_file}.output"
-
-    # Extract commit message from response
-    # OpenAI returns: {"choices":[{"message":{"content":"..."},...}],...}
-    # Use awk to properly extract JSON string value (handles escaped quotes)
-    local raw_message=$(echo "$response" | awk -F'"content":"' '{
-        if (NF > 1) {
-            str = $2
-            result = ""
-            escaped = 0
-            for (i = 1; i <= length(str); i++) {
-                c = substr(str, i, 1)
-                if (escaped) {
-                    result = result c
-                    escaped = 0
-                } else if (c == "\\") {
-                    result = result c
-                    escaped = 1
-                } else if (c == "\"") {
-                    break
-                } else {
-                    result = result c
-                }
-            }
-            print result
-            exit
-        }
-    }')
-
-    # Cleanup temp files
-    rm -f "$temp_response"
-
-    unescape_json "$raw_message"
-}
-
-call_groq() {
-    local prompt="$1"
-
-    if [ -z "$GROQ_API_KEY" ]; then
-        show_api_key_error "Groq" "GROQ_API_KEY"
-        exit 1
-    fi
-
-    # Check network connectivity before making API call
-    if ! check_network_connectivity; then
-        show_offline_error "Groq"
-        exit 1
-    fi
-
-    # Check if Groq API is reachable
-    if ! check_host_reachability "api.groq.com"; then
-        echo -e "${RED}Error: Cannot reach Groq API${NC}" >&2
-        echo "" >&2
-        echo "The API endpoint api.groq.com is not reachable." >&2
-        echo "Possible causes:" >&2
-        echo "  • Groq service is down" >&2
-        echo "  • Firewall or network filtering" >&2
-        echo "  • DNS issues" >&2
-        echo "" >&2
-        echo "Try:" >&2
-        echo "  • Check service status: https://status.groq.com/" >&2
-        echo "  • Use a different provider (export AI_PROVIDER=ollama)" >&2
-        exit 1
-    fi
-
-    local prompt_escaped=$(escape_json "$prompt")
-
-    if [ "$VERBOSE" = "true" ]; then
-        echo "[Verbose] API Endpoint:${NC} https://api.groq.com/openai/v1/chat/completions"
-        echo "[Verbose] Model:${NC} $GROQ_MODEL"
-    fi
-
-    # Token file for streaming
-    local token_file="/tmp/gh-commit-ai-tokens-$$"
-
-    # Try streaming first (Groq uses OpenAI-compatible format)
-    if should_stream; then
-        local stream_payload=$(printf '{"model":"%s","messages":[{"role":"user","content":"%s"}],"temperature":%s,"stream":true,"stream_options":{"include_usage":true}}' "$GROQ_MODEL" "$prompt_escaped" "$AI_TEMPERATURE")
-        local stream_output
-        stream_output=$(create_secure_temp_file "gh-commit-ai-stream") || return 1
-
-        if streaming_api_call \
-            "https://api.groq.com/openai/v1/chat/completions" \
-            "$stream_payload" \
-            "$stream_output" \
-            parse_openai_stream \
-            -H "Content-Type: application/json" \
-            -H "Authorization: Bearer $GROQ_API_KEY"; then
-
-            local result=$(cat "$stream_output" 2>/dev/null)
-            INPUT_TOKENS=$(cat "${stream_output}.input_tokens" 2>/dev/null || echo "0")
-            OUTPUT_TOKENS=$(cat "${stream_output}.output_tokens" 2>/dev/null || echo "0")
-            echo "${INPUT_TOKENS:-0}" > "${token_file}.input"
-            echo "${OUTPUT_TOKENS:-0}" > "${token_file}.output"
-            rm -f "$stream_output" "${stream_output}.input_tokens" "${stream_output}.output_tokens"
-            if [ -n "$result" ]; then
-                unescape_json "$result"
-                return 0
-            fi
-        fi
-
-        rm -f "$stream_output" "${stream_output}.input_tokens" "${stream_output}.output_tokens"
-        printf "\r%-80s\r" " " >&3
-        echo "Streaming failed, retrying..." >&2
-    fi
-
-    # Non-streaming path
-    local json_payload=$(printf '{"model":"%s","messages":[{"role":"user","content":"%s"}],"temperature":%s}' "$GROQ_MODEL" "$prompt_escaped" "$AI_TEMPERATURE")
-
-    if [ "$VERBOSE" = "true" ]; then
-        echo "[Verbose] Request payload:"
-        echo "$json_payload" | jq '.' 2>/dev/null || echo "$json_payload"
-        echo ""
-    fi
-
-    # Run API call with retry logic in background with spinner
-    local temp_response
-    local temp_error
-    temp_response=$(create_secure_temp_file "gh-commit-ai-response") || return 1
-    temp_error=$(create_secure_temp_file "gh-commit-ai-error") || {
-        rm -f "$temp_response"
-        return 1
-    }
-    local exit_code=0
-    (
-        retry_api_call \
-            "https://api.groq.com/openai/v1/chat/completions" \
-            "$json_payload" \
-            "$temp_response" \
-            "$temp_error" \
-            "Groq" \
-            -H "Content-Type: application/json" \
-            -H "Authorization: Bearer $GROQ_API_KEY"
-        echo $? > "${temp_response}.exit"
-    ) &
-    local api_pid=$!
-
-    show_spinner "$api_pid" "$SPINNER_MESSAGE"
-    wait "$api_pid"
-
-    # Read exit code
-    exit_code=$(cat "${temp_response}.exit" 2>/dev/null || echo "1")
-
-    # Read response from file
-    local response=$(cat "$temp_response" 2>/dev/null)
-
-    # Check for final failure after all retries
-    if [ -z "$response" ]; then
-        echo -e "${RED}Error: Failed to get response from Groq after $MAX_RETRIES attempts${NC}" >&2
-        echo "" >&2
-        echo "All retry attempts exhausted. Possible causes:" >&2
-        echo "  • Network connection issues" >&2
-        echo "  • Groq API is experiencing downtime" >&2
-        echo "  • Request timeout (large diff or slow connection)" >&2
-        echo "  • Rate limiting or quota exceeded" >&2
-        echo "" >&2
-        echo "Suggestions:" >&2
-        echo "  • Check your internet: ping api.groq.com" >&2
-        echo "  • Verify service status: https://status.groq.com/" >&2
-        echo "  • Try reducing diff size: DIFF_MAX_LINES=50 gh commit-ai" >&2
-        echo "  • Use a different provider:" >&2
-        echo "    - Ollama (local, no internet): export AI_PROVIDER=ollama" >&2
-        echo "    - Anthropic: export AI_PROVIDER=anthropic" >&2
-        echo "  • Wait a few minutes and try again" >&2
-        rm -f "$temp_response" "$temp_error" "${temp_response}.exit"
-        return 1
-    fi
-
-    # Validate response content
-    if ! validate_api_response "$response"; then
-        echo -e "${RED}Error: Invalid response from Groq${NC}" >&2
-        echo "" >&2
-        echo "The API returned an unexpected response format." >&2
-        echo "This could indicate:" >&2
-        echo "  • API version changes" >&2
-        echo "  • Service degradation" >&2
-        echo "  • Network proxy interference" >&2
-        echo "" >&2
-        echo "Try:" >&2
-        echo "  • Run with verbose mode: gh commit-ai --verbose" >&2
-        echo "  • Use a different provider: export AI_PROVIDER=ollama" >&2
-        rm -f "$temp_response" "$temp_error" "${temp_response}.exit"
-        return 1
-    fi
-
-    # Cleanup temp files
-    rm -f "$temp_error" "${temp_response}.exit"
-
-    if [ "$VERBOSE" = "true" ]; then
-        echo "[Verbose] Response:"
-        echo "$response" | jq '.' 2>/dev/null || echo "$response"
-        echo ""
-    fi
-
-    # Check for errors
-    if echo "$response" | grep -q '"error"'; then
-        local error_type=$(echo "$response" | grep -o '"type":"[^"]*"' | head -1 | sed 's/"type":"//;s/"$//')
-        local error_msg=$(echo "$response" | grep -o '"message":"[^"]*"' | head -1 | sed 's/"message":"//;s/"$//')
-        local error_code=$(echo "$response" | grep -o '"code":"[^"]*"' | head -1 | sed 's/"code":"//;s/"$//')
-
-        echo -e "${RED}Error from Groq" >&2
-        [ -n "$error_code" ] && echo -e "${RED}Code: $error_code" >&2
-        [ -n "$error_type" ] && echo -e "${RED}Type: $error_type" >&2
-        [ -n "$error_msg" ] && echo -e "${RED}Message: $error_msg" >&2
-
-        if [[ "$error_msg" == *"too large"* ]] || [[ "$error_msg" == *"reduce your message size"* ]] || [[ "$error_type" == *"tokens"* ]]; then
-            show_token_limit_tip "Groq"
-        elif [[ "$error_code" == *"invalid_api_key"* ]] || [[ "$error_msg" == *"API key"* ]]; then
-            echo "Tip: Check your API key is valid" >&2
-        elif [[ "$error_code" == *"rate_limit"* ]]; then
-            echo "Tip: You've hit the rate limit. Wait a moment and try again" >&2
-        elif [[ "$error_code" == *"model_not_found"* ]]; then
-            echo "Tip: The model '$GROQ_MODEL' doesn't exist or you don't have access" >&2
-        fi
-        return 1
-    fi
-
-    # Extract token usage (global variables for cost tracking)
-    INPUT_TOKENS=$(echo "$response" | grep -o '"prompt_tokens":[0-9]*' | head -1 | grep -o '[0-9]*')
-    OUTPUT_TOKENS=$(echo "$response" | grep -o '"completion_tokens":[0-9]*' | head -1 | grep -o '[0-9]*')
-
-    # Write token counts for parent process
-    echo "${INPUT_TOKENS:-0}" > "${token_file}.input"
-    echo "${OUTPUT_TOKENS:-0}" > "${token_file}.output"
-
-    # Extract commit message from response
-    # Groq uses OpenAI format: {"choices":[{"message":{"content":"..."},...}],...}
-    # Use awk to properly extract JSON string value (handles escaped quotes)
-    local raw_message=$(echo "$response" | awk -F'"content":"' '{
-        if (NF > 1) {
-            str = $2
-            result = ""
-            escaped = 0
-            for (i = 1; i <= length(str); i++) {
-                c = substr(str, i, 1)
-                if (escaped) {
-                    result = result c
-                    escaped = 0
-                } else if (c == "\\") {
-                    result = result c
-                    escaped = 1
-                } else if (c == "\"") {
-                    break
-                } else {
-                    result = result c
-                }
-            }
-            print result
-            exit
-        }
-    }')
-
-    # Cleanup temp files
-    rm -f "$temp_response"
-
-    unescape_json "$raw_message"
-}
-
-# ---------------------------------------------------------------------------
-# Provider dispatch with automatic local fallback
-# ---------------------------------------------------------------------------
-
-# Records the provider that actually produced output (may differ from the
-# configured AI_PROVIDER when a fallback kicks in). Read by callers so analytics
-# and cost tracking point at the model that ran.
-EFFECTIVE_PROVIDER_FILE="/tmp/gh-commit-ai-provider-$$"
-
-# Route a prompt to a named provider.
-dispatch_provider() {
-    local provider="$1"
-    local prompt="$2"
-    case "$provider" in
-        ollama)    call_ollama "$prompt" ;;
-        anthropic) call_anthropic "$prompt" ;;
-        openai)    call_openai "$prompt" ;;
-        groq)      call_groq "$prompt" ;;
-        *)
-            echo -e "${RED}Error: Unknown AI provider '$provider'${NC}" >&2
-            return 1
-            ;;
-    esac
-}
-
-# Is the local fallback provider ready to serve? (Only Ollama needs a live check;
-# other providers gate on their own API keys inside their call_* functions.)
-fallback_is_available() {
-    [ "$FALLBACK_PROVIDER" = "ollama" ] || return 0
-    curl -s --connect-timeout 1 "$OLLAMA_HOST/api/tags" >/dev/null 2>&1 || return 1
-    local count
-    count=$(curl -s "$OLLAMA_HOST/api/tags" 2>/dev/null | grep -o '"name":"[^"]*"' | wc -l)
-    [ "$count" -gt 0 ]
-}
-
-# Choose which local model to use for the fallback: honor the configured
-# OLLAMA_MODEL if it's actually installed, otherwise auto-pick the best one
-# available so the fallback doesn't fail on a missing model.
-pick_fallback_ollama_model() {
-    local installed
-    installed=$(curl -s "$OLLAMA_HOST/api/tags" 2>/dev/null | grep -o '"name":"[^"]*"' | sed 's/"name":"//;s/"//')
-    if [ -n "$OLLAMA_MODEL" ] && echo "$installed" | grep -qxF "$OLLAMA_MODEL"; then
-        echo "$OLLAMA_MODEL"
-        return
-    fi
-    get_best_ollama_model
-}
-
-# Resolve the model name configured for a given provider.
-provider_model() {
-    case "$1" in
-        ollama)    echo "$OLLAMA_MODEL" ;;
-        anthropic) echo "$ANTHROPIC_MODEL" ;;
-        openai)    echo "$OPENAI_MODEL" ;;
-        groq)      echo "$GROQ_MODEL" ;;
-        *)         echo "" ;;
-    esac
-}
-
-# Daily-rotated error log. The full provider error output goes here instead of the
-# terminal. The file is reset the first time it is written on a new day, so it
-# never grows beyond a single day's worth of failures.
-ERROR_LOG="${GH_COMMIT_AI_ERROR_LOG:-/tmp/gh-commit-ai-errors.log}"
-
-log_provider_error() {
-    local provider="$1" model="$2" detail_file="$3"
-    local today ts label first_date esc
-    today=$(date +%Y-%m-%d 2>/dev/null || echo "unknown")
-    ts=$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "$today")
-    esc=$(printf '\033')   # literal ESC byte, portable across GNU/BSD sed
-    label="$provider"
-    if [ -n "$model" ]; then label="$provider/$model"; fi
-
-    # Daily rotation: start a fresh log if the existing one isn't from today.
-    if [ -f "$ERROR_LOG" ]; then
-        first_date=$(head -1 "$ERROR_LOG" 2>/dev/null | grep -oE '^[0-9]{4}-[0-9]{2}-[0-9]{2}' || true)
-        if [ "$first_date" != "$today" ]; then
-            : > "$ERROR_LOG" 2>/dev/null || true
-        fi
-    fi
-
-    {
-        echo "$ts  [$label]"
-        if [ -s "$detail_file" ]; then
-            # Strip ANSI color codes and indent for readability.
-            sed -E "s/${esc}\[[0-9;]*m//g; s/^/    /" "$detail_file" 2>/dev/null || true
-        else
-            echo "    (no error detail captured)"
-        fi
-        echo "------------------------------------------------------------"
-    } >> "$ERROR_LOG" 2>/dev/null || true
-    return 0
-}
-
-# Log the full error quietly and show the user a single concise line.
-report_provider_failure() {
-    local provider="$1" model="$2" detail_file="$3"
-    local label="$provider"
-    if [ -n "$model" ]; then label="$provider/$model"; fi
-    log_provider_error "$provider" "$model" "$detail_file"
-    echo -e "${RED}✗ Model ${label} failed.${NC} See error log: $ERROR_LOG" >&2
-    return 0
-}
-
-# Call the configured provider; on failure, log the (verbose) error to ERROR_LOG,
-# tell the user where to find it in one line, then transparently retry with the
-# local fallback provider so a commit message still gets generated. Records the
-# provider that produced output in EFFECTIVE_PROVIDER_FILE.
-call_provider_with_fallback() {
-    local prompt="$1"
-    local result="" rc=0
-    local errfile="/tmp/gh-commit-ai-provider-err-$$"
-
-    printf '%s' "$AI_PROVIDER" > "$EFFECTIVE_PROVIDER_FILE" 2>/dev/null || true
-
-    # Primary provider. Capture fd 2 (error detail) to a file; the spinner uses
-    # fd 3 and still reaches the terminal. '|| rc=$?' keeps set -e from aborting
-    # here so we can fall back instead of dying on the first failure.
-    : > "$errfile" 2>/dev/null || true
-    rc=0
-    result=$(dispatch_provider "$AI_PROVIDER" "$prompt" 2>"$errfile") || rc=$?
-    if [ "$rc" -eq 0 ] && [ -n "$result" ]; then
-        rm -f "$errfile"
-        printf '%s\n' "$result"
-        return 0
-    fi
-
-    report_provider_failure "$AI_PROVIDER" "$(provider_model "$AI_PROVIDER")" "$errfile"
-    rm -f "$errfile"
-
-    # Fall back to a local model when enabled, different, and actually available.
-    if [ "$ENABLE_FALLBACK" = "true" ] && [ "$AI_PROVIDER" != "$FALLBACK_PROVIDER" ] && fallback_is_available; then
-        if [ "$FALLBACK_PROVIDER" = "ollama" ]; then
-            OLLAMA_MODEL=$(pick_fallback_ollama_model 2>/dev/null || echo "$OLLAMA_MODEL")
-        fi
-        echo -e "↪ Falling back to $FALLBACK_PROVIDER ($(provider_model "$FALLBACK_PROVIDER"))" >&2
-
-        : > "$errfile" 2>/dev/null || true
-        rc=0
-        result=$(dispatch_provider "$FALLBACK_PROVIDER" "$prompt" 2>"$errfile") || rc=$?
-        if [ "$rc" -eq 0 ] && [ -n "$result" ]; then
-            rm -f "$errfile"
-            printf '%s' "$FALLBACK_PROVIDER" > "$EFFECTIVE_PROVIDER_FILE" 2>/dev/null || true
-            printf '%s\n' "$result"
-            return 0
-        fi
-        report_provider_failure "$FALLBACK_PROVIDER" "$(provider_model "$FALLBACK_PROVIDER")" "$errfile"
-        rm -f "$errfile"
-    fi
-
-    return 1
 }
 
 # Handle code review mode (needs AI functions defined above)
@@ -7648,7 +7795,7 @@ fi
 # Handle multiple options mode
 if [ "$MULTIPLE_OPTIONS" = "true" ]; then
     # Clean up any existing temp files
-    rm -f /tmp/option_*.txt /tmp/reasoning_*.txt /tmp/ai_recommendation.txt 2>/dev/null
+    rm -f "$OPTIONS_DIR"/option_*.txt "$OPTIONS_DIR"/reasoning_*.txt "$OPTIONS_DIR/ai_recommendation.txt" 2>/dev/null
 
     # Parse options from response
     num_options=$(parse_multiple_options "$COMMIT_MSG")
@@ -7656,10 +7803,10 @@ if [ "$MULTIPLE_OPTIONS" = "true" ]; then
     # Enforce lowercase on each option (unless disabled)
     if [ "$NO_LOWERCASE" != "true" ]; then
         for i in $(seq 1 $num_options); do
-            if [ -f "/tmp/option_${i}.txt" ]; then
-                option_content=$(cat "/tmp/option_${i}.txt")
+            if [ -f "$OPTIONS_DIR/option_${i}.txt" ]; then
+                option_content=$(cat "$OPTIONS_DIR/option_${i}.txt")
                 lowercased=$(enforce_lowercase "$option_content")
-                echo "$lowercased" > "/tmp/option_${i}.txt"
+                echo "$lowercased" > "$OPTIONS_DIR/option_${i}.txt"
             fi
         done
     fi
@@ -7667,10 +7814,10 @@ if [ "$MULTIPLE_OPTIONS" = "true" ]; then
     # Auto-fix common formatting issues on each option (unless disabled)
     if [ "$AUTO_FIX" = "true" ]; then
         for i in $(seq 1 $num_options); do
-            if [ -f "/tmp/option_${i}.txt" ]; then
-                option_content=$(cat "/tmp/option_${i}.txt")
+            if [ -f "$OPTIONS_DIR/option_${i}.txt" ]; then
+                option_content=$(cat "$OPTIONS_DIR/option_${i}.txt")
                 fixed=$(auto_fix_message "$option_content")
-                echo "$fixed" > "/tmp/option_${i}.txt"
+                echo "$fixed" > "$OPTIONS_DIR/option_${i}.txt"
             fi
         done
     fi
@@ -7680,10 +7827,10 @@ if [ "$MULTIPLE_OPTIONS" = "true" ]; then
         PROJECT_TYPE=$(detect_project_type)
         TEMPLATE=$(load_template "$PROJECT_TYPE")
         for i in $(seq 1 $num_options); do
-            if [ -f "/tmp/option_${i}.txt" ]; then
-                option_content=$(cat "/tmp/option_${i}.txt")
+            if [ -f "$OPTIONS_DIR/option_${i}.txt" ]; then
+                option_content=$(cat "$OPTIONS_DIR/option_${i}.txt")
                 templated=$(apply_template "$TEMPLATE" "$option_content")
-                echo "$templated" > "/tmp/option_${i}.txt"
+                echo "$templated" > "$OPTIONS_DIR/option_${i}.txt"
             fi
         done
     fi
@@ -7706,13 +7853,13 @@ if [ "$MULTIPLE_OPTIONS" = "true" ]; then
 
     if [ "$selected" = "cancelled" ]; then
         echo "Commit cancelled"
-        rm -f /tmp/option_*.txt /tmp/reasoning_*.txt /tmp/ai_recommendation.txt 2>/dev/null
+        rm -f "$OPTIONS_DIR"/option_*.txt "$OPTIONS_DIR"/reasoning_*.txt "$OPTIONS_DIR/ai_recommendation.txt" 2>/dev/null
         exit 0
     fi
 
     # Load selected option
-    COMMIT_MSG=$(cat "/tmp/option_${selected}.txt")
-    rm -f /tmp/option_*.txt /tmp/reasoning_*.txt /tmp/ai_recommendation.txt 2>/dev/null
+    COMMIT_MSG=$(cat "$OPTIONS_DIR/option_${selected}.txt")
+    rm -f "$OPTIONS_DIR"/option_*.txt "$OPTIONS_DIR"/reasoning_*.txt "$OPTIONS_DIR/ai_recommendation.txt" 2>/dev/null
 
     # Save to message history
     save_message_history "$COMMIT_MSG"
@@ -7812,10 +7959,13 @@ EOF
                 exit 1
             fi
         else
-            # Stage all changes if nothing is staged
+            # Stage all changes if nothing is staged. The analysis pass folded
+            # untracked files into the diff for exactly this reason, so what is
+            # staged here is the same set that was summarised and secret-scanned.
             if git diff --cached --quiet; then
-                echo "Staging all changes"
+                echo "Staging all changes:"
                 git add -A
+                git diff --cached --name-only | sed 's/^/  /'
             fi
 
             # Commit with the generated message using HEREDOC for proper newline handling

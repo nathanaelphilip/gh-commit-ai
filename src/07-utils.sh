@@ -99,6 +99,38 @@ smart_sample_diff() {
     rm -f "$temp_file" "$priority_file"
 }
 
+# Build a diff for untracked (but not ignored) files.
+#
+# `git diff` only ever reports tracked files, yet the commit path stages with
+# `git add -A`, which also sweeps up untracked ones. Left alone, that means a
+# brand-new file gets committed under a message that never described it and,
+# worse, never passed through the secret scanner. Producing a real diff for
+# those files here keeps "what we analyze" and "what we commit" the same set.
+#
+# Binary files and anything past max_files are skipped: they are noise in a
+# commit message and can be enormous.
+untracked_files_diff() {
+    local max_files="${1:-25}"
+    local file
+    local count=0
+
+    while IFS= read -r -d '' file; do
+        [ -f "$file" ] || continue
+        grep -Iq . "$file" 2>/dev/null || continue
+
+        count=$((count + 1))
+        [ "$count" -le "$max_files" ] || break
+
+        # --no-index exits 1 whenever the files differ, which is always here.
+        git diff --no-index -- /dev/null "$file" 2>/dev/null || true
+    done < <(git ls-files --others --exclude-standard -z 2>/dev/null)
+}
+
+# List untracked (but not ignored) files, one per line.
+untracked_files_list() {
+    git ls-files --others --exclude-standard 2>/dev/null || true
+}
+
 # Analyze commit size (count lines changed)
 analyze_commit_size() {
     local diff="$1"

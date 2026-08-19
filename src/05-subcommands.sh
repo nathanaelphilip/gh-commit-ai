@@ -537,36 +537,19 @@ Be specific and practical."
     fi
 }
 
-# Helper function to call AI for split suggestions
+# Helper function to call AI for split suggestions.
+#
+# Goes through call_provider_with_fallback rather than dispatching to the
+# provider functions directly, so this path gets the same retry, fallback and
+# ERROR_LOG treatment as commit-message generation. (The old inline `case` also
+# carried a dead `if [ "$AI_PROVIDER" = "auto" ]` branch that discarded the
+# detection result and never assigned AI_PROVIDER - resolution already happened
+# in 04-providers-detect.sh long before this ran.)
 call_ai_for_split() {
     local prompt="$1"
 
     require_ai_provider
-
-    # Detect and use available AI provider
-    if [ "$AI_PROVIDER" = "auto" ]; then
-        detect_available_providers > /dev/null
-    fi
-
-    # Route to appropriate provider
-    case "$AI_PROVIDER" in
-        ollama)
-            call_ollama "$prompt"
-            ;;
-        anthropic)
-            call_anthropic "$prompt"
-            ;;
-        openai)
-            call_openai "$prompt"
-            ;;
-        groq)
-            call_groq "$prompt"
-            ;;
-        *)
-            echo -e "${RED}Error: Unknown AI provider: $AI_PROVIDER${NC}" >&2
-            exit 1
-            ;;
-    esac
+    call_provider_with_fallback "$prompt"
 }
 
 # Generate code review for changes
@@ -742,26 +725,10 @@ Provide your review:"
 
     require_ai_provider
 
-    # Call AI provider for review
+    # Call AI provider for review, through the shared dispatcher so a failure
+    # here gets the same fallback and ERROR_LOG detail as the commit path.
     local review_result
-    case "$AI_PROVIDER" in
-        ollama)
-            review_result=$(call_ollama "$review_prompt")
-            ;;
-        anthropic)
-            review_result=$(call_anthropic "$review_prompt")
-            ;;
-        openai)
-            review_result=$(call_openai "$review_prompt")
-            ;;
-        groq)
-            review_result=$(call_groq "$review_prompt")
-            ;;
-        *)
-            echo -e "${RED}Error: Unknown AI provider: $AI_PROVIDER${NC}" >&2
-            exit 1
-            ;;
-    esac
+    review_result=$(call_provider_with_fallback "$review_prompt") || review_result=""
 
     # Restore original models
     OLLAMA_MODEL="$original_ollama_model"
@@ -934,26 +901,10 @@ FORMAT:
 
     require_ai_provider
 
-    # Call AI to generate PR description
+    # Call AI to generate PR description, through the shared dispatcher so a
+    # failure here gets the same fallback and ERROR_LOG detail as the commit path.
     local pr_description=""
-    case "$AI_PROVIDER" in
-        ollama)
-            pr_description=$(call_ollama "$pr_prompt")
-            ;;
-        anthropic)
-            pr_description=$(call_anthropic "$pr_prompt")
-            ;;
-        openai)
-            pr_description=$(call_openai "$pr_prompt")
-            ;;
-        groq)
-            pr_description=$(call_groq "$pr_prompt")
-            ;;
-        *)
-            echo -e "${RED}Error: Unknown AI provider '$AI_PROVIDER'${NC}" >&2
-            exit 1
-            ;;
-    esac
+    pr_description=$(call_provider_with_fallback "$pr_prompt") || pr_description=""
 
     # Strip any markdown fences
     pr_description=$(echo "$pr_description" | awk '

@@ -1,7 +1,10 @@
-# Secret detection: scan diff before sending to cloud providers
-if [ "$AI_PROVIDER" != "ollama" ] && [ "$SKIP_SECRET_SCAN" != "true" ] && [ -n "$GIT_DIFF" ]; then
+# Secret detection: scan diff before sending to cloud providers.
+# Considers every provider that could receive the diff - primary, pipeline
+# analysis stage, and fallback - not just $AI_PROVIDER.
+SECRET_SCAN_TARGETS=$(cloud_providers_in_play)
+if [ -n "$SECRET_SCAN_TARGETS" ] && [ "$SKIP_SECRET_SCAN" != "true" ] && [ -n "$GIT_DIFF" ]; then
     if ! detect_secrets_in_diff "$GIT_DIFF"; then
-        if ! handle_detected_secrets "$AI_PROVIDER"; then
+        if ! handle_detected_secrets "$(echo "$SECRET_SCAN_TARGETS" | tr ' ' '/')"; then
             exit 0
         fi
     fi

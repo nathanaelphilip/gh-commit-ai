@@ -20,6 +20,26 @@ create_secure_temp_file() {
     echo "$temp_file"
 }
 
+# Create a secure temporary directory with restricted permissions (700)
+# Returns the path to the created directory
+create_secure_temp_dir() {
+    local prefix="${1:-gh-commit-ai}"
+    local temp_dir
+
+    temp_dir=$(mktemp -d "/tmp/${prefix}.XXXXXXXXXX") || {
+        echo -e "${RED}Error: Failed to create secure temporary directory${NC}" >&2
+        return 1
+    }
+
+    chmod 700 "$temp_dir" 2>/dev/null || {
+        echo -e "${RED}Error: Failed to set secure permissions on temporary directory${NC}" >&2
+        rm -rf "$temp_dir"
+        return 1
+    }
+
+    echo "$temp_dir"
+}
+
 # Validate that a parameter is a positive integer
 # Usage: validate_positive_integer <value> <param_name>
 # Returns: 0 if valid, 1 if invalid
@@ -171,6 +191,39 @@ detect_secrets_in_diff() {
     fi
 
     return 0
+}
+
+# List every provider that could receive the diff on this run, excluding the
+# local one. The diff does not only go to $AI_PROVIDER: the two-stage pipeline
+# can route Stage 1 to $ANALYSIS_PROVIDER, and a primary failure can hand the
+# same diff to $FALLBACK_PROVIDER. Gating the secret scan on $AI_PROVIDER alone
+# meant `AI_PROVIDER=ollama` skipped the scan while a cloud analysis or fallback
+# provider still received the raw diff.
+# Output: space-separated provider names, empty if everything stays local.
+cloud_providers_in_play() {
+    local candidates="$AI_PROVIDER"
+
+    if [ "$PIPELINE_ENABLED" = "true" ] && [ -n "$ANALYSIS_PROVIDER" ]; then
+        candidates="$candidates $ANALYSIS_PROVIDER"
+    fi
+
+    if [ "$ENABLE_FALLBACK" = "true" ] && [ -n "$FALLBACK_PROVIDER" ]; then
+        candidates="$candidates $FALLBACK_PROVIDER"
+    fi
+
+    local provider seen="" cloud=""
+    for provider in $candidates; do
+        [ -n "$provider" ] || continue
+        [ "$provider" != "ollama" ] || continue
+        case " $seen " in
+            *" $provider "*) continue ;;
+        esac
+        seen="$seen $provider"
+        cloud="$cloud $provider"
+    done
+
+    # shellcheck disable=SC2086
+    echo $cloud
 }
 
 # Prompt user about detected secrets and handle their choice
