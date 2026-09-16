@@ -151,3 +151,124 @@ teardown() {
     result=$(convert_newlines 'Simple text')
     [ "$result" = "Simple text" ]
 }
+
+# Tests for unescape_json function
+#
+# The ampersand cases are the important ones: they used to spin forever rather
+# than return a wrong answer, so they run under a deadline.
+
+@test "unescape_json: escaped ampersand does not hang" {
+    local rc=0
+    run_with_deadline 15 unescape_json 'search \u0026 filter' || rc=$?
+    [ "$rc" -ne 124 ]
+    [ "$DEADLINE_OUTPUT" = "search & filter" ]
+}
+
+@test "unescape_json: several escaped ampersands do not hang" {
+    local rc=0
+    run_with_deadline 15 unescape_json '\u0026 a \u0026 b \u0026' || rc=$?
+    [ "$rc" -ne 124 ]
+    [ "$DEADLINE_OUTPUT" = "& a & b &" ]
+}
+
+@test "unescape_json: ampersand after a literal backslash does not hang" {
+    local rc=0
+    run_with_deadline 15 unescape_json 'a \\u0026 b' || rc=$?
+    [ "$rc" -ne 124 ]
+    [ "$DEADLINE_OUTPUT" = 'a \& b' ]
+}
+
+@test "unescape_json: decodes angle brackets" {
+    result=$(unescape_json 'x \u003c y \u003e z')
+    [ "$result" = "x < y > z" ]
+}
+
+@test "unescape_json: decodes ASCII escapes" {
+    result=$(unescape_json '\u0041\u0042')
+    [ "$result" = "AB" ]
+}
+
+@test "unescape_json: decodes an escaped backslash code point" {
+    result=$(unescape_json 'p \u005c q')
+    [ "$result" = 'p \ q' ]
+}
+
+@test "unescape_json: decodes two-byte code points as UTF-8" {
+    result=$(unescape_json 'caf\u00e9')
+    [ "$result" = "café" ]
+}
+
+@test "unescape_json: decodes three-byte code points as UTF-8" {
+    result=$(unescape_json '\u4f60\u597d')
+    [ "$result" = "你好" ]
+}
+
+@test "unescape_json: decodes surrogate pairs as one code point" {
+    result=$(unescape_json 'ship \ud83d\ude80')
+    [ "$result" = "ship 🚀" ]
+}
+
+@test "unescape_json: leaves text without escapes alone" {
+    result=$(unescape_json 'feat: add login')
+    [ "$result" = "feat: add login" ]
+}
+
+@test "unescape_json: collapses escaped backslashes and quotes" {
+    result=$(unescape_json 'say \\"hi\\"')
+    [ "$result" = 'say "hi"' ]
+}
+
+@test "unescape_json: leaves newline escapes for convert_newlines" {
+    result=$(unescape_json 'one\\ntwo')
+    [ "$result" = 'one\ntwo' ]
+}
+
+# Tests for replace_placeholder function
+
+@test "replace_placeholder: an ampersand in the value stays an ampersand" {
+    result='X {{message}} Y'
+    replace_placeholder result '{{message}}' 'add search & filter'
+    [ "$result" = "X add search & filter Y" ]
+}
+
+@test "replace_placeholder: substitutes a plain value" {
+    result='X {{message}} Y'
+    replace_placeholder result '{{message}}' 'add login'
+    [ "$result" = "X add login Y" ]
+}
+
+@test "replace_placeholder: substitutes every occurrence" {
+    result='{{type}}-{{type}}'
+    replace_placeholder result '{{type}}' 'feat'
+    [ "$result" = "feat-feat" ]
+}
+
+@test "replace_placeholder: an empty value removes the placeholder" {
+    result='X {{ticket}} Y'
+    replace_placeholder result '{{ticket}}' ''
+    [ "$result" = "X  Y" ]
+}
+
+@test "replace_placeholder: leaves text without the placeholder alone" {
+    result='nothing to substitute'
+    replace_placeholder result '{{ticket}}' 'ABC-123'
+    [ "$result" = "nothing to substitute" ]
+}
+
+@test "replace_placeholder: preserves backslashes in the value" {
+    result='A {{message}} B'
+    replace_placeholder result '{{message}}' 'use C:\path\here'
+    [ "$result" = 'A use C:\path\here B' ]
+}
+
+@test "replace_placeholder: a value containing the placeholder terminates" {
+    probe_placeholder_recursion() {
+        local result='A {{type}} B'
+        replace_placeholder result '{{type}}' 'x {{type}} y'
+        printf '%s' "$result"
+    }
+    local rc=0
+    run_with_deadline 15 probe_placeholder_recursion || rc=$?
+    [ "$rc" -ne 124 ]
+    [ "$DEADLINE_OUTPUT" = "A x {{type}} y B" ]
+}
