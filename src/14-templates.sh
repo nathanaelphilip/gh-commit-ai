@@ -116,6 +116,29 @@ parse_commit_components() {
     echo "BREAKING_EOF"
 }
 
+# Replace every occurrence of a literal placeholder in the named variable.
+#
+# This used to be ${result//\{\{message\}\}/$SUMMARY}, which looks harmless but
+# isn't: since bash 5.2 an unquoted "&" in the replacement half of a pattern
+# substitution stands for the text that matched. A summary like
+# "add search & filter" therefore rendered as "add search {{message}} filter" -
+# the placeholder reappearing inside the message it was meant to become.
+# Escaping the "&" is not portable either, since bash 5.1 and the 3.2 that ships
+# with macOS would keep the backslash. Splitting on the placeholder and
+# concatenating sidesteps the question: the replacement is never a pattern, and
+# it is never rescanned, so a value containing its own placeholder terminates.
+replace_placeholder() {
+    local __rp_var="$1" placeholder="$2" replacement="$3"
+    local haystack="${!__rp_var}" out=""
+
+    while [[ "$haystack" == *"$placeholder"* ]]; do
+        out="$out${haystack%%"$placeholder"*}$replacement"
+        haystack="${haystack#*"$placeholder"}"
+    done
+
+    printf -v "$__rp_var" '%s' "$out$haystack"
+}
+
 # Apply template variables and return formatted message
 apply_template() {
     local template="$1"
@@ -164,18 +187,18 @@ apply_template() {
     fi
 
     # Simple variable substitution
-    result="${result//\{\{emoji\}\}/$EMOJI}"
-    result="${result//\{\{type\}\}/$TYPE}"
-    result="${result//\{\{scope\}\}/$SCOPE_STR}"
-    result="${result//\{\{breaking_marker\}\}/$BREAKING_STR}"
-    result="${result//\{\{message\}\}/$SUMMARY}"
-    result="${result//\{\{bullets\}\}/$BULLETS}"
-    result="${result//\{\{breaking\}\}/$BREAKING}"
-    result="${result//\{\{ticket\}\}/$TICKET}"
-    result="${result//\{\{branch\}\}/$BRANCH}"
-    result="${result//\{\{author\}\}/$AUTHOR}"
-    result="${result//\{\{date\}\}/$DATE}"
-    result="${result//\{\{files_changed\}\}/$FILES_CHANGED}"
+    replace_placeholder result '{{emoji}}' "$EMOJI"
+    replace_placeholder result '{{type}}' "$TYPE"
+    replace_placeholder result '{{scope}}' "$SCOPE_STR"
+    replace_placeholder result '{{breaking_marker}}' "$BREAKING_STR"
+    replace_placeholder result '{{message}}' "$SUMMARY"
+    replace_placeholder result '{{bullets}}' "$BULLETS"
+    replace_placeholder result '{{breaking}}' "$BREAKING"
+    replace_placeholder result '{{ticket}}' "$TICKET"
+    replace_placeholder result '{{branch}}' "$BRANCH"
+    replace_placeholder result '{{author}}' "$AUTHOR"
+    replace_placeholder result '{{date}}' "$DATE"
+    replace_placeholder result '{{files_changed}}' "$FILES_CHANGED"
 
     # Clean up the gaps left by placeholders that resolved to nothing.
     #

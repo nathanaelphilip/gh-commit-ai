@@ -28,25 +28,85 @@ escape_json() {
         | sed '$ s/\\n$//'
 }
 
+# Write the UTF-8 encoding of a Unicode code point into the named variable.
+#
+# printf's \uXXXX form would do this in one line, but it needs bash 4.2 and
+# this script still runs on the bash 3.2 that ships with macOS. The octal
+# \0NNN form works everywhere, so the encoding is done by hand.
+codepoint_to_utf8() {
+    local __cp2u_var="$1" cp="$2" esc=""
+    if [ "$cp" -lt 128 ]; then
+        printf -v esc '\\0%03o' "$cp"
+    elif [ "$cp" -lt 2048 ]; then
+        printf -v esc '\\0%03o\\0%03o' \
+            $(( 0xC0 | (cp >> 6) )) \
+            $(( 0x80 | (cp & 0x3F) ))
+    elif [ "$cp" -lt 65536 ]; then
+        printf -v esc '\\0%03o\\0%03o\\0%03o' \
+            $(( 0xE0 | (cp >> 12) )) \
+            $(( 0x80 | ((cp >> 6) & 0x3F) )) \
+            $(( 0x80 | (cp & 0x3F) ))
+    else
+        printf -v esc '\\0%03o\\0%03o\\0%03o\\0%03o' \
+            $(( 0xF0 | (cp >> 18) )) \
+            $(( 0x80 | ((cp >> 12) & 0x3F) )) \
+            $(( 0x80 | ((cp >> 6) & 0x3F) )) \
+            $(( 0x80 | (cp & 0x3F) ))
+    fi
+    printf -v "$__cp2u_var" '%b' "$esc"
+}
+
 # Unescape JSON strings (handle unicode escapes like \u0026)
+#
+# Two hazards shaped this implementation:
+#
+#   1. The loop used to rewrite the string with ${text/\\u$hex/$char}.
+#      Since bash 5.2 an unquoted "&" in the replacement half of a pattern
+#      substitution means "the text that matched" - so decoding \u0026 put
+#      the escape straight back and the loop spun at full CPU forever. Providers
+#      escape "&" exactly that way, which meant any commit message containing an
+#      ampersand hung the tool after the API call had already succeeded and been
+#      paid for. Nothing is pattern-substituted here now: the string is split at
+#      the match and reassembled by concatenation.
+#   2. Converting the code point with "\NNN" emitted a single raw byte, so
+#      every code point above U+007F decoded to invalid UTF-8. codepoint_to_utf8
+#      encodes properly, surrogate pairs included.
+#
+# Matches are consumed right to left and decoded text is moved into "out", which
+# is never rescanned. That bounds the loop - "text" is strictly shorter every
+# iteration - and stops a decoded backslash from combining with the literal text
+# after it into a new escape.
 unescape_json() {
     local text="$1"
+    local out="" head hex tail cp hi char
 
-    # First, decode unicode escapes (\uXXXX)
-    # This handles common cases like \u0026 (&), \u003c (<), \u003e (>)
-    while [[ "$text" =~ \\u([0-9a-fA-F]{4}) ]]; do
-        local hex="${BASH_REMATCH[1]}"
-        local dec=$((16#$hex))
-        # Use printf to convert to actual character
-        local char=$(printf "\\$(printf '%03o' "$dec")")
-        text="${text/\\u$hex/$char}"
+    # Decode unicode escapes: \u0026 (&), \u003c (<), \u003e (>), ...
+    while [[ "$text" =~ ^(.*)\\u([0-9a-fA-F]{4})(.*)$ ]]; do
+        head="${BASH_REMATCH[1]}"
+        hex="${BASH_REMATCH[2]}"
+        tail="${BASH_REMATCH[3]}"
+        cp=$((16#$hex))
+
+        # A low surrogate immediately preceded by a high surrogate is one astral
+        # code point (emoji, mostly), not two broken ones.
+        if [ "$cp" -ge 56320 ] && [ "$cp" -le 57343 ] &&
+           [[ "$head" =~ ^(.*)\\u([dD][89abAB][0-9a-fA-F]{2})$ ]]; then
+            hi=$((16#${BASH_REMATCH[2]}))
+            cp=$(( 65536 + (hi - 55296) * 1024 + (cp - 56320) ))
+            head="${BASH_REMATCH[1]}"
+        fi
+
+        codepoint_to_utf8 char "$cp"
+        out="$char$tail$out"
+        text="$head"
     done
+    text="$text$out"
 
     # Then handle standard JSON escapes
     text="${text//\\\\/\\}"    # \\ -> \
     text="${text//\\\"/\"}"    # \" -> "
 
-    echo "$text"
+    printf '%s\n' "$text"
 }
 
 # Enforce lowercase on commit message while preserving acronyms and ticket numbers

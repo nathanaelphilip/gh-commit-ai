@@ -116,6 +116,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Applied to all AI providers (Ollama, Anthropic, OpenAI, Groq)
 
 ### Fixed
+- **Critical**: Hang after a successful API call when the message contained "&"
+  - Previous: providers escape "&" as `\u0026`, and since bash 5.2 an unquoted
+    "&" in the replacement half of `${var/pattern/replacement}` means "the text
+    that matched" - so decoding it reinserted the escape and the loop spun at
+    100% CPU forever, after the response had already been received and paid for
+  - Now: the string is split at the match and reassembled, never pattern-substituted
+- Non-ASCII unicode escapes decoded to invalid UTF-8
+  - Previous: `\u00e9` became a single raw byte, so accented characters, dashes,
+    CJK and emoji all came out as mojibake
+  - Now: code points are UTF-8 encoded properly, surrogate pairs included
+- Commit templates corrupted any value containing "&"
+  - Previous: a summary of "add search & filter" rendered as
+    "add search {{message}} filter" - the placeholder reappearing in its own value
+  - Now: placeholders are substituted literally
 - **Critical**: Message history now properly scoped per repository
   - Previous: All repositories shared the same cache directory
   - Now: Each repository has its own isolated cache based on path hash
